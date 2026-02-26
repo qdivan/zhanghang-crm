@@ -1,0 +1,121 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]: 代账系统 MVP
+    - menubar [ref=e6]:
+      - menuitem "客户开发" [ref=e7] [cursor=pointer]:
+        - img [ref=e9]
+        - generic [ref=e11]: 客户开发
+      - menuitem "客户列表" [ref=e12] [cursor=pointer]:
+        - img [ref=e14]
+        - generic [ref=e16]: 客户列表
+      - menuitem "地址资源" [ref=e17] [cursor=pointer]:
+        - img [ref=e19]
+        - generic [ref=e22]: 地址资源
+      - menuitem "收费收款" [ref=e23] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e29]: 收费收款
+      - menuitem "成本与老板视图" [ref=e30] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e34]: 成本与老板视图
+  - generic [ref=e35]:
+    - generic [ref=e36]:
+      - generic [ref=e37]: 客户开发、管理、收款
+      - generic [ref=e38]:
+        - generic [ref=e41]:
+          - img [ref=e43] [cursor=pointer]
+          - text: boss（老板）
+        - button "退出" [ref=e46] [cursor=pointer]:
+          - generic [ref=e47]: 退出
+    - main [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e53]:
+          - button "返回客户列表" [ref=e55] [cursor=pointer]:
+            - img [ref=e57]
+            - generic [ref=e59]: 返回客户列表
+          - button "编辑档案" [ref=e61] [cursor=pointer]:
+            - generic [ref=e62]: 编辑档案
+          - button "新增跟进" [ref=e64] [cursor=pointer]:
+            - generic [ref=e65]: 新增跟进
+          - button "查看线索详情" [ref=e67] [cursor=pointer]:
+            - generic [ref=e68]: 查看线索详情
+        - generic [ref=e70]:
+          - generic [ref=e72]:
+            - generic [ref=e73]: 客户档案
+            - generic [ref=e173]: 客户ID 6
+          - table [ref=e77]:
+            - rowgroup [ref=e78]:
+              - row "客户名称 E2E转介绍客户-20260226-A 联系人 李测试 电话 13920001234" [ref=e79]:
+                - cell "客户名称" [ref=e80]
+                - cell "E2E转介绍客户-20260226-A" [ref=e81]
+                - cell "联系人" [ref=e82]
+                - cell "李测试" [ref=e83]
+                - cell "电话" [ref=e84]
+                - cell "13920001234" [ref=e85]
+              - row "分配会计 accountant 来源模板 客户跟进模板 等级 -" [ref=e86]:
+                - cell "分配会计" [ref=e87]
+                - cell "accountant" [ref=e88]
+                - cell "来源模板" [ref=e89]
+                - cell "客户跟进模板" [ref=e90]
+                - cell "等级" [ref=e91]
+                - cell "-" [ref=e92]
+              - row "微信 - 传真 - 其他联系方式 -" [ref=e93]:
+                - cell "微信" [ref=e94]
+                - cell "-" [ref=e95]
+                - cell "传真" [ref=e96]
+                - cell "-" [ref=e97]
+                - cell "其他联系方式" [ref=e98]
+                - cell "-" [ref=e99]
+              - row "地区 - 国家/类型 跨境电商 服务开始时间 -" [ref=e100]:
+                - cell "地区" [ref=e101]
+                - cell "-" [ref=e102]
+                - cell "国家/类型" [ref=e103]
+                - cell "跨境电商" [ref=e104]
+                - cell "服务开始时间" [ref=e105]
+                - cell "-" [ref=e106]
+              - row "企业性质 - 服务方式 - 收费标准 -" [ref=e107]:
+                - cell "企业性质" [ref=e108]
+                - cell "-" [ref=e109]
+                - cell "服务方式" [ref=e110]
+                - cell "-" [ref=e111]
+                - cell "收费标准" [ref=e112]
+                - cell "-" [ref=e113]
+              - row "首期账单期间 - 提醒值 - 下次提醒 -" [ref=e114]:
+                - cell "首期账单期间" [ref=e115]
+                - cell "-" [ref=e116]
+                - cell "提醒值" [ref=e117]
+                - cell "-" [ref=e118]
+                - cell "下次提醒" [ref=e119]
+                - cell "-" [ref=e120]
+              - row "最后跟进日期 - 来源 转介绍+互联网 主营/需求 代账+税务咨询，来源为老客户转介绍后在互联网复访" [ref=e121]:
+                - cell "最后跟进日期" [ref=e122]
+                - cell "-" [ref=e123]
+                - cell "来源" [ref=e124]
+                - cell "转介绍+互联网" [ref=e125]
+                - cell "主营/需求" [ref=e126]
+                - cell "代账+税务咨询，来源为老客户转介绍后在互联网复访" [ref=e127]
+              - row "介绍 老板说明：客户预算稳定，优先安排会计跟进" [ref=e128]:
+                - cell "介绍" [ref=e129]
+                - cell "老板说明：客户预算稳定，优先安排会计跟进" [ref=e130]
+              - row "备注 老板备注：三天内给报价，重点关注回款" [ref=e131]:
+                - cell "备注" [ref=e132]
+                - cell "老板备注：三天内给报价，重点关注回款" [ref=e133]
+        - generic [ref=e139]:
+          - generic [ref=e141]:
+            - generic [ref=e142]: 跟进记录
+            - generic [ref=e144]: 0 条
+          - generic [ref=e147]:
+            - table [ref=e149]:
+              - rowgroup [ref=e155]:
+                - row "跟进日期 跟进反馈 下次提醒 备注" [ref=e156]:
+                  - columnheader "跟进日期" [ref=e157]:
+                    - generic [ref=e158]: 跟进日期
+                  - columnheader "跟进反馈" [ref=e159]:
+                    - generic [ref=e160]: 跟进反馈
+                  - columnheader "下次提醒" [ref=e161]:
+                    - generic [ref=e162]: 下次提醒
+                  - columnheader "备注" [ref=e163]:
+                    - generic [ref=e164]: 备注
+            - generic [ref=e168]:
+              - table:
+                - rowgroup
+              - generic [ref=e170]: 暂无数据

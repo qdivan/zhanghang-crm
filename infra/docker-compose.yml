@@ -1,0 +1,44 @@
+services:
+  db:
+    image: docker.1ms.run/postgres:16-alpine
+    container_name: daizhang-db
+    environment:
+      POSTGRES_DB: daizhang
+      POSTGRES_USER: daizhang
+      POSTGRES_PASSWORD: daizhang
+    ports:
+      - "5432:5432"
+    volumes:
+      - daizhang-db-data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    container_name: daizhang-api
+    environment:
+      DATABASE_URL: sqlite+pysqlite:///./daizhang.db
+      JWT_SECRET: change-me-in-production
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    volumes:
+      - ../apps/api:/app
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    container_name: daizhang-web
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ../apps/web:/app
+      - web-node-modules:/app/node_modules
+
+volumes:
+  daizhang-db-data:
+  web-node-modules:

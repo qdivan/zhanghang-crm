@@ -1,0 +1,62 @@
+from datetime import date, datetime
+from typing import Optional
+
+from pydantic import BaseModel
+
+from app.schemas.lead import LeadOut, LeadFollowupOut
+
+
+class CustomerListOut(BaseModel):
+    id: int
+    name: str
+    contact_name: str
+    phone: str
+    status: str
+    assigned_accountant_id: int
+    accountant_username: str
+    source_lead_id: int
+    source_template_type: str
+    source_grade: str
+    source_last_followup_date: Optional[date]
+    source_reminder_value: str
+    created_at: datetime
+
+
+class CustomerDetailOut(BaseModel):
+    id: int
+    name: str
+    contact_name: str
+    phone: str
+    status: str
+    assigned_accountant_id: int
+    accountant_username: str
+    source_lead_id: int
+    created_at: datetime
+    lead: LeadOut
+    followups: list[LeadFollowupOut]
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
+    assigned_accountant_id: Optional[int] = None
+
+    lead_grade: Optional[str] = None
+    lead_contact_wechat: Optional[str] = None
+    lead_fax: Optional[str] = None
+    lead_other_contact: Optional[str] = None
+    lead_region: Optional[str] = None
+    lead_country: Optional[str] = None
+    lead_service_start_text: Optional[str] = None
+    lead_company_nature: Optional[str] = None
+    lead_service_mode: Optional[str] = None
+    lead_fee_standard: Optional[str] = None
+    lead_first_billing_period: Optional[str] = None
+    lead_reminder_value: Optional[str] = None
+    lead_next_reminder_at: Optional[date] = None
+    lead_source: Optional[str] = None
+    lead_main_business: Optional[str] = None
+    lead_intro: Optional[str] = None
+    lead_notes: Optional[str] = None

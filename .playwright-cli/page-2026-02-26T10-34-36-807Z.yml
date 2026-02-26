@@ -1,0 +1,90 @@
+- generic [ref=e31]:
+  - complementary [ref=e32]:
+    - generic [ref=e33]: 代账系统 MVP
+    - menubar [ref=e34]:
+      - menuitem "客户开发" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e39]: 客户开发
+      - menuitem "客户列表" [ref=e40] [cursor=pointer]:
+        - img [ref=e42]
+        - generic [ref=e44]: 客户列表
+      - menuitem "地址资源" [active] [ref=e45] [cursor=pointer]:
+        - img [ref=e47]
+        - generic [ref=e50]: 地址资源
+      - menuitem "收费收款" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e57]: 收费收款
+      - menuitem "成本与老板视图" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e62]: 成本与老板视图
+  - generic [ref=e63]:
+    - generic [ref=e64]:
+      - generic [ref=e65]: 客户开发、管理、收款
+      - generic [ref=e66]:
+        - generic [ref=e69]:
+          - img [ref=e71] [cursor=pointer]
+          - text: boss（老板）
+        - button "退出" [ref=e74] [cursor=pointer]:
+          - generic [ref=e75]: 退出
+    - main [ref=e76]:
+      - generic [ref=e762]:
+        - generic [ref=e766]:
+          - generic [ref=e767]:
+            - generic [ref=e768]: 关键词
+            - textbox "关键词" [ref=e772]:
+              - /placeholder: 分类/联系方式/说明
+          - generic [ref=e774]:
+            - button "查询" [ref=e775] [cursor=pointer]:
+              - generic [ref=e776]: 查询
+            - button "新增资源" [ref=e777] [cursor=pointer]:
+              - generic [ref=e778]: 新增资源
+        - generic [ref=e780]:
+          - generic [ref=e782]:
+            - generic [ref=e783]: 地址资源池（转化2026）
+            - generic [ref=e785]: 2 条
+          - generic [ref=e788]:
+            - table [ref=e790]:
+              - rowgroup [ref=e798]:
+                - row "分类/区域 联系方式 资源说明 后续动作 备注 操作" [ref=e799]:
+                  - columnheader "分类/区域" [ref=e800]:
+                    - generic [ref=e801]: 分类/区域
+                  - columnheader "联系方式" [ref=e802]:
+                    - generic [ref=e803]: 联系方式
+                  - columnheader "资源说明" [ref=e804]:
+                    - generic [ref=e805]: 资源说明
+                  - columnheader "后续动作" [ref=e806]:
+                    - generic [ref=e807]: 后续动作
+                  - columnheader "备注" [ref=e808]:
+                    - generic [ref=e809]: 备注
+                  - columnheader "操作" [ref=e810]:
+                    - generic [ref=e811]: 操作
+            - table [ref=e816]:
+              - rowgroup [ref=e824]:
+                - row "注册地址 微信：qdzc001 支持一般纳税人地址挂靠 补充合同模板后推进 报价按年 编辑" [ref=e825]:
+                  - cell "注册地址" [ref=e826]:
+                    - generic [ref=e827]: 注册地址
+                  - cell "微信：qdzc001" [ref=e828]:
+                    - generic [ref=e829]: 微信：qdzc001
+                  - cell "支持一般纳税人地址挂靠" [ref=e830]:
+                    - generic [ref=e831]: 支持一般纳税人地址挂靠
+                  - cell "补充合同模板后推进" [ref=e832]:
+                    - generic [ref=e833]: 补充合同模板后推进
+                  - cell "报价按年" [ref=e834]:
+                    - generic [ref=e835]: 报价按年
+                  - cell "编辑" [ref=e836]:
+                    - button "编辑" [ref=e838] [cursor=pointer]:
+                      - generic [ref=e839]: 编辑
+                - row "自贸区 186 5320 7940 孙建云 阎总介绍，地址 3000/年 2/25 再次电话沟通 可作为转化线索来源 编辑" [ref=e840]:
+                  - cell "自贸区" [ref=e841]:
+                    - generic [ref=e842]: 自贸区
+                  - cell "186 5320 7940 孙建云" [ref=e843]:
+                    - generic [ref=e844]: 186 5320 7940 孙建云
+                  - cell "阎总介绍，地址 3000/年" [ref=e845]:
+                    - generic [ref=e846]: 阎总介绍，地址 3000/年
+                  - cell "2/25 再次电话沟通" [ref=e847]:
+                    - generic [ref=e848]: 2/25 再次电话沟通
+                  - cell "可作为转化线索来源" [ref=e849]:
+                    - generic [ref=e850]: 可作为转化线索来源
+                  - cell "编辑" [ref=e851]:
+                    - button "编辑" [ref=e853] [cursor=pointer]:
+                      - generic [ref=e854]: 编辑

@@ -1,0 +1,372 @@
+- generic [ref=e1]:
+  - generic [ref=e207]:
+    - complementary [ref=e208]:
+      - generic [ref=e209]: 代账系统 MVP
+      - menubar [ref=e210]:
+        - menuitem "客户开发" [ref=e211] [cursor=pointer]:
+          - img [ref=e213]
+          - generic [ref=e215]: 客户开发
+        - menuitem "客户列表" [ref=e216] [cursor=pointer]:
+          - img [ref=e218]
+          - generic [ref=e220]: 客户列表
+        - menuitem "地址资源" [ref=e221] [cursor=pointer]:
+          - img [ref=e223]
+          - generic [ref=e226]: 地址资源
+        - menuitem "收费收款" [ref=e227] [cursor=pointer]:
+          - img [ref=e229]
+          - generic [ref=e233]: 收费收款
+        - menuitem "成本与老板视图" [ref=e234] [cursor=pointer]:
+          - img [ref=e236]
+          - generic [ref=e238]: 成本与老板视图
+    - generic [ref=e239]:
+      - generic [ref=e240]:
+        - generic [ref=e241]: 客户开发、管理、收款
+        - generic [ref=e242]:
+          - generic [ref=e245]:
+            - img [ref=e247] [cursor=pointer]
+            - text: accountant（会计）
+          - button "退出" [ref=e250] [cursor=pointer]:
+            - generic [ref=e251]: 退出
+      - main [ref=e252]:
+        - generic [ref=e762]:
+          - generic [ref=e764]:
+            - generic [ref=e768]:
+              - generic [ref=e769]: 记录数
+              - generic [ref=e770]: "5"
+            - generic [ref=e774]:
+              - generic [ref=e775]: 总费用
+              - generic [ref=e776]: 23,200
+            - generic [ref=e780]:
+              - generic [ref=e781]: 月费用合计
+              - generic [ref=e782]: 2,100
+          - generic [ref=e786]:
+            - generic [ref=e787]:
+              - generic [ref=e788]: 关键词
+              - textbox "关键词" [ref=e792]:
+                - /placeholder: 序号/客户/备注
+            - generic [ref=e793]:
+              - generic [ref=e794]: 付款方式
+              - generic [ref=e797] [cursor=pointer]:
+                - generic:
+                  - combobox "付款方式" [ref=e799]
+                  - generic: 全部
+                - img [ref=e802]
+            - generic [ref=e804]:
+              - generic [ref=e805]: 台账状态
+              - generic [ref=e808] [cursor=pointer]:
+                - generic:
+                  - combobox "台账状态" [ref=e810]
+                  - generic: 全部
+                - img [ref=e813]
+            - generic [ref=e816]:
+              - button "查询" [ref=e817] [cursor=pointer]:
+                - generic [ref=e818]: 查询
+              - button "新增收费记录" [ref=e819] [cursor=pointer]:
+                - generic [ref=e820]: 新增收费记录
+          - generic [ref=e822]:
+            - generic [ref=e824]:
+              - generic [ref=e825]: "收费台账（对齐 `周 (2)` 结构）"
+              - generic [ref=e827]: 5 条
+            - generic [ref=e830]:
+              - table [ref=e832]:
+                - rowgroup [ref=e848]:
+                  - row "序号 名称 会计 总费用 已收 未收 状态 月费用 代账周期 到期日 付款方式 备注 扩展 操作" [ref=e849]:
+                    - columnheader "序号" [ref=e850]:
+                      - generic [ref=e851]: 序号
+                    - columnheader "名称" [ref=e852]:
+                      - generic [ref=e853]: 名称
+                    - columnheader "会计" [ref=e854]:
+                      - generic [ref=e855]: 会计
+                    - columnheader "总费用" [ref=e856]:
+                      - generic [ref=e857]: 总费用
+                    - columnheader "已收" [ref=e858]:
+                      - generic [ref=e859]: 已收
+                    - columnheader "未收" [ref=e860]:
+                      - generic [ref=e861]: 未收
+                    - columnheader "状态" [ref=e862]:
+                      - generic [ref=e863]: 状态
+                    - columnheader "月费用" [ref=e864]:
+                      - generic [ref=e865]: 月费用
+                    - columnheader "代账周期" [ref=e866]:
+                      - generic [ref=e867]: 代账周期
+                    - columnheader "到期日" [ref=e868]:
+                      - generic [ref=e869]: 到期日
+                    - columnheader "付款方式" [ref=e870]:
+                      - generic [ref=e871]: 付款方式
+                    - columnheader "备注" [ref=e872]:
+                      - generic [ref=e873]: 备注
+                    - columnheader "扩展" [ref=e874]:
+                      - generic [ref=e875]: 扩展
+                    - columnheader "操作" [ref=e876]:
+                      - generic [ref=e877]: 操作
+              - table [ref=e882]:
+                - rowgroup [ref=e898]:
+                  - row "1 安杰尔 accountant 4800 4800 0 清账 400 4800/6月17收（2025.1-2025.12） 2025-12-31 预收 400/月，年报200，退税300 催收/收款" [ref=e899]:
+                    - cell "1" [ref=e900]:
+                      - generic [ref=e901]: "1"
+                    - cell "安杰尔" [ref=e902]:
+                      - button "安杰尔" [ref=e904] [cursor=pointer]:
+                        - generic [ref=e905]: 安杰尔
+                    - cell "accountant" [ref=e906]:
+                      - generic [ref=e907]: accountant
+                    - cell "4800" [ref=e908]:
+                      - generic [ref=e909]: "4800"
+                    - cell "4800" [ref=e910]:
+                      - generic [ref=e911]: "4800"
+                    - cell "0" [ref=e912]:
+                      - generic [ref=e913]: "0"
+                    - cell "清账" [ref=e914]:
+                      - generic [ref=e917]: 清账
+                    - cell "400" [ref=e918]:
+                      - generic [ref=e919]: "400"
+                    - cell "4800/6月17收（2025.1-2025.12）" [ref=e920]:
+                      - generic [ref=e921]: 4800/6月17收（2025.1-2025.12）
+                    - cell "2025-12-31" [ref=e922]:
+                      - generic [ref=e923]: 2025-12-31
+                    - cell "预收" [ref=e924]:
+                      - generic [ref=e925]: 预收
+                    - cell "400/月，年报200，退税300" [ref=e926]:
+                      - generic [ref=e927]: 400/月，年报200，退税300
+                    - cell [ref=e928]
+                    - cell "催收/收款" [ref=e929]:
+                      - button "催收/收款" [ref=e931] [cursor=pointer]:
+                        - generic [ref=e932]: 催收/收款
+                  - row "2 海恩诺 accountant 8400 5600 2800 部分收费 700 2026/1月8收（2025.1-2025.12） 2025-12-31 年底收 记账加退税每月700，年底付 10800 催收/收款" [ref=e933]:
+                    - cell "2" [ref=e934]:
+                      - generic [ref=e935]: "2"
+                    - cell "海恩诺" [ref=e936]:
+                      - button "海恩诺" [ref=e938] [cursor=pointer]:
+                        - generic [ref=e939]: 海恩诺
+                    - cell "accountant" [ref=e940]:
+                      - generic [ref=e941]: accountant
+                    - cell "8400" [ref=e942]:
+                      - generic [ref=e943]: "8400"
+                    - cell "5600" [ref=e944]:
+                      - generic [ref=e945]: "5600"
+                    - cell "2800" [ref=e946]:
+                      - generic [ref=e947]: "2800"
+                    - cell "部分收费" [ref=e948]:
+                      - generic [ref=e951]: 部分收费
+                    - cell "700" [ref=e952]:
+                      - generic [ref=e953]: "700"
+                    - cell "2026/1月8收（2025.1-2025.12）" [ref=e954]:
+                      - generic [ref=e955]: 2026/1月8收（2025.1-2025.12）
+                    - cell "2025-12-31" [ref=e956]:
+                      - generic [ref=e957]: 2025-12-31
+                    - cell "年底收" [ref=e958]:
+                      - generic [ref=e959]: 年底收
+                    - cell "记账加退税每月700，年底付" [ref=e960]:
+                      - generic [ref=e961]: 记账加退税每月700，年底付
+                    - cell "10800" [ref=e962]:
+                      - generic [ref=e963]: "10800"
+                    - cell "催收/收款" [ref=e964]:
+                      - button "催收/收款" [ref=e966] [cursor=pointer]:
+                        - generic [ref=e967]: 催收/收款
+                  - row "3 海德和信 accountant 4800 0 4800 全欠 400 2025/12/31收（2025.1-2025.12） 2025-12-31 年底收 账本100年报赠送，400/月含退税。 催收/收款" [ref=e968]:
+                    - cell "3" [ref=e969]:
+                      - generic [ref=e970]: "3"
+                    - cell "海德和信" [ref=e971]:
+                      - button "海德和信" [ref=e973] [cursor=pointer]:
+                        - generic [ref=e974]: 海德和信
+                    - cell "accountant" [ref=e975]:
+                      - generic [ref=e976]: accountant
+                    - cell "4800" [ref=e977]:
+                      - generic [ref=e978]: "4800"
+                    - cell "0" [ref=e979]:
+                      - generic [ref=e980]: "0"
+                    - cell "4800" [ref=e981]:
+                      - generic [ref=e982]: "4800"
+                    - cell "全欠" [ref=e983]:
+                      - generic [ref=e986]: 全欠
+                    - cell "400" [ref=e987]:
+                      - generic [ref=e988]: "400"
+                    - cell "2025/12/31收（2025.1-2025.12）" [ref=e989]:
+                      - generic [ref=e990]: 2025/12/31收（2025.1-2025.12）
+                    - cell "2025-12-31" [ref=e991]:
+                      - generic [ref=e992]: 2025-12-31
+                    - cell "年底收" [ref=e993]:
+                      - generic [ref=e994]: 年底收
+                    - cell "账本100年报赠送，400/月含退税。" [ref=e995]:
+                      - generic [ref=e996]: 账本100年报赠送，400/月含退税。
+                    - cell [ref=e997]
+                    - cell "催收/收款" [ref=e998]:
+                      - button "催收/收款" [ref=e1000] [cursor=pointer]:
+                        - generic [ref=e1001]: 催收/收款
+                  - row "4 晟坤纺织 accountant 2400 0 2400 全欠 200 2025/2/22收（2024.1-2024.12） 2024-12-31 年底收 后付费，需催收 催收/收款" [ref=e1002]:
+                    - cell "4" [ref=e1003]:
+                      - generic [ref=e1004]: "4"
+                    - cell "晟坤纺织" [ref=e1005]:
+                      - button "晟坤纺织" [ref=e1007] [cursor=pointer]:
+                        - generic [ref=e1008]: 晟坤纺织
+                    - cell "accountant" [ref=e1009]:
+                      - generic [ref=e1010]: accountant
+                    - cell "2400" [ref=e1011]:
+                      - generic [ref=e1012]: "2400"
+                    - cell "0" [ref=e1013]:
+                      - generic [ref=e1014]: "0"
+                    - cell "2400" [ref=e1015]:
+                      - generic [ref=e1016]: "2400"
+                    - cell "全欠" [ref=e1017]:
+                      - generic [ref=e1020]: 全欠
+                    - cell "200" [ref=e1021]:
+                      - generic [ref=e1022]: "200"
+                    - cell "2025/2/22收（2024.1-2024.12）" [ref=e1023]:
+                      - generic [ref=e1024]: 2025/2/22收（2024.1-2024.12）
+                    - cell "2024-12-31" [ref=e1025]:
+                      - generic [ref=e1026]: 2024-12-31
+                    - cell "年底收" [ref=e1027]:
+                      - generic [ref=e1028]: 年底收
+                    - cell "后付费，需催收" [ref=e1029]:
+                      - generic [ref=e1030]: 后付费，需催收
+                    - cell [ref=e1031]
+                    - cell "催收/收款" [ref=e1032]:
+                      - button "催收/收款" [ref=e1034] [cursor=pointer]:
+                        - generic [ref=e1035]: 催收/收款
+                  - row "5 叶荣钢铁 accountant 2800 1200 1600 部分收费 400 2025/12/30收（2025.7-2025.12） 2025-12-31 半年收 200/月，400/月，根据业务量调整 催收/收款" [ref=e1036]:
+                    - cell "5" [ref=e1037]:
+                      - generic [ref=e1038]: "5"
+                    - cell "叶荣钢铁" [ref=e1039]:
+                      - button "叶荣钢铁" [ref=e1041] [cursor=pointer]:
+                        - generic [ref=e1042]: 叶荣钢铁
+                    - cell "accountant" [ref=e1043]:
+                      - generic [ref=e1044]: accountant
+                    - cell "2800" [ref=e1045]:
+                      - generic [ref=e1046]: "2800"
+                    - cell "1200" [ref=e1047]:
+                      - generic [ref=e1048]: "1200"
+                    - cell "1600" [ref=e1049]:
+                      - generic [ref=e1050]: "1600"
+                    - cell "部分收费" [ref=e1051]:
+                      - generic [ref=e1054]: 部分收费
+                    - cell "400" [ref=e1055]:
+                      - generic [ref=e1056]: "400"
+                    - cell "2025/12/30收（2025.7-2025.12）" [ref=e1057]:
+                      - generic [ref=e1058]: 2025/12/30收（2025.7-2025.12）
+                    - cell "2025-12-31" [ref=e1059]:
+                      - generic [ref=e1060]: 2025-12-31
+                    - cell "半年收" [ref=e1061]:
+                      - generic [ref=e1062]: 半年收
+                    - cell "200/月，400/月，根据业务量调整" [ref=e1063]:
+                      - generic [ref=e1064]: 200/月，400/月，根据业务量调整
+                    - cell [ref=e1065]
+                    - cell "催收/收款" [ref=e1066]:
+                      - button "催收/收款" [ref=e1068] [cursor=pointer]:
+                        - generic [ref=e1069]: 催收/收款
+          - generic [ref=e1072]:
+            - generic [ref=e1074]:
+              - generic [ref=e1075]: 付款方式分布
+              - generic [ref=e1077]:
+                - generic [ref=e1080]: 年底收：3
+                - generic [ref=e1083]: 预收：1
+                - generic [ref=e1086]: 半年收：1
+            - generic [ref=e1088]:
+              - generic [ref=e1089]: 状态分布
+              - generic [ref=e1091]:
+                - generic [ref=e1094]: 全欠：2
+                - generic [ref=e1097]: 部分收费：2
+                - generic [ref=e1100]: 清账：1
+        - dialog "催收/收款 - 海德和信" [ref=e1102]:
+          - generic [ref=e1103]:
+            - heading "催收/收款 - 海德和信" [level=2] [ref=e1104]
+            - button "关闭此对话框" [ref=e1105] [cursor=pointer]:
+              - img [ref=e1107]
+          - generic [ref=e1109]:
+            - generic [ref=e1110]:
+              - generic [ref=e1111]:
+                - generic [ref=e1113]:
+                  - generic [ref=e1114]: 类型
+                  - generic [ref=e1117] [cursor=pointer]:
+                    - generic:
+                      - combobox "类型" [ref=e1119]
+                      - generic [ref=e1120]: 催收
+                    - img [ref=e1123]
+                - generic [ref=e1126]:
+                  - generic [ref=e1127]: 日期
+                  - generic [ref=e1130]:
+                    - img [ref=e1133]
+                    - combobox "日期" [ref=e1135]: 2026-02-26
+                - generic [ref=e1137]:
+                  - generic [ref=e1138]: 金额（收款时）
+                  - spinbutton "金额（收款时）" [ref=e1143]: "0"
+              - generic [ref=e1144]:
+                - generic [ref=e1146]:
+                  - generic [ref=e1147]: 收款类型
+                  - generic [ref=e1150] [cursor=pointer]:
+                    - generic:
+                      - combobox "收款类型" [ref=e1152]
+                      - generic [ref=e1153]: 请选择
+                    - img [ref=e1156]
+                - generic [ref=e1159]:
+                  - generic [ref=e1160]: 下次跟进
+                  - generic [ref=e1163]:
+                    - img [ref=e1166]
+                    - combobox "下次跟进" [ref=e1168]
+                - group "结算标记" [ref=e1170]:
+                  - generic [ref=e1171]: 结算标记
+                  - generic [ref=e1173]:
+                    - generic [ref=e1175] [cursor=pointer]:
+                      - generic [ref=e1176]:
+                        - checkbox "预付"
+                      - generic [ref=e1178]: 预付
+                    - generic [ref=e1180] [cursor=pointer]:
+                      - generic [ref=e1181]:
+                        - checkbox "结清"
+                      - generic [ref=e1183]: 结清
+              - generic [ref=e1184]:
+                - generic [ref=e1185]: 内容
+                - textbox "内容" [ref=e1188]
+              - generic [ref=e1189]:
+                - generic [ref=e1190]: 备注
+                - textbox "备注" [ref=e1194]
+              - button "保存日志" [active] [ref=e1195] [cursor=pointer]:
+                - generic [ref=e1196]: 保存日志
+            - separator [ref=e1197]
+            - generic [ref=e1199]:
+              - table [ref=e1201]:
+                - rowgroup [ref=e1210]:
+                  - row "日期 类型 金额 性质 内容 下次跟进 备注" [ref=e1211]:
+                    - columnheader "日期" [ref=e1212]:
+                      - generic [ref=e1213]: 日期
+                    - columnheader "类型" [ref=e1214]:
+                      - generic [ref=e1215]: 类型
+                    - columnheader "金额" [ref=e1216]:
+                      - generic [ref=e1217]: 金额
+                    - columnheader "性质" [ref=e1218]:
+                      - generic [ref=e1219]: 性质
+                    - columnheader "内容" [ref=e1220]:
+                      - generic [ref=e1221]: 内容
+                    - columnheader "下次跟进" [ref=e1222]:
+                      - generic [ref=e1223]: 下次跟进
+                    - columnheader "备注" [ref=e1224]:
+                      - generic [ref=e1225]: 备注
+              - table [ref=e1233]:
+                - rowgroup [ref=e1242]:
+                  - row "2026-02-26 催收 2000 收到首笔款项2000 剩余2800待收" [ref=e1263]:
+                    - cell "2026-02-26" [ref=e1244]:
+                      - generic [ref=e1245]: 2026-02-26
+                    - cell "催收" [ref=e1246]:
+                      - generic [ref=e1249]: 催收
+                    - cell "2000" [ref=e1264]:
+                      - generic [ref=e1251]: "2000"
+                    - cell [ref=e1252]
+                    - cell "收到首笔款项2000" [ref=e1265]:
+                      - generic [ref=e1254]: 收到首笔款项2000
+                    - cell [ref=e1255]
+                    - cell "剩余2800待收" [ref=e1266]:
+                      - generic [ref=e1257]: 剩余2800待收
+                  - row "2026-02-26 催收 0 第一次催收：提醒本月应付款4800，已电话沟通 客户承诺3天内付款" [ref=e1267]:
+                    - cell "2026-02-26" [ref=e1268]:
+                      - generic [ref=e1269]: 2026-02-26
+                    - cell "催收" [ref=e1270]:
+                      - generic [ref=e1273]: 催收
+                    - cell "0" [ref=e1274]:
+                      - generic [ref=e1275]: "0"
+                    - cell [ref=e1276]
+                    - cell "第一次催收：提醒本月应付款4800，已电话沟通" [ref=e1277]:
+                      - generic [ref=e1278]: 第一次催收：提醒本月应付款4800，已电话沟通
+                    - cell [ref=e1279]
+                    - cell "客户承诺3天内付款" [ref=e1280]:
+                      - generic [ref=e1281]: 客户承诺3天内付款
+  - alert [ref=e1282]:
+    - img [ref=e1284]
+    - paragraph [ref=e1286]: 记录已保存

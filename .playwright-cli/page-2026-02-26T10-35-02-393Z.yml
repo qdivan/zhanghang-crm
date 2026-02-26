@@ -1,0 +1,462 @@
+- generic [ref=e31]:
+  - complementary [ref=e32]:
+    - generic [ref=e33]: 代账系统 MVP
+    - menubar [ref=e34]:
+      - menuitem "客户开发" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e39]: 客户开发
+      - menuitem "客户列表" [ref=e40] [cursor=pointer]:
+        - img [ref=e42]
+        - generic [ref=e44]: 客户列表
+      - menuitem "地址资源" [ref=e45] [cursor=pointer]:
+        - img [ref=e47]
+        - generic [ref=e50]: 地址资源
+      - menuitem "收费收款" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e57]: 收费收款
+      - menuitem "成本与老板视图" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e62]: 成本与老板视图
+  - generic [ref=e63]:
+    - generic [ref=e64]:
+      - generic [ref=e65]: 客户开发、管理、收款
+      - generic [ref=e66]:
+        - generic [ref=e69]:
+          - img [ref=e71] [cursor=pointer]
+          - text: boss（老板）
+        - button "退出" [ref=e74] [cursor=pointer]:
+          - generic [ref=e75]: 退出
+    - main [ref=e76]:
+      - generic [ref=e1195]:
+        - generic [ref=e1199]:
+          - generic [ref=e1200]:
+            - generic [ref=e1201]: 关键词
+            - textbox "关键词" [ref=e1205]:
+              - /placeholder: 客户/联系人/电话
+          - generic [ref=e1206]:
+            - generic [ref=e1207]: 状态
+            - generic [ref=e1210] [cursor=pointer]:
+              - generic:
+                - combobox "状态" [ref=e1212]
+                - generic: 全部
+              - img [ref=e1215]
+          - generic [ref=e1217]:
+            - generic [ref=e1218]: 模板
+            - generic [ref=e1221] [cursor=pointer]:
+              - generic:
+                - combobox "模板" [ref=e1223]
+                - generic: 全部
+              - img [ref=e1226]
+          - generic [ref=e1229]:
+            - button "查询" [ref=e1230] [cursor=pointer]:
+              - generic [ref=e1231]: 查询
+            - button "新增线索" [ref=e1232] [cursor=pointer]:
+              - generic [ref=e1233]: 新增线索
+            - button "导入 Excel" [ref=e1234] [cursor=pointer]:
+              - generic [ref=e1235]: 导入 Excel
+        - generic [ref=e1237]:
+          - generic [ref=e1239]:
+            - generic [ref=e1240]: 客户开发总览（字段对齐 Excel）
+            - generic [ref=e1242]: 7 条
+          - generic [ref=e1245]:
+            - table [ref=e1247]:
+              - rowgroup [ref=e1265]:
+                - row "序号 模板 公司名 等级 联系人 电话 微信 传真 其他联系方式 地区 国家/类型 主营/需求 状态 下次提醒 最后跟进反馈 操作" [ref=e1266]:
+                  - columnheader "序号" [ref=e1267]:
+                    - generic [ref=e1268]: 序号
+                  - columnheader "模板" [ref=e1269]:
+                    - generic [ref=e1270]: 模板
+                  - columnheader "公司名" [ref=e1271]:
+                    - generic [ref=e1272]: 公司名
+                  - columnheader "等级" [ref=e1273]:
+                    - generic [ref=e1274]: 等级
+                  - columnheader "联系人" [ref=e1275]:
+                    - generic [ref=e1276]: 联系人
+                  - columnheader "电话" [ref=e1277]:
+                    - generic [ref=e1278]: 电话
+                  - columnheader "微信" [ref=e1279]:
+                    - generic [ref=e1280]: 微信
+                  - columnheader "传真" [ref=e1281]:
+                    - generic [ref=e1282]: 传真
+                  - columnheader "其他联系方式" [ref=e1283]:
+                    - generic [ref=e1284]: 其他联系方式
+                  - columnheader "地区" [ref=e1285]:
+                    - generic [ref=e1286]: 地区
+                  - columnheader "国家/类型" [ref=e1287]:
+                    - generic [ref=e1288]: 国家/类型
+                  - columnheader "主营/需求" [ref=e1289]:
+                    - generic [ref=e1290]: 主营/需求
+                  - columnheader "状态" [ref=e1291]:
+                    - generic [ref=e1292]: 状态
+                  - columnheader "下次提醒" [ref=e1293]:
+                    - generic [ref=e1294]: 下次提醒
+                  - columnheader "最后跟进反馈" [ref=e1295]:
+                    - generic [ref=e1296]: 最后跟进反馈
+                  - columnheader "操作" [ref=e1297]:
+                    - generic [ref=e1298]: 操作
+            - table [ref=e1303]:
+              - rowgroup [ref=e1321]:
+                - row "7 客户跟进 可编辑客户名称 C 新联系人 13900000000 已转化 详情 跟进 历史 转化 撤销转化" [ref=e1322]:
+                  - cell "7" [ref=e1323]:
+                    - generic [ref=e1324]: "7"
+                  - cell "客户跟进" [ref=e1325]:
+                    - generic [ref=e1328]: 客户跟进
+                  - cell "可编辑客户名称" [ref=e1329]:
+                    - button "可编辑客户名称" [ref=e1331] [cursor=pointer]:
+                      - generic [ref=e1332]: 可编辑客户名称
+                  - cell "C" [ref=e1333]:
+                    - generic [ref=e1334]: C
+                  - cell "新联系人" [ref=e1335]:
+                    - generic [ref=e1336]: 新联系人
+                  - cell "13900000000" [ref=e1337]:
+                    - generic [ref=e1338]: "13900000000"
+                  - cell [ref=e1339]
+                  - cell [ref=e1340]
+                  - cell [ref=e1341]
+                  - cell [ref=e1342]
+                  - cell [ref=e1343]
+                  - cell [ref=e1344]
+                  - cell "已转化" [ref=e1345]:
+                    - generic [ref=e1348]: 已转化
+                  - cell [ref=e1349]
+                  - cell [ref=e1350]
+                  - cell "详情 跟进 历史 转化 撤销转化" [ref=e1351]:
+                    - generic [ref=e1353]:
+                      - button "详情" [ref=e1355] [cursor=pointer]:
+                        - generic [ref=e1356]: 详情
+                      - button "跟进" [ref=e1358] [cursor=pointer]:
+                        - generic [ref=e1359]: 跟进
+                      - button "历史" [ref=e1361] [cursor=pointer]:
+                        - generic [ref=e1362]: 历史
+                      - button "转化" [disabled] [ref=e1364]:
+                        - generic [ref=e1365]: 转化
+                      - button "撤销转化" [ref=e1367] [cursor=pointer]:
+                        - generic [ref=e1368]: 撤销转化
+                - row "6 客户跟进 晟坤纺织 C 晟坤纺织负责人 13800000014 已转化 详情 跟进 历史 转化 撤销转化" [ref=e1369]:
+                  - cell "6" [ref=e1370]:
+                    - generic [ref=e1371]: "6"
+                  - cell "客户跟进" [ref=e1372]:
+                    - generic [ref=e1375]: 客户跟进
+                  - cell "晟坤纺织" [ref=e1376]:
+                    - button "晟坤纺织" [ref=e1378] [cursor=pointer]:
+                      - generic [ref=e1379]: 晟坤纺织
+                  - cell "C" [ref=e1380]:
+                    - generic [ref=e1381]: C
+                  - cell "晟坤纺织负责人" [ref=e1382]:
+                    - generic [ref=e1383]: 晟坤纺织负责人
+                  - cell "13800000014" [ref=e1384]:
+                    - generic [ref=e1385]: "13800000014"
+                  - cell [ref=e1386]
+                  - cell [ref=e1387]
+                  - cell [ref=e1388]
+                  - cell [ref=e1389]
+                  - cell [ref=e1390]
+                  - cell [ref=e1391]
+                  - cell "已转化" [ref=e1392]:
+                    - generic [ref=e1395]: 已转化
+                  - cell [ref=e1396]
+                  - cell [ref=e1397]
+                  - cell "详情 跟进 历史 转化 撤销转化" [ref=e1398]:
+                    - generic [ref=e1400]:
+                      - button "详情" [ref=e1402] [cursor=pointer]:
+                        - generic [ref=e1403]: 详情
+                      - button "跟进" [ref=e1405] [cursor=pointer]:
+                        - generic [ref=e1406]: 跟进
+                      - button "历史" [ref=e1408] [cursor=pointer]:
+                        - generic [ref=e1409]: 历史
+                      - button "转化" [disabled] [ref=e1411]:
+                        - generic [ref=e1412]: 转化
+                      - button "撤销转化" [ref=e1414] [cursor=pointer]:
+                        - generic [ref=e1415]: 撤销转化
+                - row "5 客户跟进 海德和信 B 海德和信负责人 13800000013 已转化 详情 跟进 历史 转化 撤销转化" [ref=e1416]:
+                  - cell "5" [ref=e1417]:
+                    - generic [ref=e1418]: "5"
+                  - cell "客户跟进" [ref=e1419]:
+                    - generic [ref=e1422]: 客户跟进
+                  - cell "海德和信" [ref=e1423]:
+                    - button "海德和信" [ref=e1425] [cursor=pointer]:
+                      - generic [ref=e1426]: 海德和信
+                  - cell "B" [ref=e1427]:
+                    - generic [ref=e1428]: B
+                  - cell "海德和信负责人" [ref=e1429]:
+                    - generic [ref=e1430]: 海德和信负责人
+                  - cell "13800000013" [ref=e1431]:
+                    - generic [ref=e1432]: "13800000013"
+                  - cell [ref=e1433]
+                  - cell [ref=e1434]
+                  - cell [ref=e1435]
+                  - cell [ref=e1436]
+                  - cell [ref=e1437]
+                  - cell [ref=e1438]
+                  - cell "已转化" [ref=e1439]:
+                    - generic [ref=e1442]: 已转化
+                  - cell [ref=e1443]
+                  - cell [ref=e1444]
+                  - cell "详情 跟进 历史 转化 撤销转化" [ref=e1445]:
+                    - generic [ref=e1447]:
+                      - button "详情" [ref=e1449] [cursor=pointer]:
+                        - generic [ref=e1450]: 详情
+                      - button "跟进" [ref=e1452] [cursor=pointer]:
+                        - generic [ref=e1453]: 跟进
+                      - button "历史" [ref=e1455] [cursor=pointer]:
+                        - generic [ref=e1456]: 历史
+                      - button "转化" [disabled] [ref=e1458]:
+                        - generic [ref=e1459]: 转化
+                      - button "撤销转化" [ref=e1461] [cursor=pointer]:
+                        - generic [ref=e1462]: 撤销转化
+                - row "4 客户跟进 海恩诺 B 海恩诺负责人 13800000012 已转化 详情 跟进 历史 转化 撤销转化" [ref=e1463]:
+                  - cell "4" [ref=e1464]:
+                    - generic [ref=e1465]: "4"
+                  - cell "客户跟进" [ref=e1466]:
+                    - generic [ref=e1469]: 客户跟进
+                  - cell "海恩诺" [ref=e1470]:
+                    - button "海恩诺" [ref=e1472] [cursor=pointer]:
+                      - generic [ref=e1473]: 海恩诺
+                  - cell "B" [ref=e1474]:
+                    - generic [ref=e1475]: B
+                  - cell "海恩诺负责人" [ref=e1476]:
+                    - generic [ref=e1477]: 海恩诺负责人
+                  - cell "13800000012" [ref=e1478]:
+                    - generic [ref=e1479]: "13800000012"
+                  - cell [ref=e1480]
+                  - cell [ref=e1481]
+                  - cell [ref=e1482]
+                  - cell [ref=e1483]
+                  - cell [ref=e1484]
+                  - cell [ref=e1485]
+                  - cell "已转化" [ref=e1486]:
+                    - generic [ref=e1489]: 已转化
+                  - cell [ref=e1490]
+                  - cell [ref=e1491]
+                  - cell "详情 跟进 历史 转化 撤销转化" [ref=e1492]:
+                    - generic [ref=e1494]:
+                      - button "详情" [ref=e1496] [cursor=pointer]:
+                        - generic [ref=e1497]: 详情
+                      - button "跟进" [ref=e1499] [cursor=pointer]:
+                        - generic [ref=e1500]: 跟进
+                      - button "历史" [ref=e1502] [cursor=pointer]:
+                        - generic [ref=e1503]: 历史
+                      - button "转化" [disabled] [ref=e1505]:
+                        - generic [ref=e1506]: 转化
+                      - button "撤销转化" [ref=e1508] [cursor=pointer]:
+                        - generic [ref=e1509]: 撤销转化
+                - row "3 客户跟进 安杰尔 A 安杰尔负责人 13800000011 跨境电商 已转化 详情 跟进 历史 转化 撤销转化" [ref=e1510]:
+                  - cell "3" [ref=e1511]:
+                    - generic [ref=e1512]: "3"
+                  - cell "客户跟进" [ref=e1513]:
+                    - generic [ref=e1516]: 客户跟进
+                  - cell "安杰尔" [ref=e1517]:
+                    - button "安杰尔" [ref=e1519] [cursor=pointer]:
+                      - generic [ref=e1520]: 安杰尔
+                  - cell "A" [ref=e1521]:
+                    - generic [ref=e1522]: A
+                  - cell "安杰尔负责人" [ref=e1523]:
+                    - generic [ref=e1524]: 安杰尔负责人
+                  - cell "13800000011" [ref=e1525]:
+                    - generic [ref=e1526]: "13800000011"
+                  - cell [ref=e1527]
+                  - cell [ref=e1528]
+                  - cell [ref=e1529]
+                  - cell [ref=e1530]
+                  - cell "跨境电商" [ref=e1531]:
+                    - generic [ref=e1532]: 跨境电商
+                  - cell [ref=e1533]
+                  - cell "已转化" [ref=e1534]:
+                    - generic [ref=e1537]: 已转化
+                  - cell [ref=e1538]
+                  - cell [ref=e1539]
+                  - cell "详情 跟进 历史 转化 撤销转化" [ref=e1540]:
+                    - generic [ref=e1542]:
+                      - button "详情" [ref=e1544] [cursor=pointer]:
+                        - generic [ref=e1545]: 详情
+                      - button "跟进" [ref=e1547] [cursor=pointer]:
+                        - generic [ref=e1548]: 跟进
+                      - button "历史" [ref=e1550] [cursor=pointer]:
+                        - generic [ref=e1551]: 历史
+                      - button "转化" [disabled] [ref=e1553]:
+                        - generic [ref=e1554]: 转化
+                      - button "撤销转化" [ref=e1556] [cursor=pointer]:
+                        - generic [ref=e1557]: 撤销转化
+                - row "2 转化 东莞样例贸易公司 B 陈小姐 13800000002 陈小姐 青岛 首次联系，补充资料中 新线索 2026-02-27 首次联系，补充资料中 详情 跟进 历史 转化" [ref=e1558]:
+                  - cell "2" [ref=e1559]:
+                    - generic [ref=e1560]: "2"
+                  - cell "转化" [ref=e1561]:
+                    - generic [ref=e1564]: 转化
+                  - cell "东莞样例贸易公司" [ref=e1565]:
+                    - button "东莞样例贸易公司" [ref=e1567] [cursor=pointer]:
+                      - generic [ref=e1568]: 东莞样例贸易公司
+                  - cell "B" [ref=e1569]:
+                    - generic [ref=e1570]: B
+                  - cell "陈小姐" [ref=e1571]:
+                    - generic [ref=e1572]: 陈小姐
+                  - cell "13800000002" [ref=e1573]:
+                    - generic [ref=e1574]: "13800000002"
+                  - cell "陈小姐" [ref=e1575]:
+                    - generic [ref=e1576]: 陈小姐
+                  - cell [ref=e1577]
+                  - cell [ref=e1578]
+                  - cell "青岛" [ref=e1579]:
+                    - generic [ref=e1580]: 青岛
+                  - cell [ref=e1581]
+                  - cell "首次联系，补充资料中" [ref=e1582]:
+                    - generic [ref=e1583]: 首次联系，补充资料中
+                  - cell "新线索" [ref=e1584]:
+                    - generic [ref=e1587]: 新线索
+                  - cell "2026-02-27" [ref=e1588]:
+                    - generic [ref=e1589]: 2026-02-27
+                  - cell "首次联系，补充资料中" [ref=e1590]:
+                    - generic [ref=e1591]: 首次联系，补充资料中
+                  - cell "详情 跟进 历史 转化" [ref=e1592]:
+                    - generic [ref=e1594]:
+                      - button "详情" [ref=e1596] [cursor=pointer]:
+                        - generic [ref=e1597]: 详情
+                      - button "跟进" [ref=e1599] [cursor=pointer]:
+                        - generic [ref=e1600]: 跟进
+                      - button "历史" [ref=e1602] [cursor=pointer]:
+                        - generic [ref=e1603]: 历史
+                      - button "转化" [ref=e1605] [cursor=pointer]:
+                        - generic [ref=e1606]: 转化
+                - row "1 客户跟进 深圳示例科技有限公司 A 王总 13800000001 黄广 跨境电商 多店铺，有走9810的有0110，车衣 跟进中 2026-03-01 已沟通代理记账报价，等待确认 详情 跟进 历史 转化" [ref=e1607]:
+                  - cell "1" [ref=e1608]:
+                    - generic [ref=e1609]: "1"
+                  - cell "客户跟进" [ref=e1610]:
+                    - generic [ref=e1613]: 客户跟进
+                  - cell "深圳示例科技有限公司" [ref=e1614]:
+                    - button "深圳示例科技有限公司" [ref=e1616] [cursor=pointer]:
+                      - generic [ref=e1617]: 深圳示例科技有限公司
+                  - cell "A" [ref=e1618]:
+                    - generic [ref=e1619]: A
+                  - cell "王总" [ref=e1620]:
+                    - generic [ref=e1621]: 王总
+                  - cell "13800000001" [ref=e1622]:
+                    - generic [ref=e1623]: "13800000001"
+                  - cell [ref=e1624]
+                  - cell [ref=e1625]
+                  - cell "黄广" [ref=e1626]:
+                    - generic [ref=e1627]: 黄广
+                  - cell [ref=e1628]
+                  - cell "跨境电商" [ref=e1629]:
+                    - generic [ref=e1630]: 跨境电商
+                  - cell "多店铺，有走9810的有0110，车衣" [ref=e1631]:
+                    - generic [ref=e1632]: 多店铺，有走9810的有0110，车衣
+                  - cell "跟进中" [ref=e1633]:
+                    - generic [ref=e1636]: 跟进中
+                  - cell "2026-03-01" [ref=e1637]:
+                    - generic [ref=e1638]: 2026-03-01
+                  - cell "已沟通代理记账报价，等待确认" [ref=e1639]:
+                    - generic [ref=e1640]: 已沟通代理记账报价，等待确认
+                  - cell "详情 跟进 历史 转化" [ref=e1641]:
+                    - generic [ref=e1643]:
+                      - button "详情" [ref=e1645] [cursor=pointer]:
+                        - generic [ref=e1646]: 详情
+                      - button "跟进" [ref=e1648] [cursor=pointer]:
+                        - generic [ref=e1649]: 跟进
+                      - button "历史" [ref=e1651] [cursor=pointer]:
+                        - generic [ref=e1652]: 历史
+                      - button "转化" [ref=e1654] [cursor=pointer]:
+                        - generic [ref=e1655]: 转化
+      - dialog "新增线索（Excel 字段版）" [ref=e1658]:
+        - generic [active] [ref=e1659]:
+          - generic [ref=e1660]:
+            - heading "新增线索（Excel 字段版）" [level=2] [ref=e1661]
+            - button "关闭此对话框" [ref=e1662] [cursor=pointer]:
+              - img [ref=e1664]
+          - generic [ref=e1667]:
+            - generic [ref=e1668]:
+              - generic [ref=e1670]:
+                - generic [ref=e1671]: 来源模板
+                - generic [ref=e1674] [cursor=pointer]:
+                  - generic:
+                    - combobox "来源模板" [ref=e1676]
+                    - generic [ref=e1677]: 客户跟进模板
+                  - img [ref=e1680]
+              - generic [ref=e1683]:
+                - generic [ref=e1684]: 公司名
+                - textbox "公司名" [ref=e1688]
+              - generic [ref=e1690]:
+                - generic [ref=e1691]: 等级
+                - textbox "等级" [ref=e1695]:
+                  - /placeholder: A/B/C...
+            - generic [ref=e1696]:
+              - generic [ref=e1698]:
+                - generic [ref=e1699]: 联系人
+                - textbox "联系人" [ref=e1703]
+              - generic [ref=e1705]:
+                - generic [ref=e1706]: 电话
+                - textbox "电话" [ref=e1710]
+              - generic [ref=e1712]:
+                - generic [ref=e1713]: 微信/联系人（微信号）
+                - textbox "微信/联系人（微信号）" [ref=e1717]
+            - generic [ref=e1718]:
+              - generic [ref=e1720]:
+                - generic [ref=e1721]: 地区
+                - textbox "地区" [ref=e1725]
+              - generic [ref=e1727]:
+                - generic [ref=e1728]: 国家/业务类型
+                - textbox "国家/业务类型" [ref=e1732]
+              - generic [ref=e1734]:
+                - generic [ref=e1735]: 来源
+                - textbox "来源" [ref=e1739]
+            - generic [ref=e1740]:
+              - generic [ref=e1742]:
+                - generic [ref=e1743]: 传真
+                - textbox "传真" [ref=e1747]
+              - generic [ref=e1749]:
+                - generic [ref=e1750]: 其他联系方式
+                - textbox "其他联系方式" [ref=e1754]
+            - generic [ref=e1755]:
+              - generic [ref=e1757]:
+                - generic [ref=e1758]: 联络开始时间
+                - generic [ref=e1761]:
+                  - img [ref=e1764]
+                  - combobox "联络开始时间" [ref=e1766]
+              - generic [ref=e1768]:
+                - generic [ref=e1769]: 服务开始时间（文本）
+                - textbox "服务开始时间（文本）" [ref=e1773]:
+                  - /placeholder: 如 2025.07.02
+              - generic [ref=e1775]:
+                - generic [ref=e1776]: 下次提醒
+                - generic [ref=e1779]:
+                  - img [ref=e1782]
+                  - combobox "下次提醒" [ref=e1784]
+            - generic [ref=e1785]:
+              - generic [ref=e1787]:
+                - generic [ref=e1788]: 企业性质
+                - textbox "企业性质" [ref=e1792]
+              - generic [ref=e1794]:
+                - generic [ref=e1795]: 服务方式
+                - textbox "服务方式" [ref=e1799]
+              - generic [ref=e1801]:
+                - generic [ref=e1802]: 提醒值
+                - textbox "提醒值" [ref=e1806]
+            - generic [ref=e1807]:
+              - generic [ref=e1808]: 主营/需求
+              - textbox "主营/需求" [ref=e1811]
+            - generic [ref=e1812]:
+              - generic [ref=e1813]: 介绍
+              - textbox "介绍" [ref=e1817]
+            - generic [ref=e1818]:
+              - generic [ref=e1820]:
+                - generic [ref=e1821]: 收费标准
+                - textbox "收费标准" [ref=e1825]
+              - generic [ref=e1827]:
+                - generic [ref=e1828]: 首期账单期间
+                - textbox "首期账单期间" [ref=e1832]
+              - generic [ref=e1834]:
+                - generic [ref=e1835]: 备用2
+                - textbox "备用2" [ref=e1839]
+            - generic [ref=e1840]:
+              - generic [ref=e1842]:
+                - generic [ref=e1843]: 备用3
+                - textbox "备用3" [ref=e1847]
+              - generic [ref=e1849]:
+                - generic [ref=e1850]: 备用4
+                - textbox "备用4" [ref=e1854]
+            - generic [ref=e1855]:
+              - generic [ref=e1856]: 备注
+              - textbox "备注" [ref=e1859]
+          - generic [ref=e1860]:
+            - button "取消" [ref=e1861] [cursor=pointer]:
+              - generic [ref=e1862]: 取消
+            - button "保存" [ref=e1863] [cursor=pointer]:
+              - generic [ref=e1864]: 保存
