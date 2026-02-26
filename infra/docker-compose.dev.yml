@@ -1,0 +1,30 @@
+name: daizhang-dev
+
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/your-org/daizhang-api:dev-latest}
+    container_name: daizhang-dev-api
+    restart: unless-stopped
+    env_file:
+      - ./env/api.dev.env
+    volumes:
+      - ./data/dev/api:/app/data
+    ports:
+      - "32000:8000"
+    networks:
+      - daizhang-dev
+
+  web:
+    image: ${WEB_IMAGE:-ghcr.io/your-org/daizhang-web:dev-latest}
+    container_name: daizhang-dev-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "32080:80"
+    networks:
+      - daizhang-dev
+
+networks:
+  daizhang-dev:
+    name: daizhang-dev-net

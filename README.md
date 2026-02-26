@@ -53,7 +53,9 @@ cd infra
 docker compose up --build
 ```
 
-说明：基础镜像已改为 `docker.1ms.run` 镜像源（`api/web` 均基于 `python`，`db` 基于 `postgres`）。
+说明：
+1. `infra/docker-compose.yml` 主要用于本地开发（包含代码挂载、`--reload`）。
+2. 基础镜像使用 `docker.1ms.run` 镜像源（`api/web` 均基于 `python`，`db` 基于 `postgres`）。
 
 启动后：
 1. Web: `http://localhost:5173`
@@ -63,4 +65,13 @@ docker compose up --build
 
 备注：
 1. 当前开发模式默认使用 SQLite（`apps/api/daizhang.db`）。
-2. 为保证字段结构与代码同步，`ENVIRONMENT=dev` 下 API 启动会重建表结构并重新注入演示数据。
+2. 可通过环境变量控制启动行为：
+   - `BOOTSTRAP_DEMO_DATA=true|false`（是否注入演示数据）
+   - `RESET_DB_ON_STARTUP=true|false`（是否启动时重建数据库）
+
+## 群晖 DS920+ 双环境部署（dev + prd）
+- 部署文档：`infra/DEPLOY_SYNOLOGY.md`
+- 关键文件：
+  - `infra/docker-compose.dev.yml`
+  - `infra/docker-compose.prd.yml`
+  - `.github/workflows/build-and-deploy-synology.yml`
