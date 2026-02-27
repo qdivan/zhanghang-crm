@@ -1,9 +1,0 @@
-[   12126ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:8000/api/v1/auth/login:0
-[   77357ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   78360ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   79364ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   80368ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   81372ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   82395ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   83399ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
-[   84403ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
