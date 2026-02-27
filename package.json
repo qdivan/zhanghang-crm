@@ -6,6 +6,10 @@
     "apps/web"
   ],
   "scripts": {
+    "dev": "bash ./scripts/run-dev.sh",
+    "prd": "bash ./scripts/run-prd.sh",
+    "stop:dev": "bash ./scripts/stop-dev.sh",
+    "stop:prd": "bash ./scripts/stop-prd.sh",
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
     "lint:web": "npm --workspace apps/web run lint --if-present"

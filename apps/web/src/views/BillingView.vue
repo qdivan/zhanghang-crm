@@ -84,14 +84,47 @@ const activityForm = reactive<ActivityForm>({
   note: "",
 });
 
+function readActivityTypeToken(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (value && typeof value === "object") {
+    const maybeValue = (value as Record<string, unknown>).value;
+    if (typeof maybeValue === "string") {
+      return maybeValue.trim();
+    }
+    const maybeLabel = (value as Record<string, unknown>).label;
+    if (typeof maybeLabel === "string") {
+      return maybeLabel.trim();
+    }
+    const maybeType = (value as Record<string, unknown>).activity_type;
+    if (typeof maybeType === "string") {
+      return maybeType.trim();
+    }
+  }
+  return "";
+}
+
 function normalizeActivityType(value: unknown): "REMINDER" | "PAYMENT" {
-  if (value === "PAYMENT" || value === "收款") {
+  const token = readActivityTypeToken(value);
+  const upper = token.toUpperCase();
+  if (upper === "PAYMENT" || token.includes("收款")) {
     return "PAYMENT";
   }
   return "REMINDER";
 }
 
-const isPaymentActivity = computed(() => normalizeActivityType(activityForm.activity_type) === "PAYMENT");
+function isPaymentActivityType(value: unknown): boolean {
+  const token = readActivityTypeToken(value);
+  const upper = token.toUpperCase();
+  if (!token) return false;
+  if (upper === "REMINDER" || token.includes("催收")) return false;
+  if (upper === "PAYMENT" || token.includes("收款")) return true;
+  // 未识别值时优先放开输入，避免“已选收款但金额无法填写”的阻塞
+  return true;
+}
+
+const isPaymentActivity = computed(() => isPaymentActivityType(activityForm.activity_type));
 
 function statusLabel(status: string) {
   if (status === "CLEARED") return "清账";
@@ -202,8 +235,9 @@ function resetActivityForm() {
 }
 
 function onActivityTypeChange(value: unknown) {
-  activityForm.activity_type = normalizeActivityType(value);
-  if (activityForm.activity_type === "REMINDER") {
+  const paymentMode = isPaymentActivityType(value);
+  activityForm.activity_type = paymentMode ? "PAYMENT" : "REMINDER";
+  if (!paymentMode) {
     activityForm.amount = 0;
     activityForm.payment_nature = "";
     activityForm.is_prepay = false;
@@ -236,20 +270,23 @@ async function openActivityDrawer(record: BillingRecord) {
 
 async function submitActivity() {
   if (!selectedRecord.value) return;
-  activityForm.activity_type = normalizeActivityType(activityForm.activity_type);
+  const normalizedType = normalizeActivityType(activityForm.activity_type);
+  const paymentMode = normalizedType === "PAYMENT";
+  activityForm.activity_type = normalizedType;
   if (!activityForm.content.trim()) {
     ElMessage.warning("请填写沟通内容");
     return;
   }
-  if (isPaymentActivity.value && activityForm.amount <= 0) {
+  if (paymentMode && activityForm.amount <= 0) {
     ElMessage.warning("收款金额必须大于 0");
     return;
   }
   const payload =
-    isPaymentActivity.value
-      ? { ...activityForm }
+    paymentMode
+      ? { ...activityForm, activity_type: "PAYMENT" as const }
       : {
           ...activityForm,
+          activity_type: "REMINDER" as const,
           amount: 0,
           payment_nature: "",
           is_prepay: false,
@@ -519,9 +556,11 @@ onMounted(async () => {
               v-model="activityForm.amount"
               :min="0"
               :controls="false"
-              :disabled="!isPaymentActivity"
               style="width:100%"
             />
+            <el-text v-if="!isPaymentActivity" type="info" size="small">
+              当前为催收，保存时金额会自动记为 0
+            </el-text>
           </el-form-item>
         </el-col>
       </el-row>
