@@ -97,6 +97,10 @@
    - Status: `DONE`
 13. `T5-13` Docker 开发栈默认切换 PostgreSQL 连接（API 不再默认连 sqlite）。
    - Status: `DONE`
+14. `T5-14` 收费收款抽屉“收款金额不可输入”阻塞修复（类型兼容识别 + 提交流程兜底）。
+   - Status: `DONE`
+15. `T5-15` 前端本地直跑 API 代理补齐（未配置 `VITE_API_BASE_URL` 时可通过 Vite proxy 访问后端）。
+   - Status: `DONE`
 
 ## Phase 6 - 多租户与备份（规划中）
 1. `T6-1` 多租户基础模型（tenant / tenant_memberships）与 tenant_id 强制过滤。

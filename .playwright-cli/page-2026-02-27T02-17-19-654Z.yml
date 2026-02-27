@@ -1,0 +1,277 @@
+- generic [ref=e1]:
+  - generic [ref=e31]:
+    - complementary [ref=e32]:
+      - generic [ref=e33]: 账航·一帆财税
+      - menubar [ref=e34]:
+        - menuitem "客户开发" [ref=e35] [cursor=pointer]:
+          - img [ref=e37]
+          - generic [ref=e39]: 客户开发
+        - menuitem "客户列表" [ref=e40] [cursor=pointer]:
+          - img [ref=e42]
+          - generic [ref=e44]: 客户列表
+        - menuitem "地址资源" [ref=e45] [cursor=pointer]:
+          - img [ref=e47]
+          - generic [ref=e50]: 地址资源
+        - menuitem "收费收款" [ref=e51] [cursor=pointer]:
+          - img [ref=e53]
+          - generic [ref=e57]: 收费收款
+        - menuitem "成本与老板视图" [ref=e58] [cursor=pointer]:
+          - img [ref=e60]
+          - generic [ref=e62]: 成本与老板视图
+        - menuitem "管理员面板" [ref=e63] [cursor=pointer]:
+          - img [ref=e65]
+          - generic [ref=e67]: 管理员面板
+    - generic [ref=e68]:
+      - generic [ref=e69]:
+        - generic [ref=e71]:
+          - generic [ref=e72]: 账航·一帆财税
+          - generic [ref=e73]: 客户开发、管理、收款
+        - generic [ref=e74]:
+          - generic [ref=e77]:
+            - img [ref=e79] [cursor=pointer]
+            - text: admin（管理员）
+          - button "退出" [ref=e82] [cursor=pointer]:
+            - generic [ref=e83]: 退出
+      - main [ref=e84]:
+        - generic [ref=e563]:
+          - alert [ref=e565]:
+            - generic [ref=e567]: 管理员可管理全部本地用户（含管理员）
+          - generic [ref=e569]:
+            - tablist [ref=e573]:
+              - tab "用户管理" [selected] [ref=e575]
+              - tab "LDAP 设置" [ref=e576]
+              - tab "操作日志" [ref=e577]
+            - tabpanel "用户管理" [ref=e579]:
+              - generic [ref=e580]:
+                - generic [ref=e584]:
+                  - generic [ref=e585]:
+                    - generic [ref=e586]: 关键词
+                    - textbox "关键词" [ref=e590]:
+                      - /placeholder: 用户名/角色
+                  - generic [ref=e591]:
+                    - generic [ref=e592]: 角色
+                    - generic [ref=e595] [cursor=pointer]:
+                      - generic:
+                        - combobox "角色" [ref=e597]
+                        - generic: 全部
+                      - img [ref=e600]
+                  - generic [ref=e602]:
+                    - generic [ref=e603]: 状态
+                    - generic [ref=e606] [cursor=pointer]:
+                      - generic:
+                        - combobox "状态" [ref=e608]
+                        - generic: 全部
+                      - img [ref=e611]
+                  - generic [ref=e614]:
+                    - button "查询" [ref=e615] [cursor=pointer]:
+                      - generic [ref=e616]: 查询
+                    - button "新增用户" [ref=e617] [cursor=pointer]:
+                      - generic [ref=e618]: 新增用户
+                - generic [ref=e620]:
+                  - generic [ref=e622]:
+                    - generic [ref=e623]: 用户管理
+                    - generic [ref=e625]: 8 人
+                  - generic [ref=e628]:
+                    - table [ref=e630]:
+                      - rowgroup [ref=e640]:
+                        - row "ID 账号 账号来源 角色 状态 最近登录 创建时间 操作" [ref=e641]:
+                          - columnheader "ID" [ref=e642]:
+                            - generic [ref=e643]: ID
+                          - columnheader "账号" [ref=e644]:
+                            - generic [ref=e645]: 账号
+                          - columnheader "账号来源" [ref=e646]:
+                            - generic [ref=e647]: 账号来源
+                          - columnheader "角色" [ref=e648]:
+                            - generic [ref=e649]: 角色
+                          - columnheader "状态" [ref=e650]:
+                            - generic [ref=e651]: 状态
+                          - columnheader "最近登录" [ref=e652]:
+                            - generic [ref=e653]: 最近登录
+                          - columnheader "创建时间" [ref=e654]:
+                            - generic [ref=e655]: 创建时间
+                          - columnheader "操作" [ref=e656]:
+                            - generic [ref=e657]: 操作
+                    - table [ref=e662]:
+                      - rowgroup [ref=e672]:
+                        - row "1 boss 本地 老板 启用 2026/2/27 01:54:46 2026/2/26 15:36:54 编辑 删除" [ref=e673]:
+                          - cell "1" [ref=e674]:
+                            - generic [ref=e675]: "1"
+                          - cell "boss" [ref=e676]:
+                            - generic [ref=e677]: boss
+                          - cell "本地" [ref=e678]:
+                            - generic [ref=e679]: 本地
+                          - cell "老板" [ref=e680]:
+                            - generic [ref=e683]: 老板
+                          - cell "启用" [ref=e684]:
+                            - generic [ref=e687]: 启用
+                          - cell "2026/2/27 01:54:46" [ref=e688]:
+                            - generic [ref=e689]: 2026/2/27 01:54:46
+                          - cell "2026/2/26 15:36:54" [ref=e690]:
+                            - generic [ref=e691]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e692]:
+                            - generic [ref=e693]:
+                              - button "编辑" [ref=e694] [cursor=pointer]:
+                                - generic [ref=e695]: 编辑
+                              - button "删除" [ref=e696] [cursor=pointer]:
+                                - generic [ref=e697]: 删除
+                        - row "2 admin 本地 管理员 启用 2026/2/27 02:15:51 2026/2/26 15:36:54 编辑 删除" [ref=e698]:
+                          - cell "2" [ref=e699]:
+                            - generic [ref=e700]: "2"
+                          - cell "admin" [ref=e701]:
+                            - generic [ref=e702]: admin
+                          - cell "本地" [ref=e703]:
+                            - generic [ref=e704]: 本地
+                          - cell "管理员" [ref=e705]:
+                            - generic [ref=e708]: 管理员
+                          - cell "启用" [ref=e709]:
+                            - generic [ref=e712]: 启用
+                          - cell "2026/2/27 02:15:51" [ref=e713]:
+                            - generic [ref=e714]: 2026/2/27 02:15:51
+                          - cell "2026/2/26 15:36:54" [ref=e715]:
+                            - generic [ref=e716]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e717]:
+                            - generic [ref=e718]:
+                              - button "编辑" [ref=e719] [cursor=pointer]:
+                                - generic [ref=e720]: 编辑
+                              - button "删除" [disabled] [ref=e721]:
+                                - generic [ref=e722]: 删除
+                        - row "3 accountant 本地 会计 启用 2026/2/27 01:18:48 2026/2/26 15:36:54 编辑 删除" [ref=e723]:
+                          - cell "3" [ref=e724]:
+                            - generic [ref=e725]: "3"
+                          - cell "accountant" [ref=e726]:
+                            - generic [ref=e727]: accountant
+                          - cell "本地" [ref=e728]:
+                            - generic [ref=e729]: 本地
+                          - cell "会计" [ref=e730]:
+                            - generic [ref=e733]: 会计
+                          - cell "启用" [ref=e734]:
+                            - generic [ref=e737]: 启用
+                          - cell "2026/2/27 01:18:48" [ref=e738]:
+                            - generic [ref=e739]: 2026/2/27 01:18:48
+                          - cell "2026/2/26 15:36:54" [ref=e740]:
+                            - generic [ref=e741]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e742]:
+                            - generic [ref=e743]:
+                              - button "编辑" [ref=e744] [cursor=pointer]:
+                                - generic [ref=e745]: 编辑
+                              - button "删除" [ref=e746] [cursor=pointer]:
+                                - generic [ref=e747]: 删除
+                        - row "4 accountant2 本地 会计 启用 2026/2/27 01:18:48 2026/2/26 15:36:54 编辑 删除" [ref=e748]:
+                          - cell "4" [ref=e749]:
+                            - generic [ref=e750]: "4"
+                          - cell "accountant2" [ref=e751]:
+                            - generic [ref=e752]: accountant2
+                          - cell "本地" [ref=e753]:
+                            - generic [ref=e754]: 本地
+                          - cell "会计" [ref=e755]:
+                            - generic [ref=e758]: 会计
+                          - cell "启用" [ref=e759]:
+                            - generic [ref=e762]: 启用
+                          - cell "2026/2/27 01:18:48" [ref=e763]:
+                            - generic [ref=e764]: 2026/2/27 01:18:48
+                          - cell "2026/2/26 15:36:54" [ref=e765]:
+                            - generic [ref=e766]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e767]:
+                            - generic [ref=e768]:
+                              - button "编辑" [ref=e769] [cursor=pointer]:
+                                - generic [ref=e770]: 编辑
+                              - button "删除" [ref=e771] [cursor=pointer]:
+                                - generic [ref=e772]: 删除
+                        - row "5 accountant3 本地 会计 启用 - 2026/2/26 15:36:54 编辑 删除" [ref=e773]:
+                          - cell "5" [ref=e774]:
+                            - generic [ref=e775]: "5"
+                          - cell "accountant3" [ref=e776]:
+                            - generic [ref=e777]: accountant3
+                          - cell "本地" [ref=e778]:
+                            - generic [ref=e779]: 本地
+                          - cell "会计" [ref=e780]:
+                            - generic [ref=e783]: 会计
+                          - cell "启用" [ref=e784]:
+                            - generic [ref=e787]: 启用
+                          - cell "-" [ref=e788]:
+                            - generic [ref=e789]: "-"
+                          - cell "2026/2/26 15:36:54" [ref=e790]:
+                            - generic [ref=e791]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e792]:
+                            - generic [ref=e793]:
+                              - button "编辑" [ref=e794] [cursor=pointer]:
+                                - generic [ref=e795]: 编辑
+                              - button "删除" [ref=e796] [cursor=pointer]:
+                                - generic [ref=e797]: 删除
+                        - row "6 accountant4 本地 会计 启用 - 2026/2/26 15:36:54 编辑 删除" [ref=e798]:
+                          - cell "6" [ref=e799]:
+                            - generic [ref=e800]: "6"
+                          - cell "accountant4" [ref=e801]:
+                            - generic [ref=e802]: accountant4
+                          - cell "本地" [ref=e803]:
+                            - generic [ref=e804]: 本地
+                          - cell "会计" [ref=e805]:
+                            - generic [ref=e808]: 会计
+                          - cell "启用" [ref=e809]:
+                            - generic [ref=e812]: 启用
+                          - cell "-" [ref=e813]:
+                            - generic [ref=e814]: "-"
+                          - cell "2026/2/26 15:36:54" [ref=e815]:
+                            - generic [ref=e816]: 2026/2/26 15:36:54
+                          - cell "编辑 删除" [ref=e817]:
+                            - generic [ref=e818]:
+                              - button "编辑" [ref=e819] [cursor=pointer]:
+                                - generic [ref=e820]: 编辑
+                              - button "删除" [ref=e821] [cursor=pointer]:
+                                - generic [ref=e822]: 删除
+                        - row "7 qa_acc_0227 本地 会计 启用 - 2026/2/27 01:28:56 编辑 删除" [ref=e823]:
+                          - cell "7" [ref=e824]:
+                            - generic [ref=e825]: "7"
+                          - cell "qa_acc_0227" [ref=e826]:
+                            - generic [ref=e827]: qa_acc_0227
+                          - cell "本地" [ref=e828]:
+                            - generic [ref=e829]: 本地
+                          - cell "会计" [ref=e830]:
+                            - generic [ref=e833]: 会计
+                          - cell "启用" [ref=e834]:
+                            - generic [ref=e837]: 启用
+                          - cell "-" [ref=e838]:
+                            - generic [ref=e839]: "-"
+                          - cell "2026/2/27 01:28:56" [ref=e840]:
+                            - generic [ref=e841]: 2026/2/27 01:28:56
+                          - cell "编辑 删除" [ref=e842]:
+                            - generic [ref=e843]:
+                              - button "编辑" [ref=e844] [cursor=pointer]:
+                                - generic [ref=e845]: 编辑
+                              - button "删除" [ref=e846] [cursor=pointer]:
+                                - generic [ref=e847]: 删除
+                        - row "8 qa_del_0227_b 本地 会计 启用 - 2026/2/27 02:16:49 编辑 删除" [ref=e921]:
+                          - cell "8" [ref=e922]:
+                            - generic [ref=e923]: "8"
+                          - cell "qa_del_0227_b" [ref=e924]:
+                            - generic [ref=e925]: qa_del_0227_b
+                          - cell "本地" [ref=e926]:
+                            - generic [ref=e927]: 本地
+                          - cell "会计" [ref=e928]:
+                            - generic [ref=e931]: 会计
+                          - cell "启用" [ref=e932]:
+                            - generic [ref=e935]: 启用
+                          - cell "-" [ref=e936]:
+                            - generic [ref=e937]: "-"
+                          - cell "2026/2/27 02:16:49" [ref=e938]:
+                            - generic [ref=e939]: 2026/2/27 02:16:49
+                          - cell "编辑 删除" [ref=e940]:
+                            - generic [ref=e941]:
+                              - button "编辑" [ref=e942] [cursor=pointer]:
+                                - generic [ref=e943]: 编辑
+                              - button "删除" [ref=e944] [cursor=pointer]:
+                                - generic [ref=e945]: 删除
+  - dialog "删除确认" [ref=e952]:
+    - generic [ref=e953]:
+      - generic [ref=e954]:
+        - generic [ref=e955]: 删除确认
+        - button "关闭此对话框" [ref=e956] [cursor=pointer]:
+          - img [ref=e958]
+      - generic [ref=e961]:
+        - img [ref=e963]
+        - paragraph [ref=e966]: 确认删除账号「qa_del_0227_b」吗？删除后无法登录，且仅无关联业务数据的账号可删除。
+      - generic [ref=e967]:
+        - button "取消" [ref=e968] [cursor=pointer]:
+          - generic [ref=e969]: 取消
+        - button "确认删除" [active] [ref=e970] [cursor=pointer]:
+          - generic [ref=e971]: 确认删除

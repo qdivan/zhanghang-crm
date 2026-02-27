@@ -1,0 +1,16 @@
+- generic [ref=e1634]:
+  - generic [ref=e1636]:
+    - generic [ref=e1637]: 账航·一帆财税
+    - generic [ref=e1638]: 本地账号（LDAP 二期接入）
+    - generic [ref=e1639]: 演示账号：boss / admin / accountant，密码均为 Demo@12345
+  - generic [ref=e1641]:
+    - generic [ref=e1642]:
+      - generic [ref=e1643]: 账号
+      - textbox "账号" [ref=e1647]:
+        - /placeholder: 请输入账号
+    - generic [ref=e1648]:
+      - generic [ref=e1649]: 密码
+      - textbox "密码" [ref=e1653]:
+        - /placeholder: 请输入密码
+    - button "登录" [ref=e1654] [cursor=pointer]:
+      - generic [ref=e1655]: 登录
