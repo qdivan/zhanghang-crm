@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
@@ -83,6 +83,15 @@ const activityForm = reactive<ActivityForm>({
   next_followup_at: null,
   note: "",
 });
+
+function normalizeActivityType(value: unknown): "REMINDER" | "PAYMENT" {
+  if (value === "PAYMENT" || value === "收款") {
+    return "PAYMENT";
+  }
+  return "REMINDER";
+}
+
+const isPaymentActivity = computed(() => normalizeActivityType(activityForm.activity_type) === "PAYMENT");
 
 function statusLabel(status: string) {
   if (status === "CLEARED") return "清账";
@@ -192,8 +201,9 @@ function resetActivityForm() {
   activityForm.note = "";
 }
 
-function onActivityTypeChange(value: ActivityForm["activity_type"]) {
-  if (value === "REMINDER") {
+function onActivityTypeChange(value: unknown) {
+  activityForm.activity_type = normalizeActivityType(value);
+  if (activityForm.activity_type === "REMINDER") {
     activityForm.amount = 0;
     activityForm.payment_nature = "";
     activityForm.is_prepay = false;
@@ -226,16 +236,17 @@ async function openActivityDrawer(record: BillingRecord) {
 
 async function submitActivity() {
   if (!selectedRecord.value) return;
+  activityForm.activity_type = normalizeActivityType(activityForm.activity_type);
   if (!activityForm.content.trim()) {
     ElMessage.warning("请填写沟通内容");
     return;
   }
-  if (activityForm.activity_type === "PAYMENT" && activityForm.amount <= 0) {
+  if (isPaymentActivity.value && activityForm.amount <= 0) {
     ElMessage.warning("收款金额必须大于 0");
     return;
   }
   const payload =
-    activityForm.activity_type === "PAYMENT"
+    isPaymentActivity.value
       ? { ...activityForm }
       : {
           ...activityForm,
@@ -508,7 +519,7 @@ onMounted(async () => {
               v-model="activityForm.amount"
               :min="0"
               :controls="false"
-              :disabled="activityForm.activity_type !== 'PAYMENT'"
+              :disabled="!isPaymentActivity"
               style="width:100%"
             />
           </el-form-item>
@@ -517,7 +528,7 @@ onMounted(async () => {
       <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="收款类型">
-            <el-select v-model="activityForm.payment_nature" clearable :disabled="activityForm.activity_type !== 'PAYMENT'">
+            <el-select v-model="activityForm.payment_nature" clearable :disabled="!isPaymentActivity">
               <el-option label="月付" value="MONTHLY" />
               <el-option label="年付" value="YEARLY" />
               <el-option label="一次性" value="ONE_OFF" />
@@ -541,10 +552,10 @@ onMounted(async () => {
         <el-col :span="8">
           <el-form-item label="结算标记">
             <el-space>
-              <el-checkbox v-model="activityForm.is_prepay" :disabled="activityForm.activity_type !== 'PAYMENT'">
+              <el-checkbox v-model="activityForm.is_prepay" :disabled="!isPaymentActivity">
                 预付
               </el-checkbox>
-              <el-checkbox v-model="activityForm.is_settlement" :disabled="activityForm.activity_type !== 'PAYMENT'">
+              <el-checkbox v-model="activityForm.is_settlement" :disabled="!isPaymentActivity">
                 结清
               </el-checkbox>
             </el-space>

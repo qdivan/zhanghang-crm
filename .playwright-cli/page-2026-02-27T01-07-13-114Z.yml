@@ -1,0 +1,98 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e1594]:
+    - complementary [ref=e1595]:
+      - generic [ref=e1596]: 代账系统 MVP
+      - menubar [ref=e1597]:
+        - menuitem "客户开发" [ref=e1598] [cursor=pointer]:
+          - img [ref=e1600]
+          - generic [ref=e1602]: 客户开发
+        - menuitem "客户列表" [ref=e1603] [cursor=pointer]:
+          - img [ref=e1605]
+          - generic [ref=e1607]: 客户列表
+        - menuitem "地址资源" [ref=e1608] [cursor=pointer]:
+          - img [ref=e1610]
+          - generic [ref=e1613]: 地址资源
+        - menuitem "收费收款" [ref=e1614] [cursor=pointer]:
+          - img [ref=e1616]
+          - generic [ref=e1620]: 收费收款
+        - menuitem "成本与老板视图" [ref=e1621] [cursor=pointer]:
+          - img [ref=e1623]
+          - generic [ref=e1625]: 成本与老板视图
+    - generic [ref=e1626]:
+      - generic [ref=e1627]:
+        - generic [ref=e1628]: 客户开发、管理、收款
+        - generic [ref=e1629]:
+          - generic [ref=e1632]:
+            - img [ref=e1634] [cursor=pointer]
+            - text: accountant（会计）
+          - button "退出" [ref=e1637] [cursor=pointer]:
+            - generic [ref=e1638]: 退出
+      - main [ref=e1639]:
+        - generic [ref=e1640]:
+          - generic [ref=e1643]:
+            - generic [ref=e1644]:
+              - generic [ref=e1645]:
+                - generic [ref=e1646]: 关键词
+                - textbox "关键词" [ref=e1650]:
+                  - /placeholder: 客户/联系人/电话
+              - generic [ref=e1651]:
+                - generic [ref=e1652]: 状态
+                - generic [ref=e1655] [cursor=pointer]:
+                  - generic:
+                    - combobox "状态" [ref=e1657]
+                    - generic: 全部
+                  - img [ref=e1660]
+              - generic [ref=e1662]:
+                - generic [ref=e1663]: 模板筛选
+                - generic [ref=e1666] [cursor=pointer]:
+                  - generic:
+                    - combobox "模板筛选" [ref=e1668]
+                    - generic: 全部
+                  - img [ref=e1671]
+              - generic [ref=e1674]:
+                - button "查询" [ref=e1675] [cursor=pointer]:
+                  - generic [ref=e1676]: 查询
+                - button "新增线索" [ref=e1677] [cursor=pointer]:
+                  - generic [ref=e1678]: 新增线索
+                - button "流程说明" [ref=e1679] [cursor=pointer]:
+                  - generic [ref=e1680]: 流程说明
+                - button "导入 Excel" [ref=e1681] [cursor=pointer]:
+                  - generic [ref=e1682]: 导入 Excel
+            - generic [ref=e1683]: 当前排序：跟进中（按下次提醒） -> 新线索 -> 已丢失 -> 已转化（置底）
+          - generic [ref=e1685]:
+            - generic [ref=e1687]:
+              - generic [ref=e1688]: 客户开发总览（首页只保留核心字段）
+              - generic [ref=e1690]: 0 条
+            - generic [ref=e1693]:
+              - table [ref=e1695]:
+                - rowgroup [ref=e1708]:
+                  - row "序号 模板 公司名 联系人 电话 来源 等级 状态 下次提醒 最后跟进反馈 操作" [ref=e1709]:
+                    - columnheader "序号" [ref=e1710]:
+                      - generic [ref=e1711]: 序号
+                    - columnheader "模板" [ref=e1712]:
+                      - generic [ref=e1713]: 模板
+                    - columnheader "公司名" [ref=e1714]:
+                      - generic [ref=e1715]: 公司名
+                    - columnheader "联系人" [ref=e1716]:
+                      - generic [ref=e1717]: 联系人
+                    - columnheader "电话" [ref=e1718]:
+                      - generic [ref=e1719]: 电话
+                    - columnheader "来源" [ref=e1720]:
+                      - generic [ref=e1721]: 来源
+                    - columnheader "等级" [ref=e1722]:
+                      - generic [ref=e1723]: 等级
+                    - columnheader "状态" [ref=e1724]:
+                      - generic [ref=e1725]: 状态
+                    - columnheader "下次提醒" [ref=e1726]:
+                      - generic [ref=e1727]: 下次提醒
+                    - columnheader "最后跟进反馈" [ref=e1728]:
+                      - generic [ref=e1729]: 最后跟进反馈
+                    - columnheader "操作" [ref=e1730]:
+                      - generic [ref=e1731]: 操作
+              - generic [ref=e1735]:
+                - table:
+                  - rowgroup
+                - generic [ref=e1737]: 暂无数据
+  - alert [ref=e1739]:
+    - img [ref=e1741]
+    - paragraph [ref=e1743]: 登录成功

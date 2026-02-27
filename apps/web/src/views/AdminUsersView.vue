@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { apiClient } from "../api/client";
@@ -23,6 +23,7 @@ const activeTab = ref<"users" | "ldap" | "logs">("users");
 const loading = ref(false);
 const createLoading = ref(false);
 const editLoading = ref(false);
+const deleteLoadingUserId = ref<number | null>(null);
 const rows = ref<ManagedUser[]>([]);
 const showCreateDialog = ref(false);
 const showEditDialog = ref(false);
@@ -133,6 +134,7 @@ function actionLabel(action: string): string {
     LOGIN: "登录",
     USER_CREATED: "创建用户",
     USER_UPDATED: "更新用户",
+    USER_DELETED: "删除用户",
     LDAP_SETTINGS_UPDATED: "LDAP设置更新",
     LDAP_SYNC: "LDAP同步",
     LEAD_CREATED: "线索创建",
@@ -147,6 +149,29 @@ function actionLabel(action: string): string {
     ADDRESS_RESOURCE_UPDATED: "地址资源更新",
   };
   return map[action] || action;
+}
+
+function resolveErrorMessage(error: any, fallback: string): string {
+  const detail = error?.response?.data?.detail;
+  if (!detail || typeof detail !== "string") {
+    return fallback;
+  }
+  const map: Record<string, string> = {
+    "用户名已存在": "用户名已存在",
+    "Username already exists": "用户名已存在",
+    "用户名不能为空": "用户名不能为空",
+    "Username cannot be empty": "用户名不能为空",
+    "不能停用当前登录账号": "不能停用当前登录账号",
+    "Cannot deactivate yourself": "不能停用当前登录账号",
+    "不能删除当前登录账号": "不能删除当前登录账号",
+    "Cannot delete yourself": "不能删除当前登录账号",
+    "老板不能管理管理员账号": "老板不能管理管理员账号",
+    "Owner cannot manage admin users": "老板不能管理管理员账号",
+    "用户不存在": "用户不存在",
+    "User not found": "用户不存在",
+    "LDAP账号请在LDAP中停用或删除": "LDAP账号请在LDAP中停用或删除",
+  };
+  return map[detail] ?? detail;
 }
 
 function resetCreateForm() {
@@ -209,7 +234,7 @@ async function submitCreate() {
     showCreateDialog.value = false;
     await Promise.all([fetchUsers(), fetchLogs()]);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail ?? "创建失败");
+    ElMessage.error(resolveErrorMessage(error, "创建失败"));
   } finally {
     createLoading.value = false;
   }
@@ -263,9 +288,40 @@ async function submitEdit() {
     showEditDialog.value = false;
     await Promise.all([fetchUsers(), fetchLogs()]);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail ?? "更新失败");
+    ElMessage.error(resolveErrorMessage(error, "更新失败"));
   } finally {
     editLoading.value = false;
+  }
+}
+
+async function removeUser(row: ManagedUser) {
+  if (row.id === auth.user?.id) {
+    ElMessage.warning("不能删除当前登录账号");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除账号「${row.username}」吗？删除后无法登录，且仅无关联业务数据的账号可删除。`,
+      "删除确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  deleteLoadingUserId.value = row.id;
+  try {
+    await apiClient.delete(`/users/${row.id}`);
+    ElMessage.success("账号已删除");
+    await Promise.all([fetchUsers(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(resolveErrorMessage(error, "删除失败"));
+  } finally {
+    deleteLoadingUserId.value = null;
   }
 }
 
@@ -428,9 +484,18 @@ onMounted(async () => {
               <el-table-column label="创建时间" min-width="170">
                 <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="120" fixed="right">
+              <el-table-column label="操作" width="180" fixed="right">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
+                  <el-button
+                    link
+                    type="danger"
+                    :disabled="row.id === auth.user?.id"
+                    :loading="deleteLoadingUserId === row.id"
+                    @click="removeUser(row)"
+                  >
+                    删除
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>

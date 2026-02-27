@@ -36,7 +36,7 @@ def _ensure_owner_scope(current_user: User, target_role: str) -> None:
     if current_user.role == "OWNER" and target_role == "ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Owner cannot set LDAP default role to ADMIN",
+            detail="老板不能把 LDAP 默认角色设置为管理员",
         )
 
 

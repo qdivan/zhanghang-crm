@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Daizhang API"
+    app_name: str = "账航·一帆财税 API"
     environment: str = "dev"
     database_url: str = "sqlite+pysqlite:///./daizhang.db"
     jwt_secret: str = "change-me-in-production"

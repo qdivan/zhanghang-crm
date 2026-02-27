@@ -33,9 +33,9 @@
 8. 催收/收款：对台账记录追加日志 -> 自动更新已收/未收与台账状态。
    - `REMINDER` 类型金额固定 `0`，`PAYMENT` 才允许金额入账。
 9. 状态语义：由“颜色”迁移为结构化状态字段（清账/全欠/部分收费）。
-10. 用户管理：`ADMIN` 管理所有本地账号；`OWNER` 仅管理非管理员账号。
+10. 用户管理：`ADMIN` 管理所有本地账号；`OWNER` 仅管理非管理员账号；支持删除无关联业务数据的本地账号。
 11. LDAP 同步：管理员保存 LDAP 连接参数 -> 手动触发同步 -> 新增/更新本地账号。
-12. 审计日志：核心写操作与登录写入 `operation_logs`，管理员面板可检索。
+12. 审计日志：核心写操作与登录写入 `operation_logs`，管理员面板可检索；用户更新日志需记录字段 diff。
 
 ## 3. Data Model（MVP）
 
@@ -140,6 +140,7 @@
 1. `GET /api/v1/users`（OWNER/ADMIN；支持 `role`、`keyword`、`include_inactive`）
 2. `POST /api/v1/users`（OWNER/ADMIN；OWNER 不可创建 ADMIN）
 3. `PATCH /api/v1/users/{user_id}`（OWNER/ADMIN；OWNER 不可修改 ADMIN）
+4. `DELETE /api/v1/users/{user_id}`（OWNER/ADMIN；仅允许删除无关联数据本地账号）
 
 ### 4.8 Admin
 1. `GET /api/v1/admin/operation-logs`
@@ -181,10 +182,12 @@
    - 用户宽表：账号、角色、状态、创建时间
    - 登录时间：显示最近登录时间
    - 筛选：关键词、角色、状态
-   - 操作：新增本地用户、编辑角色/状态、重置密码
+   - 操作：新增本地用户、编辑角色/状态、重置密码、删除账号（有依赖则阻断）
    - LDAP：连接配置 + 手动同步
    - 审计：操作日志宽表（时间、操作人、动作、对象、详情）
    - 菜单显隐：仅 OWNER/ADMIN 可见
+9. 导航适配：
+   - 移动端改为抽屉菜单，避免固定侧栏挤压内容区。
 
 ## 6. Testing Strategy
 1. 后端：

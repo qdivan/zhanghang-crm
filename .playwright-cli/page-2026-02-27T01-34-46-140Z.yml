@@ -1,0 +1,50 @@
+- generic [ref=e2148]:
+  - complementary [ref=e2149]:
+    - generic [ref=e2150]: 代账系统 MVP
+    - menubar [ref=e2151]:
+      - menuitem "客户开发" [ref=e2152] [cursor=pointer]:
+        - img [ref=e2154]
+        - generic [ref=e2156]: 客户开发
+      - menuitem "客户列表" [ref=e2157] [cursor=pointer]:
+        - img [ref=e2159]
+        - generic [ref=e2161]: 客户列表
+      - menuitem "地址资源" [ref=e2162] [cursor=pointer]:
+        - img [ref=e2164]
+        - generic [ref=e2167]: 地址资源
+      - menuitem "收费收款" [ref=e2168] [cursor=pointer]:
+        - img [ref=e2170]
+        - generic [ref=e2174]: 收费收款
+      - menuitem "成本与老板视图" [active] [ref=e2175] [cursor=pointer]:
+        - img [ref=e2177]
+        - generic [ref=e2179]: 成本与老板视图
+      - menuitem "管理员面板" [ref=e2180] [cursor=pointer]:
+        - img [ref=e2182]
+        - generic [ref=e2184]: 管理员面板
+  - generic [ref=e2185]:
+    - generic [ref=e2186]:
+      - generic [ref=e2187]: 客户开发、管理、收款
+      - generic [ref=e2188]:
+        - generic [ref=e2191]:
+          - img [ref=e2193] [cursor=pointer]
+          - text: admin（管理员）
+        - button "退出" [ref=e2196] [cursor=pointer]:
+          - generic [ref=e2197]: 退出
+    - main [ref=e2198]:
+      - generic [ref=e4344]:
+        - generic [ref=e4346]:
+          - generic [ref=e4350]:
+            - generic [ref=e4351]: 本月应收
+            - generic [ref=e4352]: "128000"
+          - generic [ref=e4356]:
+            - generic [ref=e4357]: 本月实收
+            - generic [ref=e4358]: "96000"
+          - generic [ref=e4362]:
+            - generic [ref=e4363]: 逾期应收
+            - generic [ref=e4364]: "32000"
+        - generic [ref=e4366]:
+          - generic [ref=e4368]:
+            - generic [ref=e4369]: 老板视图（示例）
+            - generic [ref=e4371]: Phase 6
+          - generic [ref=e4373]:
+            - img [ref=e4375]
+            - paragraph [ref=e4392]: 下一步将实现：成本录入 + 客户利润明细

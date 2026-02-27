@@ -17,8 +17,9 @@ services:
       dockerfile: Dockerfile
     container_name: daizhang-api
     environment:
-      DATABASE_URL: sqlite+pysqlite:///./daizhang.db
+      DATABASE_URL: postgresql+psycopg://daizhang:daizhang@db:5432/daizhang
       JWT_SECRET: change-me-in-production
+      BOOTSTRAP_DEMO_DATA: "true"
     ports:
       - "8000:8000"
     depends_on:

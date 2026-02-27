@@ -35,4 +35,4 @@ def startup():
 
 @app.get("/")
 def root():
-    return {"message": "Daizhang API is running"}
+    return {"message": "账航·一帆财税 API is running"}
