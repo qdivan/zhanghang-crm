@@ -1,0 +1,102 @@
+- generic [ref=e31]:
+  - complementary [ref=e32]:
+    - generic [ref=e33]: 代账系统 MVP
+    - menubar [ref=e34]:
+      - menuitem "客户开发" [ref=e35] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e39]: 客户开发
+      - menuitem "客户列表" [ref=e40] [cursor=pointer]:
+        - img [ref=e42]
+        - generic [ref=e44]: 客户列表
+      - menuitem "地址资源" [ref=e45] [cursor=pointer]:
+        - img [ref=e47]
+        - generic [ref=e50]: 地址资源
+      - menuitem "收费收款" [ref=e51] [cursor=pointer]:
+        - img [ref=e53]
+        - generic [ref=e57]: 收费收款
+      - menuitem "成本与老板视图" [ref=e58] [cursor=pointer]:
+        - img [ref=e60]
+        - generic [ref=e62]: 成本与老板视图
+      - menuitem "管理员面板" [ref=e63] [cursor=pointer]:
+        - img [ref=e65]
+        - generic [ref=e67]: 管理员面板
+  - generic [ref=e68]:
+    - generic [ref=e69]:
+      - generic [ref=e70]: 客户开发、管理、收款
+      - generic [ref=e71]:
+        - generic [ref=e74]:
+          - img [ref=e76] [cursor=pointer]
+          - text: admin（管理员）
+        - button "退出" [ref=e79] [cursor=pointer]:
+          - generic [ref=e80]: 退出
+    - main [ref=e81]:
+      - generic [ref=e560]:
+        - alert [ref=e562]:
+          - generic [ref=e564]: 管理员可管理全部本地用户（含管理员）
+        - generic [ref=e566]:
+          - tablist [ref=e570]:
+            - tab "用户管理" [ref=e572]
+            - tab "LDAP 设置" [active] [selected] [ref=e573] [cursor=pointer]
+            - tab "操作日志" [ref=e574]
+          - tabpanel "LDAP 设置" [ref=e1535]:
+            - generic [ref=e1538]:
+              - generic [ref=e1539]:
+                - generic [ref=e1541]:
+                  - generic [ref=e1542]: 启用 LDAP
+                  - generic [ref=e1544]:
+                    - switch "启用 LDAP"
+                    - generic [ref=e1546] [cursor=pointer]: 停用
+                    - generic [ref=e1550] [cursor=pointer]: 启用
+                - generic [ref=e1552]:
+                  - generic [ref=e1553]: 默认角色
+                  - generic [ref=e1556] [cursor=pointer]:
+                    - generic:
+                      - combobox "默认角色" [ref=e1558]
+                      - generic [ref=e1559]: 会计
+                    - img [ref=e1562]
+                - group "同步状态" [ref=e1565]:
+                  - generic [ref=e1566]: 同步状态
+                  - generic [ref=e1569]: 未保存绑定密码
+              - generic [ref=e1570]:
+                - generic [ref=e1572]:
+                  - generic [ref=e1573]: 服务器地址
+                  - textbox "服务器地址" [ref=e1577]:
+                    - /placeholder: 如 ldap://192.168.1.10:389 或 ldaps://...
+                - generic [ref=e1579]:
+                  - generic [ref=e1580]: Base DN
+                  - textbox "Base DN" [ref=e1584]:
+                    - /placeholder: 如 dc=example,dc=com
+              - generic [ref=e1585]:
+                - generic [ref=e1587]:
+                  - generic [ref=e1588]: Bind DN
+                  - textbox "Bind DN" [ref=e1592]:
+                    - /placeholder: 如 uid=admin,cn=users,dc=example,dc=com
+                - generic [ref=e1594]:
+                  - generic [ref=e1595]: Bind Password（留空不修改）
+                  - textbox "Bind Password（留空不修改）" [ref=e1599]
+              - generic [ref=e1600]:
+                - generic [ref=e1602]:
+                  - generic [ref=e1603]: 用户搜索基准 DN
+                  - textbox "用户搜索基准 DN" [ref=e1607]:
+                    - /placeholder: 如 cn=users,dc=example,dc=com
+                - generic [ref=e1609]:
+                  - generic [ref=e1610]: 用户过滤器
+                  - textbox "用户过滤器" [ref=e1614]:
+                    - /placeholder: 如 (uid=*)
+                    - text: (uid=*)
+              - generic [ref=e1615]:
+                - generic [ref=e1617]:
+                  - generic [ref=e1618]: 用户名属性
+                  - textbox "用户名属性" [ref=e1622]:
+                    - /placeholder: 如 uid
+                    - text: uid
+                - generic [ref=e1624]:
+                  - generic [ref=e1625]: 显示名属性
+                  - textbox "显示名属性" [ref=e1629]:
+                    - /placeholder: 如 cn
+                    - text: cn
+              - generic [ref=e1630]:
+                - button "保存设置" [ref=e1632] [cursor=pointer]:
+                  - generic [ref=e1633]: 保存设置
+                - button "立即同步 LDAP 账号" [ref=e1635] [cursor=pointer]:
+                  - generic [ref=e1636]: 立即同步 LDAP 账号

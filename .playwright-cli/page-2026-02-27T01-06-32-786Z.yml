@@ -1,0 +1,128 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e31]:
+    - complementary [ref=e32]:
+      - generic [ref=e33]: 代账系统 MVP
+      - menubar [ref=e34]:
+        - menuitem "客户开发" [ref=e35] [cursor=pointer]:
+          - img [ref=e37]
+          - generic [ref=e39]: 客户开发
+        - menuitem "客户列表" [ref=e40] [cursor=pointer]:
+          - img [ref=e42]
+          - generic [ref=e44]: 客户列表
+        - menuitem "地址资源" [ref=e45] [cursor=pointer]:
+          - img [ref=e47]
+          - generic [ref=e50]: 地址资源
+        - menuitem "收费收款" [ref=e51] [cursor=pointer]:
+          - img [ref=e53]
+          - generic [ref=e57]: 收费收款
+        - menuitem "成本与老板视图" [ref=e58] [cursor=pointer]:
+          - img [ref=e60]
+          - generic [ref=e62]: 成本与老板视图
+        - menuitem "管理员面板" [ref=e63] [cursor=pointer]:
+          - img [ref=e65]
+          - generic [ref=e67]: 管理员面板
+    - generic [ref=e68]:
+      - generic [ref=e69]:
+        - generic [ref=e70]: 客户开发、管理、收款
+        - generic [ref=e71]:
+          - generic [ref=e74]:
+            - img [ref=e76] [cursor=pointer]
+            - text: boss（老板）
+          - button "退出" [ref=e79] [cursor=pointer]:
+            - generic [ref=e80]: 退出
+      - main [ref=e81]:
+        - generic [ref=e1435]:
+          - generic [ref=e1439]:
+            - button "返回客户开发" [ref=e1441] [cursor=pointer]:
+              - img [ref=e1443]
+              - generic [ref=e1445]: 返回客户开发
+            - button "编辑档案" [ref=e1447] [cursor=pointer]:
+              - generic [ref=e1448]: 编辑档案
+            - button "新增跟进" [ref=e1450] [cursor=pointer]:
+              - generic [ref=e1451]: 新增跟进
+            - button "查看线索详情" [ref=e1453] [cursor=pointer]:
+              - generic [ref=e1454]: 查看线索详情
+          - generic [ref=e1456]:
+            - generic [ref=e1458]:
+              - generic [ref=e1459]: 客户档案
+              - generic [ref=e1461]: 客户ID 6
+            - table [ref=e1465]:
+              - rowgroup [ref=e1466]:
+                - row "客户名称 回归测试客户-20260227-A 联系人 赵回归 电话 13922223333" [ref=e1467]:
+                  - cell "客户名称" [ref=e1468]
+                  - cell "回归测试客户-20260227-A" [ref=e1469]
+                  - cell "联系人" [ref=e1470]
+                  - cell "赵回归" [ref=e1471]
+                  - cell "电话" [ref=e1472]
+                  - cell "13922223333" [ref=e1473]
+                - row "分配会计 accountant 来源模板 客户跟进模板 等级 -" [ref=e1474]:
+                  - cell "分配会计" [ref=e1475]
+                  - cell "accountant" [ref=e1476]
+                  - cell "来源模板" [ref=e1477]
+                  - cell "客户跟进模板" [ref=e1478]
+                  - cell "等级" [ref=e1479]
+                  - cell "-" [ref=e1480]
+                - row "微信 - 传真 - 其他联系方式 -" [ref=e1481]:
+                  - cell "微信" [ref=e1482]
+                  - cell "-" [ref=e1483]
+                  - cell "传真" [ref=e1484]
+                  - cell "-" [ref=e1485]
+                  - cell "其他联系方式" [ref=e1486]
+                  - cell "-" [ref=e1487]
+                - row "地区 - 国家/类型 跨境电商 服务开始时间 -" [ref=e1488]:
+                  - cell "地区" [ref=e1489]
+                  - cell "-" [ref=e1490]
+                  - cell "国家/类型" [ref=e1491]
+                  - cell "跨境电商" [ref=e1492]
+                  - cell "服务开始时间" [ref=e1493]
+                  - cell "-" [ref=e1494]
+                - row "企业性质 - 服务方式 - 收费标准 -" [ref=e1495]:
+                  - cell "企业性质" [ref=e1496]
+                  - cell "-" [ref=e1497]
+                  - cell "服务方式" [ref=e1498]
+                  - cell "-" [ref=e1499]
+                  - cell "收费标准" [ref=e1500]
+                  - cell "-" [ref=e1501]
+                - row "首期账单期间 - 提醒值 - 下次提醒 -" [ref=e1502]:
+                  - cell "首期账单期间" [ref=e1503]
+                  - cell "-" [ref=e1504]
+                  - cell "提醒值" [ref=e1505]
+                  - cell "-" [ref=e1506]
+                  - cell "下次提醒" [ref=e1507]
+                  - cell "-" [ref=e1508]
+                - row "最后跟进日期 - 来源 转介绍+互联网 主营/需求 记账与税务筹划，重点看回款" [ref=e1509]:
+                  - cell "最后跟进日期" [ref=e1510]
+                  - cell "-" [ref=e1511]
+                  - cell "来源" [ref=e1512]
+                  - cell "转介绍+互联网" [ref=e1513]
+                  - cell "主营/需求" [ref=e1514]
+                  - cell "记账与税务筹划，重点看回款" [ref=e1515]
+                - row "介绍 老板说明：优先安排熟悉电商的会计" [ref=e1516]:
+                  - cell "介绍" [ref=e1517]
+                  - cell "老板说明：优先安排熟悉电商的会计" [ref=e1518]
+                - row "备注 老板备注：7天内完成签约" [ref=e1519]:
+                  - cell "备注" [ref=e1520]
+                  - cell "老板备注：7天内完成签约" [ref=e1521]
+          - generic [ref=e1523]:
+            - generic [ref=e1525]:
+              - generic [ref=e1526]: 跟进记录
+              - generic [ref=e1528]: 0 条
+            - generic [ref=e1531]:
+              - table [ref=e1533]:
+                - rowgroup [ref=e1539]:
+                  - row "跟进日期 跟进反馈 下次提醒 备注" [ref=e1540]:
+                    - columnheader "跟进日期" [ref=e1541]:
+                      - generic [ref=e1542]: 跟进日期
+                    - columnheader "跟进反馈" [ref=e1543]:
+                      - generic [ref=e1544]: 跟进反馈
+                    - columnheader "下次提醒" [ref=e1545]:
+                      - generic [ref=e1546]: 下次提醒
+                    - columnheader "备注" [ref=e1547]:
+                      - generic [ref=e1548]: 备注
+              - generic [ref=e1552]:
+                - table:
+                  - rowgroup
+                - generic [ref=e1554]: 暂无数据
+  - alert [ref=e1556]:
+    - img [ref=e1558]
+    - paragraph [ref=e1560]: 已转化为客户

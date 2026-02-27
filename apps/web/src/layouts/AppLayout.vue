@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { CollectionTag, Location, Management, Money, Setting, User } from "@element-plus/icons-vue";
+import {
+  CollectionTag,
+  Location,
+  Management,
+  Menu as MenuIcon,
+  Money,
+  Setting,
+  User,
+} from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "../stores/auth";
@@ -9,6 +17,8 @@ import { useAuthStore } from "../stores/auth";
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
+const isMobile = ref(false);
+const mobileMenuVisible = ref(false);
 
 const canOpenAdminPanel = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 
@@ -28,6 +38,7 @@ const menuItems = computed(() => {
 
 function onMenuSelect(path: string) {
   router.push(path);
+  mobileMenuVisible.value = false;
 }
 
 const activeMenu = computed(() => {
@@ -52,12 +63,35 @@ function logout() {
   ElMessage.success("已退出登录");
   router.push("/login");
 }
+
+function syncViewport() {
+  isMobile.value = window.matchMedia("(max-width: 900px)").matches;
+  if (!isMobile.value) {
+    mobileMenuVisible.value = false;
+  }
+}
+
+onMounted(() => {
+  syncViewport();
+  window.addEventListener("resize", syncViewport);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", syncViewport);
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    mobileMenuVisible.value = false;
+  },
+);
 </script>
 
 <template>
   <el-container class="app-shell">
-    <el-aside width="220px" class="side-menu">
-      <div class="logo">代账系统 MVP</div>
+    <el-aside v-if="!isMobile" width="220px" class="side-menu">
+      <div class="logo">账航·一帆财税</div>
       <el-menu
         :default-active="activeMenu"
         class="menu"
@@ -73,9 +107,41 @@ function logout() {
         </el-menu-item>
       </el-menu>
     </el-aside>
+    <el-drawer
+      v-if="isMobile"
+      v-model="mobileMenuVisible"
+      direction="ltr"
+      size="240px"
+      :with-header="false"
+      class="mobile-menu-drawer"
+    >
+      <div class="logo">账航·一帆财税</div>
+      <el-menu
+        :default-active="activeMenu"
+        class="menu"
+        @select="onMenuSelect"
+      >
+        <el-menu-item
+          v-for="item in menuItems"
+          :key="item.path"
+          :index="item.path"
+        >
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </el-menu-item>
+      </el-menu>
+    </el-drawer>
     <el-container>
       <el-header class="topbar">
-        <div class="title">客户开发、管理、收款</div>
+        <div class="top-left">
+          <el-button v-if="isMobile" circle plain size="small" @click="mobileMenuVisible = true">
+            <el-icon><MenuIcon /></el-icon>
+          </el-button>
+          <div>
+            <div class="title">账航·一帆财税</div>
+            <div class="subtitle">客户开发、管理、收款</div>
+          </div>
+        </div>
         <el-space>
           <el-tag type="info" effect="plain">
             <el-icon><User /></el-icon>
@@ -114,12 +180,18 @@ function logout() {
 }
 
 .topbar {
-  height: 56px;
+  min-height: 56px;
   border-bottom: 1px solid #e6e8eb;
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: #fff;
+}
+
+.top-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .title {
@@ -128,20 +200,39 @@ function logout() {
   color: #111827;
 }
 
+.subtitle {
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .main-area {
   background: #f7f8fa;
   padding: 16px;
+  overflow-x: auto;
 }
 
 @media (max-width: 900px) {
-  .side-menu {
-    width: 76px !important;
+  .topbar {
+    padding: 0 8px;
+    align-items: flex-start;
+    gap: 8px;
   }
 
-  .logo {
-    font-size: 12px;
-    line-height: 1.2;
-    padding: 14px 8px;
+  .title {
+    font-size: 14px;
+  }
+
+  .subtitle {
+    font-size: 11px;
+  }
+
+  .main-area {
+    padding: 10px;
+  }
+
+  .topbar :deep(.el-space) {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
 </style>

@@ -1,0 +1,20 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3720]:
+    - generic [ref=e3722]:
+      - generic [ref=e3723]: 代账系统登录
+      - generic [ref=e3724]: 本地账号（LDAP 二期接入）
+      - generic [ref=e3725]: 演示账号：boss / admin / accountant，密码均为 Demo@12345
+    - generic [ref=e3727]:
+      - generic [ref=e3728]:
+        - generic [ref=e3729]: 账号
+        - textbox "账号" [ref=e3733]:
+          - /placeholder: 请输入账号
+      - generic [ref=e3734]:
+        - generic [ref=e3735]: 密码
+        - textbox "密码" [ref=e3739]:
+          - /placeholder: 请输入密码
+      - button "登录" [ref=e3740] [cursor=pointer]:
+        - generic [ref=e3741]: 登录
+  - alert [ref=e3742]:
+    - img [ref=e3744]
+    - paragraph [ref=e3746]: 已退出登录

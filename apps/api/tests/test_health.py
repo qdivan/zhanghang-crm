@@ -426,6 +426,76 @@ def test_user_update_self_protection():
         assert change_self_role.status_code == 400
 
 
+def test_user_delete_flow_and_dependency_guard():
+    with TestClient(app) as client:
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "Demo@12345"},
+        )
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        create_response = client.post(
+            "/api/v1/users",
+            headers=headers,
+            json={
+                "username": "delete_me",
+                "password": "Demo@12345",
+                "role": "ACCOUNTANT",
+                "is_active": True,
+            },
+        )
+        assert create_response.status_code == 201
+        delete_id = create_response.json()["id"]
+
+        delete_response = client.delete(f"/api/v1/users/{delete_id}", headers=headers)
+        assert delete_response.status_code == 204
+
+        list_response = client.get("/api/v1/users", headers=headers, params={"include_inactive": True})
+        assert list_response.status_code == 200
+        assert all(item["id"] != delete_id for item in list_response.json())
+
+        login_deleted = client.post(
+            "/api/v1/auth/login",
+            json={"username": "delete_me", "password": "Demo@12345"},
+        )
+        assert login_deleted.status_code == 401
+
+        create_bound_user = client.post(
+            "/api/v1/users",
+            headers=headers,
+            json={
+                "username": "bound_acc",
+                "password": "Demo@12345",
+                "role": "ACCOUNTANT",
+                "is_active": True,
+            },
+        )
+        assert create_bound_user.status_code == 201
+        bound_user_id = create_bound_user.json()["id"]
+
+        bound_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "bound_acc", "password": "Demo@12345"},
+        )
+        assert bound_login.status_code == 200
+        bound_headers = {"Authorization": f"Bearer {bound_login.json()['access_token']}"}
+        bound_lead = client.post(
+            "/api/v1/leads",
+            headers=bound_headers,
+            json={
+                "template_type": "FOLLOWUP",
+                "name": "删除阻断测试线索",
+                "contact_name": "联系人",
+                "phone": "13800112233",
+            },
+        )
+        assert bound_lead.status_code == 201
+
+        blocked_delete = client.delete(f"/api/v1/users/{bound_user_id}", headers=headers)
+        assert blocked_delete.status_code == 400
+        assert "关联数据" in blocked_delete.json()["detail"]
+
+
 def test_login_updates_last_login_and_operation_log():
     with TestClient(app) as client:
         login_response = client.post(

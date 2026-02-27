@@ -1,4 +1,4 @@
-# 代账系统 MVP（SDD 驱动）
+# 账航·一帆财税（SDD 驱动）
 
 ## 当前状态
 1. 规格文档已落地到 `.sdd/`。
@@ -23,7 +23,7 @@
    - 收费序号为数字编号（可手填或自动递增），会计归属由客户分配关系继承
    - 台账状态（清账/全欠/部分收费）与已收/未收金额
    - 催收/收款日志（可登记收款、预付、结清）
-   - 管理员面板（用户检索、创建、编辑、重置密码）
+   - 管理员面板（用户检索、创建、编辑、删除、重置密码）
    - 用户权限边界：管理员可管理全部本地账号，老板仅可管理非管理员账号
    - 用户最近登录时间展示（管理员面板）
    - 操作日志（登录/用户管理/核心业务写操作）
@@ -53,7 +53,9 @@ cd infra
 docker compose up --build
 ```
 
-说明：基础镜像已改为 `docker.1ms.run` 镜像源（`api/web` 均基于 `python`，`db` 基于 `postgres`）。
+说明：
+1. `infra/docker-compose.yml` 主要用于本地开发（包含代码挂载、`--reload`）。
+2. 基础镜像使用 `docker.1ms.run` 镜像源（`api/web` 均基于 `python`，`db` 基于 `postgres`）。
 
 启动后：
 1. Web: `http://localhost:5173`
@@ -62,5 +64,15 @@ docker compose up --build
 4. 演示账号：`boss` / `admin` / `accountant` / `accountant2` / `accountant3` / `accountant4`，密码统一 `Demo@12345`
 
 备注：
-1. 当前开发模式默认使用 SQLite（`apps/api/daizhang.db`）。
-2. 为保证字段结构与代码同步，`ENVIRONMENT=dev` 下 API 启动会重建表结构并重新注入演示数据。
+1. `infra/docker-compose.yml` 默认使用 PostgreSQL（`db` 服务）。
+2. 本地直接运行后端时，默认数据库为 SQLite（`apps/api/daizhang.db`）。
+3. 可通过环境变量控制启动行为：
+   - `BOOTSTRAP_DEMO_DATA=true|false`（是否注入演示数据）
+   - `RESET_DB_ON_STARTUP=true|false`（是否启动时重建数据库）
+
+## 群晖 DS920+ 双环境部署（dev + prd）
+- 部署文档：`infra/DEPLOY_SYNOLOGY.md`
+- 关键文件：
+  - `infra/docker-compose.dev.yml`
+  - `infra/docker-compose.prd.yml`
+  - `.github/workflows/build-and-deploy-synology.yml`

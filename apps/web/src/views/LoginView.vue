@@ -40,7 +40,7 @@ async function login() {
     <el-card class="login-card" shadow="never">
       <template #header>
         <div class="head">
-          <div class="title">代账系统登录</div>
+          <div class="title">账航·一帆财税</div>
           <div class="subtitle">本地账号（LDAP 二期接入）</div>
           <div class="hint">演示账号：boss / admin / accountant，密码均为 Demo@12345</div>
         </div>

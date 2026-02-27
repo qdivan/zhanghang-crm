@@ -1,0 +1,250 @@
+- generic [ref=e2148]:
+  - complementary [ref=e2149]:
+    - generic [ref=e2150]: 代账系统 MVP
+    - menubar [ref=e2151]:
+      - menuitem "客户开发" [ref=e2152] [cursor=pointer]:
+        - img [ref=e2154]
+        - generic [ref=e2156]: 客户开发
+      - menuitem "客户列表" [ref=e2157] [cursor=pointer]:
+        - img [ref=e2159]
+        - generic [ref=e2161]: 客户列表
+      - menuitem "地址资源" [ref=e2162] [cursor=pointer]:
+        - img [ref=e2164]
+        - generic [ref=e2167]: 地址资源
+      - menuitem "收费收款" [ref=e2168] [cursor=pointer]:
+        - img [ref=e2170]
+        - generic [ref=e2174]: 收费收款
+      - menuitem "成本与老板视图" [ref=e2175] [cursor=pointer]:
+        - img [ref=e2177]
+        - generic [ref=e2179]: 成本与老板视图
+      - menuitem "管理员面板" [ref=e2180] [cursor=pointer]:
+        - img [ref=e2182]
+        - generic [ref=e2184]: 管理员面板
+  - generic [ref=e2185]:
+    - generic [ref=e2186]:
+      - generic [ref=e2187]: 客户开发、管理、收款
+      - generic [ref=e2188]:
+        - generic [ref=e2191]:
+          - img [ref=e2193] [cursor=pointer]
+          - text: admin（管理员）
+        - button "退出" [ref=e2196] [cursor=pointer]:
+          - generic [ref=e2197]: 退出
+    - main [ref=e2198]:
+      - generic [ref=e2677]:
+        - alert [ref=e2679]:
+          - generic [ref=e2681]: 管理员可管理全部本地用户（含管理员）
+        - generic [ref=e2683]:
+          - tablist [ref=e2687]:
+            - tab "用户管理" [selected] [ref=e2689]
+            - tab "LDAP 设置" [ref=e2690]
+            - tab "操作日志" [ref=e2691]
+          - tabpanel "用户管理" [ref=e2693]:
+            - generic [ref=e2694]:
+              - generic [ref=e2698]:
+                - generic [ref=e2699]:
+                  - generic [ref=e2700]: 关键词
+                  - textbox "关键词" [ref=e2704]:
+                    - /placeholder: 用户名/角色
+                - generic [ref=e2705]:
+                  - generic [ref=e2706]: 角色
+                  - generic [ref=e2709] [cursor=pointer]:
+                    - generic:
+                      - combobox "角色" [ref=e2711]
+                      - generic: 全部
+                    - img [ref=e2714]
+                - generic [ref=e2716]:
+                  - generic [ref=e2717]: 状态
+                  - generic [ref=e2720] [cursor=pointer]:
+                    - generic:
+                      - combobox "状态" [ref=e2722]
+                      - generic: 全部
+                    - img [ref=e2725]
+                - generic [ref=e2728]:
+                  - button "查询" [ref=e2729] [cursor=pointer]:
+                    - generic [ref=e2730]: 查询
+                  - button "新增用户" [ref=e2731] [cursor=pointer]:
+                    - generic [ref=e2732]: 新增用户
+              - generic [ref=e2734]:
+                - generic [ref=e2736]:
+                  - generic [ref=e2737]: 用户管理
+                  - generic [ref=e2739]: 7 人
+                - generic [ref=e2742]:
+                  - table [ref=e2744]:
+                    - rowgroup [ref=e2754]:
+                      - row "ID 账号 账号来源 角色 状态 最近登录 创建时间 操作" [ref=e2755]:
+                        - columnheader "ID" [ref=e2756]:
+                          - generic [ref=e2757]: ID
+                        - columnheader "账号" [ref=e2758]:
+                          - generic [ref=e2759]: 账号
+                        - columnheader "账号来源" [ref=e2760]:
+                          - generic [ref=e2761]: 账号来源
+                        - columnheader "角色" [ref=e2762]:
+                          - generic [ref=e2763]: 角色
+                        - columnheader "状态" [ref=e2764]:
+                          - generic [ref=e2765]: 状态
+                        - columnheader "最近登录" [ref=e2766]:
+                          - generic [ref=e2767]: 最近登录
+                        - columnheader "创建时间" [ref=e2768]:
+                          - generic [ref=e2769]: 创建时间
+                        - columnheader "操作" [ref=e2770]:
+                          - generic [ref=e2771]: 操作
+                  - table [ref=e2776]:
+                    - rowgroup [ref=e2786]:
+                      - row "1 boss 本地 老板 启用 2026/2/27 01:18:48 2026/2/26 15:36:54 编辑" [ref=e2787]:
+                        - cell "1" [ref=e2788]:
+                          - generic [ref=e2789]: "1"
+                        - cell "boss" [ref=e2790]:
+                          - generic [ref=e2791]: boss
+                        - cell "本地" [ref=e2792]:
+                          - generic [ref=e2793]: 本地
+                        - cell "老板" [ref=e2794]:
+                          - generic [ref=e2797]: 老板
+                        - cell "启用" [ref=e2798]:
+                          - generic [ref=e2801]: 启用
+                        - cell "2026/2/27 01:18:48" [ref=e2802]:
+                          - generic [ref=e2803]: 2026/2/27 01:18:48
+                        - cell "2026/2/26 15:36:54" [ref=e2804]:
+                          - generic [ref=e2805]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2806]:
+                          - button "编辑" [ref=e2808] [cursor=pointer]:
+                            - generic [ref=e2809]: 编辑
+                      - row "2 admin 本地 管理员 启用 2026/2/27 01:32:03 2026/2/26 15:36:54 编辑" [ref=e2810]:
+                        - cell "2" [ref=e2811]:
+                          - generic [ref=e2812]: "2"
+                        - cell "admin" [ref=e2813]:
+                          - generic [ref=e2814]: admin
+                        - cell "本地" [ref=e2815]:
+                          - generic [ref=e2816]: 本地
+                        - cell "管理员" [ref=e2817]:
+                          - generic [ref=e2820]: 管理员
+                        - cell "启用" [ref=e2821]:
+                          - generic [ref=e2824]: 启用
+                        - cell "2026/2/27 01:32:03" [ref=e2825]:
+                          - generic [ref=e2826]: 2026/2/27 01:32:03
+                        - cell "2026/2/26 15:36:54" [ref=e2827]:
+                          - generic [ref=e2828]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2829]:
+                          - button "编辑" [ref=e2831] [cursor=pointer]:
+                            - generic [ref=e2832]: 编辑
+                      - row "3 accountant 本地 会计 启用 2026/2/27 01:18:48 2026/2/26 15:36:54 编辑" [ref=e2833]:
+                        - cell "3" [ref=e2834]:
+                          - generic [ref=e2835]: "3"
+                        - cell "accountant" [ref=e2836]:
+                          - generic [ref=e2837]: accountant
+                        - cell "本地" [ref=e2838]:
+                          - generic [ref=e2839]: 本地
+                        - cell "会计" [ref=e2840]:
+                          - generic [ref=e2843]: 会计
+                        - cell "启用" [ref=e2844]:
+                          - generic [ref=e2847]: 启用
+                        - cell "2026/2/27 01:18:48" [ref=e2848]:
+                          - generic [ref=e2849]: 2026/2/27 01:18:48
+                        - cell "2026/2/26 15:36:54" [ref=e2850]:
+                          - generic [ref=e2851]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2852]:
+                          - button "编辑" [ref=e2854] [cursor=pointer]:
+                            - generic [ref=e2855]: 编辑
+                      - row "4 accountant2 本地 会计 启用 2026/2/27 01:18:48 2026/2/26 15:36:54 编辑" [ref=e2856]:
+                        - cell "4" [ref=e2857]:
+                          - generic [ref=e2858]: "4"
+                        - cell "accountant2" [ref=e2859]:
+                          - generic [ref=e2860]: accountant2
+                        - cell "本地" [ref=e2861]:
+                          - generic [ref=e2862]: 本地
+                        - cell "会计" [ref=e2863]:
+                          - generic [ref=e2866]: 会计
+                        - cell "启用" [ref=e2867]:
+                          - generic [ref=e2870]: 启用
+                        - cell "2026/2/27 01:18:48" [ref=e2871]:
+                          - generic [ref=e2872]: 2026/2/27 01:18:48
+                        - cell "2026/2/26 15:36:54" [ref=e2873]:
+                          - generic [ref=e2874]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2875]:
+                          - button "编辑" [ref=e2877] [cursor=pointer]:
+                            - generic [ref=e2878]: 编辑
+                      - row "5 accountant3 本地 会计 启用 - 2026/2/26 15:36:54 编辑" [ref=e2879]:
+                        - cell "5" [ref=e2880]:
+                          - generic [ref=e2881]: "5"
+                        - cell "accountant3" [ref=e2882]:
+                          - generic [ref=e2883]: accountant3
+                        - cell "本地" [ref=e2884]:
+                          - generic [ref=e2885]: 本地
+                        - cell "会计" [ref=e2886]:
+                          - generic [ref=e2889]: 会计
+                        - cell "启用" [ref=e2890]:
+                          - generic [ref=e2893]: 启用
+                        - cell "-" [ref=e2894]:
+                          - generic [ref=e2895]: "-"
+                        - cell "2026/2/26 15:36:54" [ref=e2896]:
+                          - generic [ref=e2897]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2898]:
+                          - button "编辑" [ref=e2900] [cursor=pointer]:
+                            - generic [ref=e2901]: 编辑
+                      - row "6 accountant4 本地 会计 启用 - 2026/2/26 15:36:54 编辑" [ref=e2902]:
+                        - cell "6" [ref=e2903]:
+                          - generic [ref=e2904]: "6"
+                        - cell "accountant4" [ref=e2905]:
+                          - generic [ref=e2906]: accountant4
+                        - cell "本地" [ref=e2907]:
+                          - generic [ref=e2908]: 本地
+                        - cell "会计" [ref=e2909]:
+                          - generic [ref=e2912]: 会计
+                        - cell "启用" [ref=e2913]:
+                          - generic [ref=e2916]: 启用
+                        - cell "-" [ref=e2917]:
+                          - generic [ref=e2918]: "-"
+                        - cell "2026/2/26 15:36:54" [ref=e2919]:
+                          - generic [ref=e2920]: 2026/2/26 15:36:54
+                        - cell "编辑" [ref=e2921]:
+                          - button "编辑" [ref=e2923] [cursor=pointer]:
+                            - generic [ref=e2924]: 编辑
+                      - row "7 qa_acc_0227 本地 会计 停用 - 2026/2/27 01:28:56 编辑" [ref=e2925]:
+                        - cell "7" [ref=e2926]:
+                          - generic [ref=e2927]: "7"
+                        - cell "qa_acc_0227" [ref=e2928]:
+                          - generic [ref=e2929]: qa_acc_0227
+                        - cell "本地" [ref=e2930]:
+                          - generic [ref=e2931]: 本地
+                        - cell "会计" [ref=e2932]:
+                          - generic [ref=e2935]: 会计
+                        - cell "停用" [ref=e2936]:
+                          - generic [ref=e2939]: 停用
+                        - cell "-" [ref=e2940]:
+                          - generic [ref=e2941]: "-"
+                        - cell "2026/2/27 01:28:56" [ref=e2942]:
+                          - generic [ref=e2943]: 2026/2/27 01:28:56
+                        - cell "编辑" [ref=e2944]:
+                          - button "编辑" [ref=e2946] [cursor=pointer]:
+                            - generic [ref=e2947]: 编辑
+      - dialog "编辑用户" [ref=e2950]:
+        - generic [active] [ref=e2951]:
+          - generic [ref=e2952]:
+            - heading "编辑用户" [level=2] [ref=e2953]
+            - button "关闭此对话框" [ref=e2954] [cursor=pointer]:
+              - img [ref=e2956]
+          - generic [ref=e2959]:
+            - generic [ref=e2960]:
+              - generic [ref=e2961]: 用户名
+              - textbox "用户名" [ref=e2965]: qa_acc_0227
+            - generic [ref=e2966]:
+              - generic [ref=e2968]:
+                - generic [ref=e2969]: 角色
+                - generic [ref=e2972] [cursor=pointer]:
+                  - generic:
+                    - combobox "角色" [ref=e2974]
+                    - generic [ref=e2975]: 会计
+                  - img [ref=e2978]
+              - generic [ref=e2981]:
+                - generic [ref=e2982]: 状态
+                - generic [ref=e2984]:
+                  - switch "状态" [checked]
+                  - generic [ref=e2986] [cursor=pointer]: 停用
+                  - generic [ref=e2990] [cursor=pointer]: 启用
+            - generic [ref=e2991]:
+              - generic [ref=e2992]: 新密码（留空表示不修改）
+              - textbox "新密码（留空表示不修改）" [ref=e2996]
+          - generic [ref=e2997]:
+            - button "取消" [ref=e2998] [cursor=pointer]:
+              - generic [ref=e2999]: 取消
+            - button "保存" [ref=e3000] [cursor=pointer]:
+              - generic [ref=e3001]: 保存

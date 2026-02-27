@@ -3,17 +3,17 @@
     <el-row :gutter="12">
       <el-col :xs="24" :md="8">
         <el-card shadow="never">
-          <el-statistic title="本月应收" value="128000" />
+          <el-statistic title="本月应收" :value="128000" />
         </el-card>
       </el-col>
       <el-col :xs="24" :md="8">
         <el-card shadow="never">
-          <el-statistic title="本月实收" value="96000" />
+          <el-statistic title="本月实收" :value="96000" />
         </el-card>
       </el-col>
       <el-col :xs="24" :md="8">
         <el-card shadow="never">
-          <el-statistic title="逾期应收" value="32000" />
+          <el-statistic title="逾期应收" :value="32000" />
         </el-card>
       </el-col>
     </el-row>

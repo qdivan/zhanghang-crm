@@ -18,10 +18,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
     if user is None or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
 
     if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
 
     user.last_login_at = datetime.utcnow()
     write_operation_log(

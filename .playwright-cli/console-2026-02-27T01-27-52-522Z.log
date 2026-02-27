@@ -1,0 +1,47 @@
+[  220529ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8000/api/v1/auth/login:0
+[  411501ms] [WARNING] [Vue warn]: Invalid prop: type check failed for prop "value". Expected Number | Object, got String with value "128000". 
+  at <ElStatistic title="本月应收" value="128000" > 
+  at <ElCard shadow="never" > 
+  at <ElCol xs=24 md=8 > 
+  at <ElRow gutter=12 > 
+  at <ElSpaceItem style= {flexGrow: 1, minWidth: 100%} prefixCls=undefined key="LoopKey0" > 
+  at <ElSpace direction="vertical" fill="" size=12 > 
+  at <CostView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
+  at <RouterView> 
+  at <ElMain class="main-area" > 
+  at <ElContainer> 
+  at <ElContainer class="app-shell" > 
+  at <AppLayout onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< Proxy(Object) > > 
+  at <RouterView> 
+  at <App> @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-QBCJGSCF.js?v=1815bc82:2196
+[  411503ms] [WARNING] [Vue warn]: Invalid prop: type check failed for prop "value". Expected Number | Object, got String with value "96000". 
+  at <ElStatistic title="本月实收" value="96000" > 
+  at <ElCard shadow="never" > 
+  at <ElCol xs=24 md=8 > 
+  at <ElRow gutter=12 > 
+  at <ElSpaceItem style= {flexGrow: 1, minWidth: 100%} prefixCls=undefined key="LoopKey0" > 
+  at <ElSpace direction="vertical" fill="" size=12 > 
+  at <CostView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
+  at <RouterView> 
+  at <ElMain class="main-area" > 
+  at <ElContainer> 
+  at <ElContainer class="app-shell" > 
+  at <AppLayout onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< Proxy(Object) > > 
+  at <RouterView> 
+  at <App> @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-QBCJGSCF.js?v=1815bc82:2196
+[  411503ms] [WARNING] [Vue warn]: Invalid prop: type check failed for prop "value". Expected Number | Object, got String with value "32000". 
+  at <ElStatistic title="逾期应收" value="32000" > 
+  at <ElCard shadow="never" > 
+  at <ElCol xs=24 md=8 > 
+  at <ElRow gutter=12 > 
+  at <ElSpaceItem style= {flexGrow: 1, minWidth: 100%} prefixCls=undefined key="LoopKey0" > 
+  at <ElSpace direction="vertical" fill="" size=12 > 
+  at <CostView onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< null > > 
+  at <RouterView> 
+  at <ElMain class="main-area" > 
+  at <ElContainer> 
+  at <ElContainer class="app-shell" > 
+  at <AppLayout onVnodeUnmounted=fn<onVnodeUnmounted> ref=Ref< Proxy(Object) > > 
+  at <RouterView> 
+  at <App> @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-QBCJGSCF.js?v=1815bc82:2196
+[  592925ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://127.0.0.1:8000/api/v1/users:0
