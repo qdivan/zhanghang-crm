@@ -1,0 +1,357 @@
+{
+  "generated_at": "2026-02-27T06:39:16Z",
+  "run_ts": "1772174355",
+  "summary": {
+    "total": 37,
+    "pass": 34,
+    "fail": 3
+  },
+  "entities": {
+    "new_accountant": {
+      "username": "qa_flow_acc_1772174355",
+      "id": "13"
+    },
+    "lead": {
+      "name": "闭环线索_1772174355",
+      "id": "17"
+    },
+    "customer_id": "9",
+    "billing_record_id": "8",
+    "address_key": "资源_EDGE_1772174355"
+  },
+  "cases": [
+    {
+      "id": "AUTH-01",
+      "role": "boss",
+      "phase": "login",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "老板登录"
+    },
+    {
+      "id": "AUTH-02",
+      "role": "admin",
+      "phase": "login",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "管理员登录"
+    },
+    {
+      "id": "AUTH-03",
+      "role": "accountant2",
+      "phase": "login",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "既有会计登录"
+    },
+    {
+      "id": "ONB-01",
+      "role": "admin",
+      "phase": "onboarding",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "管理员创建入职会计"
+    },
+    {
+      "id": "ONB-02",
+      "role": "admin",
+      "phase": "onboarding",
+      "expected": "HTTP 400",
+      "actual": "HTTP 400",
+      "status": "PASS",
+      "note": "重复用户名被拒绝"
+    },
+    {
+      "id": "ONB-03",
+      "role": "boss",
+      "phase": "onboarding",
+      "expected": "HTTP 403",
+      "actual": "HTTP 403",
+      "status": "PASS",
+      "note": "老板不能管理管理员账号"
+    },
+    {
+      "id": "LEAD-01",
+      "role": "boss",
+      "phase": "resource_collect",
+      "expected": "HTTP 422",
+      "actual": "HTTP 422",
+      "status": "PASS",
+      "note": "线索字段校验生效（name太短）"
+    },
+    {
+      "id": "LEAD-02",
+      "role": "boss",
+      "phase": "resource_collect",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "创建主线索（转介绍）"
+    },
+    {
+      "id": "LEAD-03",
+      "role": "boss",
+      "phase": "resource_collect",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "创建互联网来源线索"
+    },
+    {
+      "id": "LEAD-04",
+      "role": "boss",
+      "phase": "resource_collect",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "创建转介绍来源线索"
+    },
+    {
+      "id": "LEAD-05",
+      "role": "boss",
+      "phase": "resource_collect",
+      "expected": "find>=1",
+      "actual": "find=1",
+      "status": "PASS",
+      "note": "关键字前后空格可检索"
+    },
+    {
+      "id": "LEAD-06",
+      "role": "boss",
+      "phase": "convert",
+      "expected": "HTTP 400",
+      "actual": "HTTP 400",
+      "status": "PASS",
+      "note": "老板线索不传会计ID被拒绝"
+    },
+    {
+      "id": "FLOW-01",
+      "role": "boss",
+      "phase": "convert_assign",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "线索转客户并分配给新会计"
+    },
+    {
+      "id": "FLOW-02",
+      "role": "admin",
+      "phase": "billing_create",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "管理员创建账单"
+    },
+    {
+      "id": "FLOW-03",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "login",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "新会计登录"
+    },
+    {
+      "id": "FLOW-04",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "followup",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "新会计提交跟进"
+    },
+    {
+      "id": "FLOW-05",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "reminder",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "新会计提交催收"
+    },
+    {
+      "id": "FLOW-06",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "payment",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "首笔收款"
+    },
+    {
+      "id": "FLOW-07",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "billing_numbers",
+      "expected": "received=1200,outstanding=2400,status=PARTIAL",
+      "actual": "{\"received_amount\":1200.0,\"outstanding_amount\":2400.0,\"status\":\"PARTIAL\"}",
+      "status": "PASS",
+      "note": "首笔收款后数字正确"
+    },
+    {
+      "id": "FLOW-08",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "payment_settlement",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "结清收款"
+    },
+    {
+      "id": "FLOW-09",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "billing_numbers",
+      "expected": "received=3600,outstanding=0,status=CLEARED",
+      "actual": "{\"received_amount\":3600.0,\"outstanding_amount\":0.0,\"status\":\"CLEARED\"}",
+      "status": "PASS",
+      "note": "结清后数字正确"
+    },
+    {
+      "id": "FLOW-10",
+      "role": "admin",
+      "phase": "summary_compare",
+      "expected": "summary available",
+      "actual": "before={\"total_fee\":32800.0,\"total_records\":8} after={\"total_fee\":32800.0,\"total_records\":8}",
+      "status": "PASS",
+      "note": "汇总接口可用，供人工对比总盘子"
+    },
+    {
+      "id": "OFF-01",
+      "role": "admin",
+      "phase": "handover",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "离职前将客户移交给accountant2"
+    },
+    {
+      "id": "OFF-02",
+      "role": "admin",
+      "phase": "deactivate",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "停用离职会计"
+    },
+    {
+      "id": "OFF-03",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "deactivate_effect",
+      "expected": "HTTP 401",
+      "actual": "HTTP 401",
+      "status": "PASS",
+      "note": "停用后无法登录"
+    },
+    {
+      "id": "OFF-04",
+      "role": "qa_flow_acc_1772174355",
+      "phase": "token_invalid",
+      "expected": "HTTP 401",
+      "actual": "HTTP 401",
+      "status": "PASS",
+      "note": "停用后旧token失效"
+    },
+    {
+      "id": "OFF-05",
+      "role": "admin",
+      "phase": "delete_blocked",
+      "expected": "HTTP 400",
+      "actual": "HTTP 400",
+      "status": "PASS",
+      "note": "存在依赖无法删除: 该账号存在关联数据，无法删除（催收收款日志=3, 操作日志=5）"
+    },
+    {
+      "id": "OFF-06",
+      "role": "accountant2",
+      "phase": "lead_access_detail",
+      "expected": "HTTP 200",
+      "actual": "HTTP 200",
+      "status": "PASS",
+      "note": "移交后会计可访问线索详情"
+    },
+    {
+      "id": "OFF-07",
+      "role": "accountant2",
+      "phase": "lead_access_list",
+      "expected": "list should include assigned converted lead",
+      "actual": "hit=0",
+      "status": "FAIL",
+      "note": "详情可见但列表不可见，权限逻辑不一致"
+    },
+    {
+      "id": "OFF-08",
+      "role": "admin",
+      "phase": "temp_create",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "创建无依赖测试账号"
+    },
+    {
+      "id": "OFF-09",
+      "role": "admin",
+      "phase": "temp_delete",
+      "expected": "HTTP 204",
+      "actual": "HTTP 204",
+      "status": "PASS",
+      "note": "无依赖账号可删除"
+    },
+    {
+      "id": "ADDR-01",
+      "role": "boss",
+      "phase": "address_create",
+      "expected": "HTTP 201",
+      "actual": "HTTP 201",
+      "status": "PASS",
+      "note": "正常创建地址资源"
+    },
+    {
+      "id": "ADDR-02",
+      "role": "boss",
+      "phase": "address_empty_payload",
+      "expected": "HTTP 400 or stricter validation",
+      "actual": "HTTP 201",
+      "status": "FAIL",
+      "note": "空payload被接受，易产生脏数据"
+    },
+    {
+      "id": "ADDR-03",
+      "role": "boss",
+      "phase": "address_length_validation",
+      "expected": "HTTP 422",
+      "actual": "HTTP 422",
+      "status": "PASS",
+      "note": "长度校验生效"
+    },
+    {
+      "id": "ADDR-04",
+      "role": "boss",
+      "phase": "address_search",
+      "expected": "hit>=1",
+      "actual": "hit=1",
+      "status": "PASS",
+      "note": "资源关键字空格检索正常"
+    },
+    {
+      "id": "ADDR-05",
+      "role": "boss",
+      "phase": "address_patch_notfound",
+      "expected": "HTTP 404",
+      "actual": "HTTP 404",
+      "status": "PASS",
+      "note": "不存在资源返回404"
+    },
+    {
+      "id": "ADDR-06",
+      "role": "boss",
+      "phase": "address_patch_null",
+      "expected": "HTTP 200/4xx graceful",
+      "actual": "HTTP 500",
+      "status": "FAIL",
+      "note": "null字段触发500，后端未做空值防护"
+    }
+  ]
+}

@@ -48,7 +48,7 @@ onMounted(fetchCustomers);
 <template>
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
-      <el-form inline @submit.prevent="fetchCustomers">
+      <el-form inline @submit.prevent="fetchCustomers" class="customers-filter-form">
         <el-form-item label="关键词">
           <el-input
             v-model="keyword"
@@ -72,23 +72,69 @@ onMounted(fetchCustomers);
       </template>
       <el-table v-loading="loading" :data="rows" stripe border>
         <el-table-column prop="id" label="客户ID" width="90" />
-        <el-table-column label="客户名称" min-width="200">
+        <el-table-column label="客户名称" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <el-button link type="primary" @click="openCustomerDetail(row)">{{ row.name }}</el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="contact_name" label="联系人" width="120" />
-        <el-table-column prop="phone" label="电话" width="140" />
-        <el-table-column prop="accountant_username" label="会计" width="120" />
-        <el-table-column label="来源模板" width="100">
+        <el-table-column
+          prop="contact_name"
+          label="联系人"
+          width="110"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="phone"
+          label="电话"
+          width="130"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="accountant_username"
+          label="会计"
+          width="110"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          label="来源模板"
+          width="95"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">{{ templateLabel(row.source_template_type) }}</template>
         </el-table-column>
-        <el-table-column prop="source_grade" label="等级" width="80" />
-        <el-table-column prop="source_last_followup_date" label="最后跟进" width="120" />
-        <el-table-column prop="source_reminder_value" label="提醒值" width="100" />
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column
+          prop="source_grade"
+          label="等级"
+          width="70"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="source_last_followup_date"
+          label="最后跟进"
+          width="110"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="source_reminder_value"
+          label="提醒值"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          label="操作"
+          width="150"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">
-            <el-space>
+            <el-space class="table-action-wrap">
               <el-button link type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
               <el-button link @click="openLeadDetail(row)">线索详情</el-button>
             </el-space>
@@ -104,5 +150,12 @@ onMounted(fetchCustomers);
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+@media (max-width: 900px) {
+  .customers-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>

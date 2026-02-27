@@ -333,7 +333,7 @@ onMounted(async () => {
     </el-row>
 
     <el-card shadow="never">
-      <el-form inline @submit.prevent="fetchRecords">
+      <el-form inline @submit.prevent="fetchRecords" class="billing-filter-form">
         <el-form-item label="关键词">
           <el-input
             v-model="filters.keyword"
@@ -374,32 +374,100 @@ onMounted(async () => {
         </div>
       </template>
       <el-table v-loading="loading" :data="rows" stripe border>
-        <el-table-column prop="serial_no" label="序号" width="90" />
-        <el-table-column label="名称" min-width="170">
+        <el-table-column
+          prop="serial_no"
+          label="序号"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column label="名称" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <el-button link type="primary" @click="openCustomerDetail(row)">
               {{ row.customer_name }}
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="accountant_username" label="会计" width="110" />
-        <el-table-column prop="total_fee" label="总费用" width="95" />
-        <el-table-column prop="received_amount" label="已收" width="90" />
-        <el-table-column prop="outstanding_amount" label="未收" width="90" />
-        <el-table-column label="状态" width="100">
+        <el-table-column
+          prop="accountant_username"
+          label="会计"
+          width="100"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="total_fee"
+          label="总费用"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="received_amount"
+          label="已收"
+          width="85"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column prop="outstanding_amount" label="未收" width="80" />
+        <el-table-column
+          label="状态"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">
               {{ statusLabel(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="monthly_fee" label="月费用" width="90" />
-        <el-table-column prop="billing_cycle_text" label="代账周期" min-width="220" />
-        <el-table-column prop="due_month" label="到期日" width="110" />
-        <el-table-column prop="payment_method" label="付款方式" width="100" />
-        <el-table-column prop="note" label="备注" min-width="220" />
-        <el-table-column prop="extra_note" label="扩展" min-width="160" />
-        <el-table-column label="操作" width="110" fixed="right">
+        <el-table-column
+          prop="monthly_fee"
+          label="月费用"
+          width="85"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="billing_cycle_text"
+          label="代账周期"
+          min-width="170"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="due_month"
+          label="到期日"
+          width="100"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="payment_method"
+          label="付款方式"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="note"
+          label="备注"
+          min-width="160"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="extra_note"
+          label="扩展"
+          min-width="120"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column label="操作" width="88">
           <template #default="{ row }">
             <el-button link type="primary" @click="openActivityDrawer(row)">催收/收款</el-button>
           </template>
@@ -526,7 +594,11 @@ onMounted(async () => {
     </template>
   </el-dialog>
 
-  <el-drawer v-model="showActivityDrawer" :title="`催收/收款 - ${selectedRecord?.customer_name ?? ''}`" size="50%">
+  <el-drawer
+    v-model="showActivityDrawer"
+    :title="`催收/收款 - ${selectedRecord?.customer_name ?? ''}`"
+    size="min(760px, 92vw)"
+  >
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="8">
@@ -623,10 +695,29 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="amount" label="金额" width="90" />
-      <el-table-column prop="payment_nature" label="性质" width="90" />
-      <el-table-column prop="content" label="内容" min-width="220" />
-      <el-table-column prop="next_followup_at" label="下次跟进" width="120" />
-      <el-table-column prop="note" label="备注" min-width="160" />
+      <el-table-column
+        prop="payment_nature"
+        label="性质"
+        width="90"
+        class-name="mobile-hide"
+        label-class-name="mobile-hide"
+      />
+      <el-table-column prop="content" label="内容" min-width="180" show-overflow-tooltip />
+      <el-table-column
+        prop="next_followup_at"
+        label="下次跟进"
+        width="120"
+        class-name="mobile-hide"
+        label-class-name="mobile-hide"
+      />
+      <el-table-column
+        prop="note"
+        label="备注"
+        min-width="130"
+        show-overflow-tooltip
+        class-name="mobile-hide"
+        label-class-name="mobile-hide"
+      />
     </el-table>
   </el-drawer>
 </template>
@@ -636,5 +727,12 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+@media (max-width: 900px) {
+  .billing-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>

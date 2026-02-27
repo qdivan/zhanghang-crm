@@ -426,7 +426,7 @@ onMounted(async () => {
 <template>
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
-      <el-form inline @submit.prevent="fetchLeads">
+      <el-form inline @submit.prevent="fetchLeads" class="lead-filter-form">
         <el-form-item label="关键词">
           <el-input
             v-model="filters.keyword"
@@ -481,29 +481,76 @@ onMounted(async () => {
             <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="公司名" min-width="220">
+        <el-table-column label="公司名" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <el-button link type="primary" @click="openCompanyPage(row)">
               {{ row.name }}
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="contact_name" label="联系人" width="120" />
-        <el-table-column prop="phone" label="电话" width="140" />
-        <el-table-column prop="source" label="来源" width="120" />
-        <el-table-column prop="grade" label="等级" width="80" />
-        <el-table-column label="状态" width="100">
+        <el-table-column
+          prop="contact_name"
+          label="联系人"
+          width="110"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="phone"
+          label="电话"
+          width="130"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="source"
+          label="来源"
+          width="95"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="grade"
+          label="等级"
+          width="70"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          label="状态"
+          width="100"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)" size="small">
               {{ getStatusLabel(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
-        <el-table-column prop="last_feedback" label="最后跟进反馈" min-width="260" />
-        <el-table-column label="操作" fixed="right" width="390">
+        <el-table-column
+          prop="next_reminder_at"
+          label="下次提醒"
+          width="110"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="last_feedback"
+          label="最后跟进反馈"
+          min-width="180"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          label="操作"
+          width="250"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">
-            <el-space>
+            <el-space class="table-action-wrap">
               <el-button link @click="openLeadDetail(row)">详情</el-button>
               <el-button v-if="row.customer_id" link type="primary" @click="openCustomerArchive(row)">
                 客户档案
@@ -832,12 +879,29 @@ onMounted(async () => {
     </template>
   </el-dialog>
 
-  <el-drawer v-model="showHistoryDrawer" :title="`跟进历史 - ${historyLeadName}`" size="50%">
+  <el-drawer
+    v-model="showHistoryDrawer"
+    :title="`跟进历史 - ${historyLeadName}`"
+    size="min(760px, 92vw)"
+  >
     <el-table v-loading="historyLoading" :data="historyRows" stripe border>
       <el-table-column prop="followup_at" label="跟进日期" width="120" />
-      <el-table-column prop="feedback" label="跟进反馈" min-width="260" />
-      <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
-      <el-table-column prop="notes" label="备注" min-width="200" />
+      <el-table-column prop="feedback" label="跟进反馈" min-width="180" show-overflow-tooltip />
+      <el-table-column
+        prop="next_reminder_at"
+        label="下次提醒"
+        width="120"
+        class-name="mobile-hide"
+        label-class-name="mobile-hide"
+      />
+      <el-table-column
+        prop="notes"
+        label="备注"
+        min-width="130"
+        show-overflow-tooltip
+        class-name="mobile-hide"
+        label-class-name="mobile-hide"
+      />
     </el-table>
   </el-drawer>
 </template>
@@ -847,5 +911,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  .lead-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>

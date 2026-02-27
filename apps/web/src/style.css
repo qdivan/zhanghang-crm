@@ -16,3 +16,42 @@ body {
   background: #f7f8fa;
   color: #1f2937;
 }
+
+.table-action-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+@media (max-width: 900px) {
+  .mobile-hide {
+    display: none !important;
+  }
+
+  .main-area .el-form--inline {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .main-area .el-form--inline .el-form-item {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: 8px;
+  }
+
+  .main-area .el-form--inline .el-form-item__content {
+    width: 100%;
+  }
+
+  .main-area .el-form--inline .el-form-item:last-child .el-form-item__content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .main-area .el-form--inline .el-input,
+  .main-area .el-form--inline .el-select,
+  .main-area .el-form--inline .el-input-number {
+    width: 100% !important;
+  }
+}

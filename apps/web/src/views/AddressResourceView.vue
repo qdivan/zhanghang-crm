@@ -106,7 +106,7 @@ onMounted(fetchResources);
 <template>
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
-      <el-form inline @submit.prevent="fetchResources">
+      <el-form inline @submit.prevent="fetchResources" class="resource-filter-form">
         <el-form-item label="关键词">
           <el-input
             v-model="keyword"
@@ -130,12 +130,38 @@ onMounted(fetchResources);
         </div>
       </template>
       <el-table v-loading="loading" :data="rows" stripe border>
-        <el-table-column prop="category" label="分类/区域" width="160" />
-        <el-table-column prop="contact_info" label="联系方式" min-width="220" />
-        <el-table-column prop="description" label="资源说明" min-width="300" />
-        <el-table-column prop="next_action" label="后续动作" min-width="220" />
-        <el-table-column prop="notes" label="备注" min-width="200" />
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column prop="category" label="分类/区域" width="130" />
+        <el-table-column
+          prop="contact_info"
+          label="联系方式"
+          min-width="180"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column prop="description" label="资源说明" min-width="180" show-overflow-tooltip />
+        <el-table-column
+          prop="next_action"
+          label="后续动作"
+          min-width="180"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          prop="notes"
+          label="备注"
+          min-width="150"
+          show-overflow-tooltip
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        />
+        <el-table-column
+          label="操作"
+          width="90"
+          class-name="mobile-hide"
+          label-class-name="mobile-hide"
+        >
           <template #default="{ row }">
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
           </template>
@@ -180,5 +206,12 @@ onMounted(fetchResources);
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+@media (max-width: 900px) {
+  .resource-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>

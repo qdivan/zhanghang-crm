@@ -137,18 +137,18 @@ watch(
           <el-button v-if="isMobile" circle plain size="small" @click="mobileMenuVisible = true">
             <el-icon><MenuIcon /></el-icon>
           </el-button>
-          <div>
+          <div class="brand-block">
             <div class="title">账航·一帆财税</div>
             <div class="subtitle">客户开发、管理、收款</div>
           </div>
         </div>
-        <el-space>
-          <el-tag type="info" effect="plain">
+        <div class="top-right">
+          <el-tag type="info" effect="plain" class="user-tag">
             <el-icon><User /></el-icon>
-            &nbsp;{{ auth.user?.username ?? "未登录" }}（{{ roleLabel }}）
+            <span class="user-tag-text">{{ auth.user?.username ?? "未登录" }}（{{ roleLabel }}）</span>
           </el-tag>
           <el-button size="small" @click="logout">退出</el-button>
-        </el-space>
+        </div>
       </el-header>
       <el-main class="main-area">
         <router-view />
@@ -186,23 +186,58 @@ watch(
   align-items: center;
   justify-content: space-between;
   background: #fff;
+  padding: 0 12px;
 }
 
 .top-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.brand-block {
+  min-width: 0;
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.user-tag {
+  max-width: 240px;
+}
+
+.user-tag-text {
+  display: inline-block;
+  max-width: 190px;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .title {
   font-size: 16px;
   font-weight: 600;
   color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .subtitle {
   font-size: 12px;
   color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .main-area {
@@ -213,9 +248,26 @@ watch(
 
 @media (max-width: 900px) {
   .topbar {
-    padding: 0 8px;
-    align-items: flex-start;
+    padding: 8px;
+    align-items: center;
     gap: 8px;
+  }
+
+  .top-left {
+    flex: 1;
+  }
+
+  .top-right {
+    max-width: 50%;
+    gap: 6px;
+  }
+
+  .user-tag {
+    max-width: 132px;
+  }
+
+  .user-tag-text {
+    max-width: 96px;
   }
 
   .title {
@@ -229,10 +281,12 @@ watch(
   .main-area {
     padding: 10px;
   }
+}
 
-  .topbar :deep(.el-space) {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
+.topbar :deep(.el-tag__content) {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  white-space: nowrap;
 }
 </style>

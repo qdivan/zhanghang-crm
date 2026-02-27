@@ -419,7 +419,7 @@ onMounted(async () => {
       <el-tab-pane label="用户管理" name="users">
         <el-space direction="vertical" fill :size="12">
           <el-card shadow="never">
-            <el-form inline @submit.prevent="fetchUsers">
+            <el-form inline @submit.prevent="fetchUsers" class="admin-filter-form">
               <el-form-item label="关键词">
                 <el-input
                   v-model="filters.keyword"
@@ -457,28 +457,53 @@ onMounted(async () => {
             <el-table v-loading="loading" :data="visibleRows" stripe border>
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column prop="username" label="账号" min-width="160" />
-              <el-table-column label="账号来源" width="100">
+              <el-table-column
+                label="账号来源"
+                width="100"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">{{ authSourceLabel(row.auth_source) }}</template>
               </el-table-column>
-              <el-table-column label="角色" width="120">
+              <el-table-column
+                label="角色"
+                width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">
                   <el-tag :type="roleTagType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column
+                label="状态"
+                width="100"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">
                   <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
                     {{ row.is_active ? "启用" : "停用" }}
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="最近登录" min-width="170">
+              <el-table-column
+                label="最近登录"
+                min-width="170"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.last_login_at) }}</template>
               </el-table-column>
-              <el-table-column label="创建时间" min-width="170">
+              <el-table-column
+                label="创建时间"
+                min-width="170"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="180" fixed="right">
+              <el-table-column label="操作" width="120">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
                   <el-button
@@ -583,7 +608,7 @@ onMounted(async () => {
       <el-tab-pane label="操作日志" name="logs">
         <el-space direction="vertical" fill :size="12">
           <el-card shadow="never">
-            <el-form inline @submit.prevent="fetchLogs">
+            <el-form inline @submit.prevent="fetchLogs" class="admin-filter-form">
               <el-form-item label="关键词">
                 <el-input
                   v-model="logFilters.keyword"
@@ -615,17 +640,47 @@ onMounted(async () => {
               </div>
             </template>
             <el-table v-loading="logLoading" :data="logRows" stripe border>
-              <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column label="时间" min-width="170">
+              <el-table-column
+                prop="id"
+                label="ID"
+                width="80"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column label="时间" min-width="160">
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column prop="actor_username" label="操作人" width="120" />
-              <el-table-column label="动作" min-width="170">
+              <el-table-column
+                prop="actor_username"
+                label="操作人"
+                width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column
+                label="动作"
+                min-width="140"
+                show-overflow-tooltip
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
                 <template #default="{ row }">{{ actionLabel(row.action) }}</template>
               </el-table-column>
-              <el-table-column prop="entity_type" label="对象类型" width="130" />
-              <el-table-column prop="entity_id" label="对象ID" width="120" />
-              <el-table-column prop="detail" label="详情" min-width="280" />
+              <el-table-column
+                prop="entity_type"
+                label="对象类型"
+                width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column
+                prop="entity_id"
+                label="对象ID"
+                width="110"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column prop="detail" label="详情" min-width="180" show-overflow-tooltip />
             </el-table>
           </el-card>
         </el-space>
@@ -712,5 +767,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  .admin-filter-form {
+    display: flex;
+    flex-wrap: wrap;
+  }
 }
 </style>
