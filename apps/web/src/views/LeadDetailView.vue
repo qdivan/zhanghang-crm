@@ -7,6 +7,7 @@ import { useRoute, useRouter } from "vue-router";
 import { apiClient } from "../api/client";
 import type { LeadItem } from "../types";
 import { commitDateInput } from "../utils/dateInput";
+import { todayInBrowserTimeZone } from "../utils/time";
 
 type FollowupItem = {
   id: number;
@@ -28,7 +29,7 @@ const followups = ref<FollowupItem[]>([]);
 const showFollowupDialog = ref(false);
 
 const followupForm = reactive({
-  followup_at: new Date().toISOString().slice(0, 10),
+  followup_at: todayInBrowserTimeZone(),
   feedback: "",
   notes: "",
   next_reminder_at: null as string | null,
@@ -66,7 +67,7 @@ async function fetchLeadDetail() {
 }
 
 function openFollowupDialog() {
-  followupForm.followup_at = new Date().toISOString().slice(0, 10);
+  followupForm.followup_at = todayInBrowserTimeZone();
   followupForm.feedback = "";
   followupForm.notes = "";
   followupForm.next_reminder_at = lead.value?.next_reminder_at ?? null;

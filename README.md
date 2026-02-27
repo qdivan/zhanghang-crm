@@ -76,3 +76,5 @@ docker compose up --build
   - `infra/docker-compose.dev.yml`
   - `infra/docker-compose.prd.yml`
   - `.github/workflows/build-and-deploy-synology.yml`
+
+> 说明：`infra/DEPLOY_SYNOLOGY.md` 已按中国大陆网络环境补充企业级部署方案（国内镜像仓库、回滚、备份、监控、安全加固）。

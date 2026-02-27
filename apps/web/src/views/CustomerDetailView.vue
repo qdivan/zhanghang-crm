@@ -7,6 +7,7 @@ import { useRoute, useRouter } from "vue-router";
 import { apiClient } from "../api/client";
 import type { CustomerDetail } from "../types";
 import { commitDateInput } from "../utils/dateInput";
+import { todayInBrowserTimeZone } from "../utils/time";
 
 const route = useRoute();
 const router = useRouter();
@@ -32,7 +33,7 @@ const backTarget = computed(() => {
 });
 
 const followupForm = reactive({
-  followup_at: new Date().toISOString().slice(0, 10),
+  followup_at: todayInBrowserTimeZone(),
   feedback: "",
   notes: "",
   next_reminder_at: null as string | null,
@@ -86,7 +87,7 @@ function goBack() {
 
 function openFollowupDialog() {
   if (!detail.value) return;
-  followupForm.followup_at = new Date().toISOString().slice(0, 10);
+  followupForm.followup_at = todayInBrowserTimeZone();
   followupForm.feedback = "";
   followupForm.notes = "";
   followupForm.next_reminder_at = detail.value.lead.next_reminder_at;

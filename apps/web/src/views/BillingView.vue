@@ -6,6 +6,7 @@ import { useRouter } from "vue-router";
 import { apiClient } from "../api/client";
 import type { BillingActivity, BillingRecord, CustomerListItem } from "../types";
 import { commitDateInput } from "../utils/dateInput";
+import { todayInBrowserTimeZone } from "../utils/time";
 
 type BillingCreateForm = {
   serial_no: number | null;
@@ -74,7 +75,7 @@ const activityRows = ref<BillingActivity[]>([]);
 const selectedRecord = ref<BillingRecord | null>(null);
 const activityForm = reactive<ActivityForm>({
   activity_type: "REMINDER",
-  occurred_at: new Date().toISOString().slice(0, 10),
+  occurred_at: todayInBrowserTimeZone(),
   amount: 0,
   payment_nature: "",
   is_prepay: false,
@@ -224,7 +225,7 @@ function openCustomerDetail(record: BillingRecord) {
 
 function resetActivityForm() {
   activityForm.activity_type = "REMINDER";
-  activityForm.occurred_at = new Date().toISOString().slice(0, 10);
+  activityForm.occurred_at = todayInBrowserTimeZone();
   activityForm.amount = 0;
   activityForm.payment_nature = "";
   activityForm.is_prepay = false;

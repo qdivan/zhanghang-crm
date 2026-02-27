@@ -12,7 +12,9 @@ permissions:
   packages: write
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+  IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE || github.repository_owner }}
+  NAS_GIT_SYNC: ${{ vars.NAS_GIT_SYNC || 'false' }}
 
 concurrency:
   group: synology-${{ github.ref }}
@@ -32,7 +34,9 @@ jobs:
       - name: Resolve tags
         id: vars
         run: |
-          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          registry_host="${REGISTRY_HOST}"
+          namespace="${IMAGE_NAMESPACE}"
+          namespace="$(echo "${namespace}" | tr '[:upper:]' '[:lower:]')"
 
           if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             target_env="prd"
@@ -42,8 +46,8 @@ jobs:
             channel_tag="dev-latest"
           fi
 
-          api_image="${REGISTRY}/${owner}/daizhang-api"
-          web_image="${REGISTRY}/${owner}/daizhang-web"
+          api_image="${registry_host}/${namespace}/daizhang-api"
+          web_image="${registry_host}/${namespace}/daizhang-web"
 
           echo "target_env=${target_env}" >> "$GITHUB_OUTPUT"
           echo "channel_tag=${channel_tag}" >> "$GITHUB_OUTPUT"
@@ -53,11 +57,20 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
+        if: env.REGISTRY_HOST == 'ghcr.io'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.REGISTRY_HOST }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Custom Registry
+        if: env.REGISTRY_HOST != 'ghcr.io'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_HOST }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push API image
         uses: docker/build-push-action@v6
@@ -91,6 +104,10 @@ jobs:
           WEB_IMAGE: ${{ needs.build.outputs.web_image }}:${{ needs.build.outputs.channel_tag }}
           NAS_APP_DIR: ${{ secrets.NAS_APP_DIR }}
           DEPLOY_BRANCH: ${{ github.ref_name }}
+          REGISTRY_HOST: ${{ env.REGISTRY_HOST }}
+          NAS_GIT_SYNC: ${{ env.NAS_GIT_SYNC }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_READ_PACKAGES_TOKEN }}
         with:
@@ -98,20 +115,27 @@ jobs:
           port: ${{ secrets.NAS_PORT }}
           username: ${{ secrets.NAS_USER }}
           key: ${{ secrets.NAS_SSH_KEY }}
-          envs: TARGET_ENV,API_IMAGE,WEB_IMAGE,NAS_APP_DIR,DEPLOY_BRANCH,GHCR_USER,GHCR_TOKEN
+          envs: TARGET_ENV,API_IMAGE,WEB_IMAGE,NAS_APP_DIR,DEPLOY_BRANCH,REGISTRY_HOST,NAS_GIT_SYNC,REGISTRY_USERNAME,REGISTRY_PASSWORD,GHCR_USER,GHCR_TOKEN
           script: |
             set -euo pipefail
 
             cd "$NAS_APP_DIR"
 
-            if [[ -d .git ]]; then
+            if [[ "${NAS_GIT_SYNC}" == "true" && -d .git ]]; then
               git fetch origin "$DEPLOY_BRANCH"
               git checkout "$DEPLOY_BRANCH"
               git pull --ff-only origin "$DEPLOY_BRANCH"
             fi
 
-            if [[ -n "${GHCR_TOKEN:-}" ]]; then
-              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            registry_user="${REGISTRY_USERNAME:-}"
+            registry_pass="${REGISTRY_PASSWORD:-}"
+            if [[ "${REGISTRY_HOST}" == "ghcr.io" ]]; then
+              registry_user="${GHCR_USER:-$registry_user}"
+              registry_pass="${GHCR_TOKEN:-$registry_pass}"
+            fi
+
+            if [[ -n "${registry_user}" && -n "${registry_pass}" ]]; then
+              echo "$registry_pass" | docker login "$REGISTRY_HOST" -u "$registry_user" --password-stdin
             fi
 
             ./infra/scripts/deploy.sh "$TARGET_ENV" "$API_IMAGE" "$WEB_IMAGE"

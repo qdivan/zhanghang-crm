@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 
 import { apiClient } from "../api/client";
 import { useAuthStore } from "../stores/auth";
+import { formatDateTimeInBrowserTimeZone } from "../utils/time";
 import type {
   LdapSettings,
   LdapSettingsUpdatePayload,
@@ -120,13 +121,6 @@ function roleTagType(role: UserRole): "danger" | "warning" | "success" {
 function authSourceLabel(source: string): string {
   if (source === "LDAP") return "LDAP";
   return "本地";
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return "-";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return dt.toLocaleString("zh-CN", { hour12: false });
 }
 
 function actionLabel(action: string): string {
@@ -479,10 +473,10 @@ onMounted(async () => {
                 </template>
               </el-table-column>
               <el-table-column label="最近登录" min-width="170">
-                <template #default="{ row }">{{ formatTime(row.last_login_at) }}</template>
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.last_login_at) }}</template>
               </el-table-column>
               <el-table-column label="创建时间" min-width="170">
-                <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
               <el-table-column label="操作" width="180" fixed="right">
                 <template #default="{ row }">
@@ -623,7 +617,7 @@ onMounted(async () => {
             <el-table v-loading="logLoading" :data="logRows" stripe border>
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column label="时间" min-width="170">
-                <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
               <el-table-column prop="actor_username" label="操作人" width="120" />
               <el-table-column label="动作" min-width="170">

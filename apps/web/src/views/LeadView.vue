@@ -7,6 +7,7 @@ import { apiClient } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import type { LeadItem, LeadStatus, LeadTemplateType } from "../types";
 import { commitDateInput } from "../utils/dateInput";
+import { toEpochMillis, todayInBrowserTimeZone } from "../utils/time";
 
 type LeadCreateForm = {
   template_type: LeadTemplateType;
@@ -119,7 +120,7 @@ const leadForm = reactive<LeadCreateForm>({
 
 const followupForm = reactive<FollowupForm>({
   lead_id: null,
-  followup_at: new Date().toISOString().slice(0, 10),
+  followup_at: todayInBrowserTimeZone(),
   feedback: "",
   notes: "",
   next_reminder_at: null,
@@ -169,12 +170,6 @@ const leadStatusOrder: Record<LeadStatus, number> = {
   CONVERTED: 3,
 };
 
-function toTimeValue(value: string | null): number {
-  if (!value) return Number.NaN;
-  const t = Date.parse(value);
-  return Number.isNaN(t) ? Number.NaN : t;
-}
-
 function sortLeadRows(items: LeadItem[]): LeadItem[] {
   return [...items].sort((a, b) => {
     const statusDiff = (leadStatusOrder[a.status] ?? 9) - (leadStatusOrder[b.status] ?? 9);
@@ -182,8 +177,8 @@ function sortLeadRows(items: LeadItem[]): LeadItem[] {
 
     // 对待跟进线索按提醒日期升序，提醒更近的靠前
     if (a.status === "FOLLOWING" || a.status === "NEW") {
-      const aReminder = toTimeValue(a.next_reminder_at);
-      const bReminder = toTimeValue(b.next_reminder_at);
+      const aReminder = toEpochMillis(a.next_reminder_at);
+      const bReminder = toEpochMillis(b.next_reminder_at);
       if (!Number.isNaN(aReminder) || !Number.isNaN(bReminder)) {
         if (Number.isNaN(aReminder)) return 1;
         if (Number.isNaN(bReminder)) return -1;
@@ -191,8 +186,8 @@ function sortLeadRows(items: LeadItem[]): LeadItem[] {
       }
     }
 
-    const aUpdated = toTimeValue(a.updated_at);
-    const bUpdated = toTimeValue(b.updated_at);
+    const aUpdated = toEpochMillis(a.updated_at);
+    const bUpdated = toEpochMillis(b.updated_at);
     if (!Number.isNaN(aUpdated) && !Number.isNaN(bUpdated) && aUpdated !== bUpdated) {
       return bUpdated - aUpdated;
     }
@@ -254,7 +249,7 @@ async function fetchAccountants() {
 
 function openFollowupDialog(lead: LeadItem) {
   followupForm.lead_id = lead.id;
-  followupForm.followup_at = new Date().toISOString().slice(0, 10);
+  followupForm.followup_at = todayInBrowserTimeZone();
   followupForm.feedback = "";
   followupForm.notes = "";
   followupForm.next_reminder_at = lead.next_reminder_at;
