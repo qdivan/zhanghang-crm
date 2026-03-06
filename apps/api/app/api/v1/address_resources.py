@@ -44,7 +44,14 @@ def create_address_resource(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    resource = AddressResource(**payload.model_dump())
+    data = payload.model_dump()
+    data["category"] = data["category"].strip()
+    data["contact_info"] = data["contact_info"].strip()
+    data["description"] = data["description"].strip()
+    data["next_action"] = data["next_action"].strip()
+    data["notes"] = data["notes"].strip()
+
+    resource = AddressResource(**data)
     db.add(resource)
     write_operation_log(
         db,
@@ -72,7 +79,18 @@ def update_address_resource(
     if resource is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address resource not found")
 
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+
+    for key, value in update_data.items():
+        if value is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Field `{key}` cannot be null",
+            )
+        if isinstance(value, str):
+            value = value.strip()
         setattr(resource, key, value)
     resource.updated_at = datetime.utcnow()
     write_operation_log(

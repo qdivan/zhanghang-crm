@@ -5,18 +5,25 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import { useAuthStore } from "../stores/auth";
 import type { CustomerDetail } from "../types";
 import { commitDateInput } from "../utils/dateInput";
 import { todayInBrowserTimeZone } from "../utils/time";
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const loading = ref(false);
 const followupLoading = ref(false);
 const editLoading = ref(false);
 const detail = ref<CustomerDetail | null>(null);
 const showFollowupDialog = ref(false);
 const showEditDialog = ref(false);
+
+const canWriteCustomer = computed(() => {
+  if (!detail.value || auth.user?.role !== "ACCOUNTANT") return true;
+  return detail.value.accountant_username === auth.user.username;
+});
 
 const backTarget = computed(() => {
   const from = String(route.query.from || "");
@@ -63,7 +70,9 @@ const editForm = reactive({
 });
 
 function templateLabel(templateType: string) {
-  return templateType === "FOLLOWUP" ? "客户跟进模板" : "转化模板";
+  if (templateType === "FOLLOWUP") return "客户跟进模板";
+  if (templateType === "REDEVELOP") return "老客二开模板";
+  return "转化模板";
 }
 
 async function fetchDetail() {
@@ -87,6 +96,10 @@ function goBack() {
 
 function openFollowupDialog() {
   if (!detail.value) return;
+  if (!canWriteCustomer.value) {
+    ElMessage.warning("该客户处于临时只读授权范围，不能新增跟进");
+    return;
+  }
   followupForm.followup_at = todayInBrowserTimeZone();
   followupForm.feedback = "";
   followupForm.notes = "";
@@ -97,6 +110,10 @@ function openFollowupDialog() {
 async function submitFollowup() {
   if (!detail.value || !followupForm.feedback.trim()) {
     ElMessage.warning("请填写跟进反馈");
+    return;
+  }
+  if (!canWriteCustomer.value) {
+    ElMessage.warning("该客户处于临时只读授权范围，不能新增跟进");
     return;
   }
 
@@ -123,6 +140,10 @@ function openLeadDetail() {
 
 function openEditDialog() {
   if (!detail.value) return;
+  if (!canWriteCustomer.value) {
+    ElMessage.warning("该客户处于临时只读授权范围，不能编辑档案");
+    return;
+  }
   editForm.name = detail.value.name;
   editForm.contact_name = detail.value.contact_name;
   editForm.phone = detail.value.phone;
@@ -151,6 +172,10 @@ async function submitEdit() {
     ElMessage.warning("客户名称不能为空");
     return;
   }
+  if (!canWriteCustomer.value) {
+    ElMessage.warning("该客户处于临时只读授权范围，不能编辑档案");
+    return;
+  }
   editLoading.value = true;
   try {
     await apiClient.patch(`/customers/${detail.value.id}`, editForm);
@@ -172,8 +197,10 @@ onMounted(fetchDetail);
     <el-card shadow="never">
       <el-space>
         <el-button :icon="ArrowLeft" @click="goBack">{{ backTarget.label }}</el-button>
-        <el-button :disabled="!detail" @click="openEditDialog">编辑档案</el-button>
-        <el-button type="primary" :disabled="!detail" @click="openFollowupDialog">新增跟进</el-button>
+        <el-button :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
+        <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openFollowupDialog">
+          新增跟进
+        </el-button>
         <el-button :disabled="!detail" @click="openLeadDetail">查看线索详情</el-button>
       </el-space>
     </el-card>

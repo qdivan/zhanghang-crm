@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AddressResourceCreate(BaseModel):
@@ -10,6 +10,18 @@ class AddressResourceCreate(BaseModel):
     description: str = ""
     next_action: str = Field(default="", max_length=255)
     notes: str = ""
+
+    @model_validator(mode="after")
+    def validate_business_fields(self):
+        if not any(
+            [
+                self.category.strip(),
+                self.contact_info.strip(),
+                self.description.strip(),
+            ]
+        ):
+            raise ValueError("分类、联系方式、资源说明不能同时为空")
+        return self
 
 
 class AddressResourceUpdate(BaseModel):

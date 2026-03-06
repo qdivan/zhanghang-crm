@@ -30,6 +30,7 @@ class LeadCreate(BaseModel):
     next_reminder_at: Optional[date] = None
     reminder_value: str = ""
     notes: str = ""
+    related_customer_id: Optional[int] = Field(default=None, gt=0)
     owner_id: Optional[int] = None
 
 
@@ -60,6 +61,7 @@ class LeadUpdate(BaseModel):
     next_reminder_at: Optional[date] = None
     reminder_value: Optional[str] = None
     notes: Optional[str] = None
+    related_customer_id: Optional[int] = Field(default=None, gt=0)
 
 
 class LeadOut(BaseModel):
@@ -95,6 +97,7 @@ class LeadOut(BaseModel):
     reminder_value: str
     last_feedback: str
     notes: str
+    related_customer_id: Optional[int]
     owner_id: int
     created_at: datetime
     updated_at: datetime

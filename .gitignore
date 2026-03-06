@@ -30,3 +30,9 @@ output/playwright/
 apps/api/*.db
 apps/api/*.sqlite
 apps/api/*.sqlite3
+
+# Accidental duplicate files (local editor/iCloud artifacts)
+apps/api/.dockerignore 2
+apps/api/Dockerfile 2.prod
+apps/api/tests/conftest 2.py
+apps/web/nginx/default 2.conf

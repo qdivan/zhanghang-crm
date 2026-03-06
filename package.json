@@ -6,11 +6,20 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "bash ./scripts/run-dev.sh",
-    "prd": "bash ./scripts/run-prd.sh",
-    "stop:dev": "bash ./scripts/stop-dev.sh",
-    "stop:prd": "bash ./scripts/stop-prd.sh",
+    "dev": "bash ./scripts/run-local-dev.sh",
+    "dev:local": "bash ./scripts/run-local-dev.sh",
+    "dev:api": "bash ./scripts/run-local-api.sh",
     "dev:web": "npm --workspace apps/web run dev",
+    "dev:docker": "bash ./scripts/run-dev.sh",
+    "stop:docker": "bash ./scripts/stop-dev.sh",
+    "prod:up": "bash ./scripts/run-prd.sh",
+    "prod:down": "bash ./scripts/stop-prd.sh",
+    "prd": "npm run prod:up",
+    "stop:dev": "npm run stop:docker",
+    "stop:prd": "npm run prod:down",
+    "test": "npm run test:api && npm run test:web",
+    "test:api": "bash ./scripts/test-api.sh",
+    "test:web": "npm run build:web",
     "build:web": "npm --workspace apps/web run build",
     "lint:web": "npm --workspace apps/web run lint --if-present"
   }

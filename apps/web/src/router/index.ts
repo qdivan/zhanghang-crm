@@ -8,6 +8,7 @@ import BillingView from "../views/BillingView.vue";
 import CostView from "../views/CostView.vue";
 import CustomerDetailView from "../views/CustomerDetailView.vue";
 import CustomersView from "../views/CustomersView.vue";
+import DashboardView from "../views/DashboardView.vue";
 import LeadDetailView from "../views/LeadDetailView.vue";
 import LeadView from "../views/LeadView.vue";
 import LoginView from "../views/LoginView.vue";
@@ -27,7 +28,12 @@ const router = createRouter({
       children: [
         {
           path: "",
-          redirect: "/leads",
+          redirect: "/dashboard",
+        },
+        {
+          path: "dashboard",
+          name: "dashboard",
+          component: DashboardView,
         },
         {
           path: "leads",
@@ -63,6 +69,9 @@ const router = createRouter({
           path: "costs",
           name: "costs",
           component: CostView,
+          meta: {
+            roles: ["OWNER"] as UserRole[],
+          },
         },
         {
           path: "admin/users",
@@ -87,11 +96,11 @@ router.beforeEach((to) => {
     return "/login";
   }
   if (to.path === "/login" && auth.isLoggedIn) {
-    return "/leads";
+    return "/dashboard";
   }
   const roleLimit = to.meta.roles as UserRole[] | undefined;
   if (roleLimit && auth.user && !roleLimit.includes(auth.user.role)) {
-    return "/leads";
+    return "/dashboard";
   }
   return true;
 });

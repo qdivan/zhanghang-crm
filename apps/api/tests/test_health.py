@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -54,6 +56,7 @@ def test_billing_records():
                 "total_fee": 1000,
                 "monthly_fee": 100,
                 "billing_cycle_text": "2026/2/26收（2026.1-2026.12）",
+                "collection_start_date": "2026-01-01",
                 "due_month": "2026-12-31",
                 "payment_method": "预收",
                 "note": "测试记录",
@@ -61,6 +64,565 @@ def test_billing_records():
         )
         assert create_response.status_code == 201
         assert isinstance(create_response.json()["serial_no"], int)
+        assert create_response.json()["collection_start_date"] == "2026-01-01"
+
+
+def test_billing_records_support_contact_filter_and_keyword():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        unique_contact_name = "联系人筛选_唯一_20260228"
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "联系人筛选测试客户",
+                "contact_name": unique_contact_name,
+                "phone": "13800138033",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "total_fee": 1888,
+                "monthly_fee": 188,
+                "billing_cycle_text": "联系人筛选账期",
+                "collection_start_date": "2026-01-15",
+                "due_month": "2026-12-20",
+                "payment_method": "后收",
+                "note": "联系人筛选备注",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        by_contact_resp = client.get(
+            "/api/v1/billing-records",
+            headers=headers,
+            params={"contact_name": unique_contact_name},
+        )
+        assert by_contact_resp.status_code == 200
+        by_contact_records = by_contact_resp.json()
+        assert any(item["id"] == record_id for item in by_contact_records)
+        assert all("customer_contact_name" in item for item in by_contact_records)
+
+        by_keyword_resp = client.get(
+            "/api/v1/billing-records",
+            headers=headers,
+            params={"keyword": unique_contact_name},
+        )
+        assert by_keyword_resp.status_code == 200
+        by_keyword_records = by_keyword_resp.json()
+        target = next(item for item in by_keyword_records if item["id"] == record_id)
+        assert target["customer_contact_name"] == unique_contact_name
+        assert target["collection_start_date"] == "2026-01-15"
+
+
+def test_billing_defaults_for_periodic_and_one_time_modes():
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert login_response.status_code == 200
+        headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+        customers_response = client.get("/api/v1/customers", headers=headers)
+        assert customers_response.status_code == 200
+        customer_id = customers_response.json()[0]["id"]
+
+        periodic_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "amount_basis": "MONTHLY",
+                "period_start_month": "2026-03",
+                "total_fee": 1200,
+                "payment_method": "后收",
+            },
+        )
+        assert periodic_resp.status_code == 201
+        assert periodic_resp.json()["period_end_month"] == "2027-02"
+
+        one_time_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "ONE_TIME",
+                "total_fee": 800,
+                "payment_method": "后收",
+            },
+        )
+        assert one_time_resp.status_code == 201
+        assert one_time_resp.json()["amount_basis"] == "ONE_TIME"
+        assert one_time_resp.json()["due_month"] == date.today().isoformat()
+
+
+def test_accountant_can_only_access_own_billing_records():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        users = users_resp.json()
+        accountant = next(item for item in users if item["username"] == "accountant")
+        accountant2 = next(item for item in users if item["username"] == "accountant2")
+
+        lead_owner_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "收费可见性-会计1",
+                "contact_name": "张一",
+                "phone": "13800138031",
+            },
+        )
+        assert lead_owner_resp.status_code == 201
+        lead_owner_id = lead_owner_resp.json()["id"]
+
+        convert_owner = client.post(
+            f"/api/v1/leads/{lead_owner_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_owner.status_code == 200
+        customer_owner_id = convert_owner.json()["customer"]["id"]
+
+        lead_other_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "收费可见性-会计2",
+                "contact_name": "张二",
+                "phone": "13800138032",
+            },
+        )
+        assert lead_other_resp.status_code == 201
+        lead_other_id = lead_other_resp.json()["id"]
+
+        convert_other = client.post(
+            f"/api/v1/leads/{lead_other_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant2["id"]},
+        )
+        assert convert_other.status_code == 200
+        customer_other_id = convert_other.json()["customer"]["id"]
+
+        record_owner_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1201,
+                "customer_id": customer_owner_id,
+                "total_fee": 1000,
+                "monthly_fee": 100,
+                "billing_cycle_text": "会计1账单",
+                "due_month": "2026-12-31",
+                "payment_method": "后收",
+            },
+        )
+        assert record_owner_resp.status_code == 201
+        record_owner_id = record_owner_resp.json()["id"]
+
+        record_other_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1202,
+                "customer_id": customer_other_id,
+                "total_fee": 2000,
+                "monthly_fee": 200,
+                "billing_cycle_text": "会计2账单",
+                "due_month": "2026-12-31",
+                "payment_method": "后收",
+            },
+        )
+        assert record_other_resp.status_code == 201
+        record_other_id = record_other_resp.json()["id"]
+
+        accountant2_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant2", "password": "Demo@12345"},
+        )
+        assert accountant2_login.status_code == 200
+        accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
+
+        visible_records_resp = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert visible_records_resp.status_code == 200
+        visible_record_ids = {item["id"] for item in visible_records_resp.json()}
+        assert record_other_id in visible_record_ids
+        assert record_owner_id not in visible_record_ids
+
+        summary_resp = client.get("/api/v1/billing-records/summary", headers=accountant2_headers)
+        assert summary_resp.status_code == 200
+        assert summary_resp.json()["total_records"] == 1
+        assert summary_resp.json()["total_fee"] == 2000
+
+        forbidden_activity_list = client.get(
+            f"/api/v1/billing-records/{record_owner_id}/activities",
+            headers=accountant2_headers,
+        )
+        assert forbidden_activity_list.status_code == 403
+
+        forbidden_activity_create = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/activities",
+            headers=accountant2_headers,
+            json={
+                "activity_type": "REMINDER",
+                "occurred_at": "2026-02-26",
+                "amount": 0,
+                "content": "无权限客户不应可催收",
+            },
+        )
+        assert forbidden_activity_create.status_code == 403
+
+
+def test_billing_assignment_grants_read_visibility_to_executor():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        users = users_resp.json()
+        accountant = next(item for item in users if item["username"] == "accountant")
+        accountant2 = next(item for item in users if item["username"] == "accountant2")
+
+        lead_owner_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "执行分派可见性客户A",
+                "contact_name": "执行A",
+                "phone": "13800138051",
+            },
+        )
+        assert lead_owner_resp.status_code == 201
+        lead_owner_id = lead_owner_resp.json()["id"]
+
+        convert_owner = client.post(
+            f"/api/v1/leads/{lead_owner_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_owner.status_code == 200
+        customer_owner_id = convert_owner.json()["customer"]["id"]
+
+        record_owner_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1401,
+                "customer_id": customer_owner_id,
+                "total_fee": 5000,
+                "monthly_fee": 500,
+                "billing_cycle_text": "执行分派账单",
+                "due_month": "2026-12-31",
+                "payment_method": "后收",
+            },
+        )
+        assert record_owner_resp.status_code == 201
+        record_owner_id = record_owner_resp.json()["id"]
+
+        accountant2_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant2", "password": "Demo@12345"},
+        )
+        assert accountant2_login.status_code == 200
+        accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
+
+        before_assign = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert before_assign.status_code == 200
+        assert all(item["id"] != record_owner_id for item in before_assign.json())
+
+        create_assignment = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/assignees",
+            headers=owner_headers,
+            json={
+                "assignee_user_id": accountant2["id"],
+                "assignment_role": "REGISTRATION",
+                "note": "负责注册办理，需看费用标准",
+            },
+        )
+        assert create_assignment.status_code == 201
+        assignment_id = create_assignment.json()["id"]
+
+        assignment_list = client.get(f"/api/v1/billing-records/{record_owner_id}/assignees", headers=accountant2_headers)
+        assert assignment_list.status_code == 200
+        assert any(item["id"] == assignment_id for item in assignment_list.json())
+
+        after_assign = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert after_assign.status_code == 200
+        assert any(item["id"] == record_owner_id for item in after_assign.json())
+
+        read_activities = client.get(f"/api/v1/billing-records/{record_owner_id}/activities", headers=accountant2_headers)
+        assert read_activities.status_code == 200
+
+        write_activity = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/activities",
+            headers=accountant2_headers,
+            json={
+                "activity_type": "REMINDER",
+                "occurred_at": "2026-02-26",
+                "amount": 0,
+                "content": "执行人员只读，不应能新增催收",
+            },
+        )
+        assert write_activity.status_code == 403
+
+        create_execution_log = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/execution-logs",
+            headers=accountant2_headers,
+            json={
+                "occurred_at": "2026-02-26",
+                "progress_type": "MILESTONE",
+                "content": "已完成注册资料提交",
+                "next_action": "等待工商审批结果",
+                "due_date": "2026-03-03",
+                "note": "执行分派人员可写执行进度",
+            },
+        )
+        assert create_execution_log.status_code == 201
+
+        list_execution_log = client.get(
+            f"/api/v1/billing-records/{record_owner_id}/execution-logs",
+            headers=accountant2_headers,
+        )
+        assert list_execution_log.status_code == 200
+        assert any(item["content"] == "已完成注册资料提交" for item in list_execution_log.json())
+
+        disable_assignment = client.patch(
+            f"/api/v1/billing-records/{record_owner_id}/assignees/{assignment_id}",
+            headers=owner_headers,
+            json={"is_active": False},
+        )
+        assert disable_assignment.status_code == 200
+        assert disable_assignment.json()["is_active"] is False
+
+        after_disable = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert after_disable.status_code == 200
+        assert all(item["id"] != record_owner_id for item in after_disable.json())
+
+        write_execution_after_disable = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/execution-logs",
+            headers=accountant2_headers,
+            json={
+                "occurred_at": "2026-02-27",
+                "progress_type": "UPDATE",
+                "content": "停用后不应再写入",
+            },
+        )
+        assert write_execution_after_disable.status_code == 403
+
+
+def test_accountant_read_only_data_grant_for_customer_and_billing():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        users = users_resp.json()
+        accountant = next(item for item in users if item["username"] == "accountant")
+        accountant2 = next(item for item in users if item["username"] == "accountant2")
+
+        lead_owner_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "临时授权客户A",
+                "contact_name": "授权A",
+                "phone": "13800138041",
+            },
+        )
+        assert lead_owner_resp.status_code == 201
+        lead_owner_id = lead_owner_resp.json()["id"]
+        convert_owner = client.post(
+            f"/api/v1/leads/{lead_owner_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_owner.status_code == 200
+        customer_owner_id = convert_owner.json()["customer"]["id"]
+
+        lead_other_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "临时授权客户B",
+                "contact_name": "授权B",
+                "phone": "13800138042",
+            },
+        )
+        assert lead_other_resp.status_code == 201
+        lead_other_id = lead_other_resp.json()["id"]
+        convert_other = client.post(
+            f"/api/v1/leads/{lead_other_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant2["id"]},
+        )
+        assert convert_other.status_code == 200
+        customer_other_id = convert_other.json()["customer"]["id"]
+
+        record_owner_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1301,
+                "customer_id": customer_owner_id,
+                "total_fee": 3000,
+                "monthly_fee": 300,
+                "billing_cycle_text": "授权A账单",
+                "due_month": "2026-12-31",
+                "payment_method": "后收",
+            },
+        )
+        assert record_owner_resp.status_code == 201
+        record_owner_id = record_owner_resp.json()["id"]
+
+        record_other_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1302,
+                "customer_id": customer_other_id,
+                "total_fee": 2000,
+                "monthly_fee": 200,
+                "billing_cycle_text": "授权B账单",
+                "due_month": "2026-12-31",
+                "payment_method": "后收",
+            },
+        )
+        assert record_other_resp.status_code == 201
+        record_other_id = record_other_resp.json()["id"]
+
+        accountant2_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant2", "password": "Demo@12345"},
+        )
+        assert accountant2_login.status_code == 200
+        accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
+
+        customers_before = client.get("/api/v1/customers", headers=accountant2_headers)
+        assert customers_before.status_code == 200
+        customer_ids_before = {item["id"] for item in customers_before.json()}
+        assert customer_other_id in customer_ids_before
+        assert customer_owner_id not in customer_ids_before
+
+        billing_before = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert billing_before.status_code == 200
+        billing_ids_before = {item["id"] for item in billing_before.json()}
+        assert record_other_id in billing_ids_before
+        assert record_owner_id not in billing_ids_before
+
+        create_customer_grant = client.post(
+            "/api/v1/admin/data-access-grants",
+            headers=owner_headers,
+            json={
+                "grantee_user_id": accountant2["id"],
+                "module": "CUSTOMER",
+                "reason": "月底工资核算临时查看客户",
+            },
+        )
+        assert create_customer_grant.status_code == 201
+
+        create_billing_grant = client.post(
+            "/api/v1/admin/data-access-grants",
+            headers=owner_headers,
+            json={
+                "grantee_user_id": accountant2["id"],
+                "module": "BILLING",
+                "reason": "月底工资核算临时查看收费",
+            },
+        )
+        assert create_billing_grant.status_code == 201
+        billing_grant_id = create_billing_grant.json()["id"]
+
+        customers_after = client.get("/api/v1/customers", headers=accountant2_headers)
+        assert customers_after.status_code == 200
+        customer_ids_after = {item["id"] for item in customers_after.json()}
+        assert customer_other_id in customer_ids_after
+        assert customer_owner_id in customer_ids_after
+
+        foreign_customer_detail = client.get(f"/api/v1/customers/{customer_owner_id}", headers=accountant2_headers)
+        assert foreign_customer_detail.status_code == 200
+
+        foreign_customer_update = client.patch(
+            f"/api/v1/customers/{customer_owner_id}",
+            headers=accountant2_headers,
+            json={"name": "不应允许修改"},
+        )
+        assert foreign_customer_update.status_code == 403
+
+        billing_after = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert billing_after.status_code == 200
+        billing_ids_after = {item["id"] for item in billing_after.json()}
+        assert record_other_id in billing_ids_after
+        assert record_owner_id in billing_ids_after
+
+        foreign_billing_activities = client.get(
+            f"/api/v1/billing-records/{record_owner_id}/activities",
+            headers=accountant2_headers,
+        )
+        assert foreign_billing_activities.status_code == 200
+
+        foreign_billing_write = client.post(
+            f"/api/v1/billing-records/{record_owner_id}/activities",
+            headers=accountant2_headers,
+            json={
+                "activity_type": "REMINDER",
+                "occurred_at": "2026-02-26",
+                "amount": 0,
+                "content": "临时授权仅只读，不应允许写入",
+            },
+        )
+        assert foreign_billing_write.status_code == 403
+
+        revoke_billing_grant = client.patch(
+            f"/api/v1/admin/data-access-grants/{billing_grant_id}",
+            headers=owner_headers,
+            json={"is_active": False},
+        )
+        assert revoke_billing_grant.status_code == 200
+        assert revoke_billing_grant.json()["is_active"] is False
 
 
 def test_lead_detail_and_convert_customer_flow():
@@ -135,12 +697,97 @@ def test_lead_detail_and_convert_customer_flow():
         )
         assert accountant_followup.status_code == 201
 
+        accountant_leads = client.get("/api/v1/leads", headers=accountant_headers)
+        assert accountant_leads.status_code == 200
+        assert any(item["id"] == lead_id for item in accountant_leads.json())
+
         unconvert_resp = client.post(f"/api/v1/leads/{lead_id}/unconvert", headers=headers, json={})
         assert unconvert_resp.status_code == 200
         assert unconvert_resp.json()["status"] in {"NEW", "FOLLOWING"}
 
         customers_after = client.get("/api/v1/customers", headers=headers).json()
         assert all(item["source_lead_id"] != lead_id for item in customers_after)
+
+
+def test_redevelop_lead_convert_reuses_existing_customer():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        accountants_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert accountants_resp.status_code == 200
+        accountants = accountants_resp.json()
+        assert len(accountants) >= 2
+        accountant_1 = accountants[0]
+        accountant_2 = accountants[1]
+
+        create_base_lead = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "template_type": "FOLLOWUP",
+                "name": "老客二开基准客户",
+                "contact_name": "赵老板",
+                "phone": "13800138111",
+            },
+        )
+        assert create_base_lead.status_code == 201
+        base_lead_id = create_base_lead.json()["id"]
+
+        convert_base = client.post(
+            f"/api/v1/leads/{base_lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant_1["id"]},
+        )
+        assert convert_base.status_code == 200
+        base_customer_id = convert_base.json()["customer"]["id"]
+
+        customer_count_before = len(client.get("/api/v1/customers", headers=headers).json())
+
+        create_redevelop_lead = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "template_type": "REDEVELOP",
+                "related_customer_id": base_customer_id,
+                "name": "老客二开基准客户",
+                "contact_name": "赵老板",
+                "phone": "13800138111",
+                "source": "老客户二次开发",
+                "notes": "新增股权变更服务",
+            },
+        )
+        assert create_redevelop_lead.status_code == 201
+        redevelop_lead = create_redevelop_lead.json()
+        redevelop_lead_id = redevelop_lead["id"]
+        assert redevelop_lead["related_customer_id"] == base_customer_id
+        assert redevelop_lead["customer_id"] == base_customer_id
+
+        convert_redevelop = client.post(
+            f"/api/v1/leads/{redevelop_lead_id}/convert",
+            headers=headers,
+            json={
+                "accountant_id": accountant_2["id"],
+                "customer_name": "老客二开基准客户-升级服务",
+            },
+        )
+        assert convert_redevelop.status_code == 200
+        assert convert_redevelop.json()["customer"]["id"] == base_customer_id
+
+        customers_after = client.get("/api/v1/customers", headers=headers).json()
+        assert len(customers_after) == customer_count_before
+        reused_customer = next(item for item in customers_after if item["id"] == base_customer_id)
+        assert reused_customer["assigned_accountant_id"] == accountant_2["id"]
+        assert reused_customer["name"] == "老客二开基准客户-升级服务"
+
+        redevelop_detail = client.get(f"/api/v1/leads/{redevelop_lead_id}", headers=headers)
+        assert redevelop_detail.status_code == 200
+        assert redevelop_detail.json()["status"] == "CONVERTED"
+        assert redevelop_detail.json()["customer_id"] == base_customer_id
 
 
 def test_address_resources():
@@ -176,6 +823,20 @@ def test_address_resources():
         )
         assert patch_response.status_code == 200
         assert patch_response.json()["next_action"] == "明天回访"
+
+        patch_with_null = client.patch(
+            f"/api/v1/address-resources/{resource_id}",
+            headers=headers,
+            json={"category": None},
+        )
+        assert patch_with_null.status_code == 400
+
+        empty_create_response = client.post(
+            "/api/v1/address-resources",
+            headers=headers,
+            json={},
+        )
+        assert empty_create_response.status_code == 422
 
 
 def test_billing_activities_update_amounts():
@@ -239,6 +900,318 @@ def test_billing_activities_update_amounts():
         assert target["received_amount"] == 300
         assert target["outstanding_amount"] == 700
         assert target["status"] == "PARTIAL"
+
+
+def test_payment_split_suggestion_and_apply_updates_multiple_records():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "分摊收款测试客户",
+                "contact_name": "分摊联系人",
+                "phone": "13800138061",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_a = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "serial_no": 1501,
+                "customer_id": customer_id,
+                "total_fee": 2000,
+                "monthly_fee": 200,
+                "billing_cycle_text": "项目A",
+                "due_month": "2026-03-31",
+                "payment_method": "后收",
+                "summary": "项目A服务费",
+            },
+        )
+        assert record_a.status_code == 201
+        record_a_id = record_a.json()["id"]
+
+        record_b = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "serial_no": 1502,
+                "customer_id": customer_id,
+                "total_fee": 1800,
+                "monthly_fee": 180,
+                "billing_cycle_text": "项目B",
+                "due_month": "2026-06-30",
+                "payment_method": "后收",
+                "summary": "项目B服务费",
+            },
+        )
+        assert record_b.status_code == 201
+        record_b_id = record_b.json()["id"]
+
+        suggest_resp = client.post(
+            "/api/v1/billing-records/payments/suggest",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "amount": 2500,
+                "strategy": "DUE_DATE_ASC",
+            },
+        )
+        assert suggest_resp.status_code == 200
+        suggestion = suggest_resp.json()
+        assert suggestion["customer_id"] == customer_id
+        assert suggestion["suggested_total"] == 2500
+        assert suggestion["remaining_amount"] == 0
+        assert len(suggestion["allocations"]) >= 2
+        first_allocation = suggestion["allocations"][0]
+        second_allocation = suggestion["allocations"][1]
+        assert first_allocation["billing_record_id"] == record_a_id
+        assert second_allocation["billing_record_id"] == record_b_id
+
+        apply_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-02-28",
+                "amount": 2500,
+                "strategy": "DUE_DATE_ASC",
+                "note": "客户统一付款，按默认优先分摊",
+                "allocations": [
+                    {"billing_record_id": record_a_id, "allocated_amount": 1800},
+                    {"billing_record_id": record_b_id, "allocated_amount": 700},
+                ],
+            },
+        )
+        assert apply_resp.status_code == 201
+        assert len(apply_resp.json()["allocations"]) == 2
+
+        records_resp = client.get("/api/v1/billing-records", headers=headers)
+        assert records_resp.status_code == 200
+        records_data = records_resp.json()
+        target_a = next(item for item in records_data if item["id"] == record_a_id)
+        target_b = next(item for item in records_data if item["id"] == record_b_id)
+        assert target_a["received_amount"] == 1800
+        assert target_a["outstanding_amount"] == 200
+        assert target_a["status"] == "PARTIAL"
+        assert target_b["received_amount"] == 700
+        assert target_b["outstanding_amount"] == 1100
+        assert target_b["status"] == "PARTIAL"
+
+        activities_a = client.get(f"/api/v1/billing-records/{record_a_id}/activities", headers=headers)
+        assert activities_a.status_code == 200
+        assert any("统一收款分摊" in (item["content"] or "") for item in activities_a.json())
+
+
+def test_renew_and_terminate_billing_record_lifecycle():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "续费终止测试客户",
+                "contact_name": "生命周期",
+                "phone": "13800138062",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "serial_no": 1601,
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "period_start_month": "2026-01",
+                "period_end_month": "2026-12",
+                "collection_start_date": "2026-01-01",
+                "due_month": "2026-12-31",
+                "total_fee": 2400,
+                "monthly_fee": 200,
+                "received_amount": 600,
+                "payment_method": "后收",
+                "summary": "原合同",
+            },
+        )
+        assert record_resp.status_code == 201
+        source_record_id = record_resp.json()["id"]
+
+        renew_resp = client.post(
+            f"/api/v1/billing-records/{source_record_id}/renew",
+            headers=headers,
+            json={"note": "自动续费生成"},
+        )
+        assert renew_resp.status_code == 201
+        renewed = renew_resp.json()
+        assert renewed["serial_no"] != 1601
+        assert renewed["period_start_month"] == "2027-01"
+        assert renewed["period_end_month"] == "2027-12"
+        assert renewed["due_month"] == "2027-12-31"
+        assert renewed["received_amount"] == 0
+
+        terminate_resp = client.post(
+            f"/api/v1/billing-records/{source_record_id}/terminate",
+            headers=headers,
+            json={
+                "terminated_at": "2026-06-30",
+                "reduced_fee": 800,
+                "reason": "合同提前终止",
+            },
+        )
+        assert terminate_resp.status_code == 200
+        terminated = terminate_resp.json()
+        assert terminated["total_fee"] == 1600
+        assert terminated["due_month"] == "2026-06-30"
+        assert terminated["period_end_month"] == "2026-06"
+        assert "合同提前终止" in (terminated["note"] or "")
+
+
+def test_customer_billing_ledger_entries_and_balance():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "明细账测试客户",
+                "contact_name": "台账负责人",
+                "phone": "13800138063",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "serial_no": 1701,
+                "customer_id": customer_id,
+                "total_fee": 3000,
+                "monthly_fee": 250,
+                "due_month": "2026-03-31",
+                "payment_method": "后收",
+                "summary": "2026代账服务费",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        payment_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=headers,
+            json={
+                "activity_type": "PAYMENT",
+                "occurred_at": "2026-03-15",
+                "amount": 1200,
+                "payment_nature": "ONE_OFF",
+                "content": "客户首笔回款",
+            },
+        )
+        assert payment_resp.status_code == 201
+        payment_resp_2 = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=headers,
+            json={
+                "activity_type": "PAYMENT",
+                "occurred_at": "2026-04-10",
+                "amount": 600,
+                "payment_nature": "ONE_OFF",
+                "content": "客户第二笔回款",
+            },
+        )
+        assert payment_resp_2.status_code == 201
+
+        ledger_resp = client.get(
+            "/api/v1/billing-records/ledger",
+            headers=headers,
+            params={
+                "customer_id": customer_id,
+                "date_from": "2026-03-01",
+                "date_to": "2026-04-30",
+            },
+        )
+        assert ledger_resp.status_code == 200
+        data = ledger_resp.json()
+        assert data["customer_id"] == customer_id
+        assert data["receivable_total"] == 3000
+        assert data["received_total"] == 1800
+        assert data["balance"] == 1200
+        assert len(data["entries"]) >= 3
+        assert any(item["source_type"] == "RECEIVABLE" for item in data["entries"])
+        assert any(item["source_type"] == "PAYMENT" for item in data["entries"])
+        assert data["entries"][-1]["balance"] == 1200
+        assert len(data["monthly_summaries"]) >= 2
+        march_summary = next(item for item in data["monthly_summaries"] if item["month"] == "2026-03")
+        april_summary = next(item for item in data["monthly_summaries"] if item["month"] == "2026-04")
+        assert march_summary["receivable_total"] == 3000
+        assert march_summary["received_total"] == 1200
+        assert march_summary["net_change"] == 1800
+        assert march_summary["ending_balance"] == 1800
+        assert april_summary["receivable_total"] == 0
+        assert april_summary["received_total"] == 600
+        assert april_summary["net_change"] == -600
+        assert april_summary["ending_balance"] == 1200
 
 
 def test_customer_update():
@@ -562,3 +1535,402 @@ def test_ldap_settings_permission_and_sync_guard():
 
         sync_response = client.post("/api/v1/admin/ldap/sync", headers=admin_headers, json={})
         assert sync_response.status_code == 400
+
+
+def test_dashboard_and_todo_flow():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        users = users_resp.json()
+        accountant2 = next(item for item in users if item["username"] == "accountant2")
+
+        create_for_other = client.post(
+            "/api/v1/todos",
+            headers=owner_headers,
+            json={
+                "title": "月底工资核算复核",
+                "description": "仅查看授权数据，不可写入",
+                "priority": "HIGH",
+                "due_date": "2026-03-05",
+                "assignee_user_id": accountant2["id"],
+            },
+        )
+        assert create_for_other.status_code == 201
+        todo_id = create_for_other.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant2", "password": "Demo@12345"},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        list_open_todos = client.get("/api/v1/todos", headers=accountant_headers)
+        assert list_open_todos.status_code == 200
+        assert any(item["id"] == todo_id for item in list_open_todos.json())
+
+        mark_done = client.patch(
+            f"/api/v1/todos/{todo_id}",
+            headers=accountant_headers,
+            json={"status": "DONE"},
+        )
+        assert mark_done.status_code == 200
+        assert mark_done.json()["status"] == "DONE"
+
+        dashboard_summary = client.get("/api/v1/dashboard/summary", headers=accountant_headers)
+        assert dashboard_summary.status_code == 200
+        summary_data = dashboard_summary.json()
+        assert summary_data["month"]
+        assert "system_todo_count" in summary_data
+        assert "manual_open_todo_count" in summary_data
+
+        system_todos = client.get("/api/v1/dashboard/system-todos", headers=accountant_headers, params={"limit": 20})
+        assert system_todos.status_code == 200
+        assert isinstance(system_todos.json(), list)
+
+
+def test_billing_due_system_todo_lifecycle():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "到期待办闭环客户",
+                "contact_name": "财务负责人",
+                "phone": "13800138999",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        due_date = date.today() + timedelta(days=2)
+        create_record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1901,
+                "customer_id": customer_id,
+                "total_fee": 3000,
+                "monthly_fee": 300,
+                "billing_cycle_text": "闭环测试账期",
+                "due_month": due_date.isoformat(),
+                "payment_method": "后收",
+            },
+        )
+        assert create_record_resp.status_code == 201
+        record_id = create_record_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": "Demo@12345"},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        system_todos_before = client.get("/api/v1/dashboard/system-todos", headers=accountant_headers, params={"limit": 200})
+        assert system_todos_before.status_code == 200
+        todo_ids_before = {item["id"] for item in system_todos_before.json()}
+        assert f"billing:{record_id}" in todo_ids_before
+
+        reminder_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=accountant_headers,
+            json={
+                "activity_type": "REMINDER",
+                "occurred_at": date.today().isoformat(),
+                "amount": 0,
+                "content": "电话催收，客户确认本周付款",
+            },
+        )
+        assert reminder_resp.status_code == 201
+
+        payment_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=accountant_headers,
+            json={
+                "activity_type": "PAYMENT",
+                "occurred_at": date.today().isoformat(),
+                "amount": 3000,
+                "payment_nature": "YEARLY",
+                "is_settlement": True,
+                "content": "款项到账，结清",
+            },
+        )
+        assert payment_resp.status_code == 201
+
+        records_resp = client.get("/api/v1/billing-records", headers=accountant_headers)
+        assert records_resp.status_code == 200
+        target_record = next(item for item in records_resp.json() if item["id"] == record_id)
+        assert target_record["status"] == "CLEARED"
+        assert target_record["outstanding_amount"] == 0
+
+        system_todos_after = client.get("/api/v1/dashboard/system-todos", headers=accountant_headers, params={"limit": 200})
+        assert system_todos_after.status_code == 200
+        todo_ids_after = {item["id"] for item in system_todos_after.json()}
+        assert f"billing:{record_id}" not in todo_ids_after
+
+
+def test_billing_renew_system_todo_contains_action_path():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "续费待办测试客户",
+                "contact_name": "续费联系人",
+                "phone": "13800138998",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        due_date = date.today() + timedelta(days=10)
+        create_record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "serial_no": 1902,
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "period_start_month": "2026-01",
+                "period_end_month": "2026-12",
+                "due_month": due_date.isoformat(),
+                "total_fee": 4800,
+                "monthly_fee": 400,
+                "payment_method": "预收",
+            },
+        )
+        assert create_record_resp.status_code == 201
+        record_id = create_record_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": "Demo@12345"},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        system_todos = client.get("/api/v1/dashboard/system-todos", headers=accountant_headers, params={"limit": 200})
+        assert system_todos.status_code == 200
+        renew_todo = next(item for item in system_todos.json() if item["id"] == f"renew:{record_id}")
+        assert renew_todo["action_label"] == "一键续费"
+        assert renew_todo["action_path"] == f"/billing?action=renew&record_id={record_id}"
+
+
+def test_system_billing_todo_only_for_assigned_accountant():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        users = users_resp.json()
+        accountant = next(item for item in users if item["username"] == "accountant")
+        accountant2 = next(item for item in users if item["username"] == "accountant2")
+
+        lead_a = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={"name": "负责人A", "contact_name": "A", "phone": "13800138071"},
+        )
+        assert lead_a.status_code == 201
+        customer_a = client.post(
+            f"/api/v1/leads/{lead_a.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        ).json()["customer"]["id"]
+
+        lead_b = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={"name": "负责人B", "contact_name": "B", "phone": "13800138072"},
+        )
+        assert lead_b.status_code == 201
+        customer_b = client.post(
+            f"/api/v1/leads/{lead_b.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant2["id"]},
+        ).json()["customer"]["id"]
+
+        due_date = (date.today() + timedelta(days=1)).isoformat()
+        record_a_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_a,
+                "total_fee": 1200,
+                "monthly_fee": 100,
+                "billing_cycle_text": "负责人A账期",
+                "due_month": due_date,
+                "payment_method": "后收",
+            },
+        )
+        assert record_a_resp.status_code == 201
+        record_a_id = record_a_resp.json()["id"]
+
+        record_b_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_b,
+                "total_fee": 1300,
+                "monthly_fee": 100,
+                "billing_cycle_text": "负责人B账期",
+                "due_month": due_date,
+                "payment_method": "后收",
+            },
+        )
+        assert record_b_resp.status_code == 201
+        record_b_id = record_b_resp.json()["id"]
+
+        grant_resp = client.post(
+            "/api/v1/admin/data-access-grants",
+            headers=owner_headers,
+            json={
+                "grantee_user_id": accountant2["id"],
+                "module": "BILLING",
+                "reason": "临时查看全量收费",
+            },
+        )
+        assert grant_resp.status_code == 201
+
+        accountant2_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant2", "password": "Demo@12345"},
+        )
+        assert accountant2_login.status_code == 200
+        accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
+
+        billing_visible = client.get("/api/v1/billing-records", headers=accountant2_headers)
+        assert billing_visible.status_code == 200
+        visible_ids = {item["id"] for item in billing_visible.json()}
+        assert record_a_id in visible_ids and record_b_id in visible_ids
+
+        todo_visible = client.get("/api/v1/dashboard/system-todos", headers=accountant2_headers, params={"limit": 200})
+        assert todo_visible.status_code == 200
+        todo_ids = {item["id"] for item in todo_visible.json()}
+        assert f"billing:{record_b_id}" in todo_ids
+        assert f"billing:{record_a_id}" not in todo_ids
+
+
+def test_todo_my_day_toggle_and_carry_behavior():
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": "Demo@12345"},
+        )
+        assert login_response.status_code == 200
+        headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+        first_todo = client.post(
+            "/api/v1/todos",
+            headers=headers,
+            json={
+                "title": "今日机制测试A",
+                "priority": "MEDIUM",
+            },
+        )
+        assert first_todo.status_code == 201
+        first_todo_id = first_todo.json()["id"]
+
+        second_todo = client.post(
+            "/api/v1/todos",
+            headers=headers,
+            json={
+                "title": "今日机制测试B",
+                "priority": "LOW",
+                "due_date": (date.today() + timedelta(days=3)).isoformat(),
+            },
+        )
+        assert second_todo.status_code == 201
+        second_todo_id = second_todo.json()["id"]
+
+        before_today = client.get("/api/v1/todos", headers=headers, params={"view": "TODAY"})
+        assert before_today.status_code == 200
+        before_ids = {item["id"] for item in before_today.json()}
+        assert first_todo_id not in before_ids
+        assert second_todo_id not in before_ids
+
+        add_all = client.post("/api/v1/todos/my-day/add-all", headers=headers)
+        assert add_all.status_code == 200
+        assert add_all.json()["affected_count"] >= 2
+
+        after_add_today = client.get("/api/v1/todos", headers=headers, params={"view": "TODAY"})
+        assert after_add_today.status_code == 200
+        added_ids = {item["id"] for item in after_add_today.json()}
+        assert first_todo_id in added_ids
+        assert second_todo_id in added_ids
+
+        done_first = client.patch(
+            f"/api/v1/todos/{first_todo_id}",
+            headers=headers,
+            json={"status": "DONE"},
+        )
+        assert done_first.status_code == 200
+        assert done_first.json()["status"] == "DONE"
+
+        today_after_done = client.get("/api/v1/todos", headers=headers, params={"view": "TODAY"})
+        assert today_after_done.status_code == 200
+        today_after_done_ids = {item["id"] for item in today_after_done.json()}
+        assert first_todo_id not in today_after_done_ids
+        assert second_todo_id in today_after_done_ids
+
+        clear_today = client.post("/api/v1/todos/my-day/clear", headers=headers)
+        assert clear_today.status_code == 200
+        assert clear_today.json()["affected_count"] >= 1
+
+        all_after_clear = client.get("/api/v1/todos", headers=headers, params={"view": "ALL", "include_done": True})
+        assert all_after_clear.status_code == 200
+        all_items = {item["id"]: item for item in all_after_clear.json()}
+        # 未完成任务不会因“今日”清空而消失，仍留在全部任务里。
+        assert second_todo_id in all_items
+        assert all_items[second_todo_id]["status"] == "OPEN"

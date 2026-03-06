@@ -62,26 +62,92 @@ type UserLite = {
   role: string;
 };
 
+type CustomerSearchItem = {
+  id: number;
+  name: string;
+  contact_name: string;
+  phone: string;
+  assigned_accountant_id: number;
+  accountant_username: string;
+};
+
+type BillingCreateForm = {
+  serial_no: number | null;
+  customer_id: number | null;
+  charge_category: string;
+  charge_mode: "PERIODIC" | "ONE_TIME";
+  amount_basis: "MONTHLY" | "YEARLY" | "ONE_TIME" | "PERIOD_TOTAL";
+  summary: string;
+  total_fee: number;
+  monthly_fee: number;
+  billing_cycle_text: string;
+  period_start_month: string;
+  period_end_month: string;
+  collection_start_date: string;
+  due_month: string;
+  payment_method: string;
+  status: "CLEARED" | "FULL_ARREARS" | "PARTIAL";
+  received_amount: number;
+  note: string;
+  extra_note: string;
+  color_tag: string;
+};
+
 const auth = useAuthStore();
 const router = useRouter();
 const loading = ref(false);
 const rows = ref<LeadItem[]>([]);
 const showLeadDialog = ref(false);
+const showRedevelopDialog = ref(false);
 const showFollowupDialog = ref(false);
 const showHistoryDrawer = ref(false);
 const showConvertDialog = ref(false);
+const showConvertBillingDialog = ref(false);
 const showGuideDialog = ref(false);
 const historyLoading = ref(false);
 const historyRows = ref<FollowupItem[]>([]);
 const historyLeadName = ref("");
 const convertTargetLeadName = ref("");
+const convertBillingTargetName = ref("");
 const accountantOptions = ref<UserLite[]>([]);
+const converting = ref(false);
+const creatingConvertBilling = ref(false);
+const creatingRedevelopLead = ref(false);
+const redevelopSearchLoading = ref(false);
+const redevelopCustomerOptions = ref<CustomerSearchItem[]>([]);
+const redevelopForm = reactive({
+  customer_id: null as number | null,
+  source: "老客户二次开发",
+  notes: "",
+  next_reminder_at: null as string | null,
+});
 const convertForm = reactive({
   lead_id: null as number | null,
   accountant_id: null as number | null,
   customer_name: "",
   customer_contact_name: "",
   customer_phone: "",
+});
+const convertBillingForm = reactive<BillingCreateForm>({
+  serial_no: null,
+  customer_id: null,
+  charge_category: "代账",
+  charge_mode: "PERIODIC",
+  amount_basis: "MONTHLY",
+  summary: "",
+  total_fee: 0,
+  monthly_fee: 0,
+  billing_cycle_text: "按月（每月收）",
+  period_start_month: "",
+  period_end_month: "",
+  collection_start_date: "",
+  due_month: "",
+  payment_method: "预收",
+  status: "PARTIAL",
+  received_amount: 0,
+  note: "",
+  extra_note: "",
+  color_tag: "",
 });
 
 const filters = reactive({
@@ -136,6 +202,50 @@ const statusOptions = [
 const templateOptions = [
   { label: "客户跟进模板", value: "FOLLOWUP" },
   { label: "转化模板", value: "CONVERSION" },
+  { label: "老客二开模板", value: "REDEVELOP" },
+];
+
+const paymentMethodOptions = [
+  { value: "预收", label: "预收" },
+  { value: "后收", label: "后收" },
+];
+
+const chargeCategoryOptions = [
+  "注册",
+  "代账",
+  "代账并退税",
+  "单独退税",
+  "咨询",
+  "课程",
+  "海外注册",
+  "其他",
+];
+
+const chargeModeOptions = [
+  { value: "PERIODIC", label: "按期" },
+  { value: "ONE_TIME", label: "按次" },
+];
+
+const amountBasisOptions = [
+  { value: "MONTHLY", label: "月费" },
+  { value: "YEARLY", label: "年费" },
+  { value: "PERIOD_TOTAL", label: "周期总价" },
+  { value: "ONE_TIME", label: "单次费用" },
+];
+
+const billingStatusOptions = [
+  { value: "CLEARED", label: "清账" },
+  { value: "PARTIAL", label: "部分收费" },
+  { value: "FULL_ARREARS", label: "全欠" },
+];
+
+const billingCycleOptions = [
+  "按月（每月收）",
+  "按季（每3个月收）",
+  "半年（每6个月收）",
+  "全年（每12个月收）",
+  "一次性（单次服务）",
+  "自定义周期（见备注）",
 ];
 
 const canConvert = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
@@ -160,6 +270,7 @@ function getStatusLabel(status: LeadStatus) {
 
 function getTemplateLabel(templateType: LeadTemplateType) {
   if (templateType === "FOLLOWUP") return "客户跟进";
+  if (templateType === "REDEVELOP") return "老客二开";
   return "转化";
 }
 
@@ -247,6 +358,71 @@ async function fetchAccountants() {
   }
 }
 
+function resetRedevelopForm() {
+  redevelopForm.customer_id = null;
+  redevelopForm.source = "老客户二次开发";
+  redevelopForm.notes = "";
+  redevelopForm.next_reminder_at = null;
+  redevelopCustomerOptions.value = [];
+}
+
+function openRedevelopDialog() {
+  resetRedevelopForm();
+  showRedevelopDialog.value = true;
+}
+
+async function searchRedevelopCustomers(keyword: string) {
+  const q = keyword.trim();
+  if (!q) {
+    redevelopCustomerOptions.value = [];
+    return;
+  }
+  redevelopSearchLoading.value = true;
+  try {
+    const resp = await apiClient.get<CustomerSearchItem[]>("/customers", {
+      params: { keyword: q },
+    });
+    redevelopCustomerOptions.value = resp.data.slice(0, 20);
+  } catch (error) {
+    ElMessage.error("搜索客户失败");
+    redevelopCustomerOptions.value = [];
+  } finally {
+    redevelopSearchLoading.value = false;
+  }
+}
+
+async function createRedevelopLead() {
+  if (!redevelopForm.customer_id) {
+    ElMessage.warning("请先搜索并选择客户");
+    return;
+  }
+  const selected = redevelopCustomerOptions.value.find((item) => item.id === redevelopForm.customer_id);
+  if (!selected) {
+    ElMessage.warning("请选择有效客户");
+    return;
+  }
+  creatingRedevelopLead.value = true;
+  try {
+    await apiClient.post("/leads", {
+      template_type: "REDEVELOP",
+      related_customer_id: selected.id,
+      name: selected.name,
+      contact_name: selected.contact_name,
+      phone: selected.phone,
+      source: redevelopForm.source.trim() || "老客户二次开发",
+      notes: redevelopForm.notes.trim(),
+      next_reminder_at: redevelopForm.next_reminder_at,
+    });
+    showRedevelopDialog.value = false;
+    ElMessage.success("已创建老客二开线索");
+    await fetchLeads();
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "创建老客二开线索失败");
+  } finally {
+    creatingRedevelopLead.value = false;
+  }
+}
+
 function openFollowupDialog(lead: LeadItem) {
   followupForm.lead_id = lead.id;
   followupForm.followup_at = todayInBrowserTimeZone();
@@ -291,10 +467,74 @@ function openConvertDialog(lead: LeadItem) {
   showConvertDialog.value = true;
 }
 
-async function submitConvert() {
+function shiftMonth(monthText: string, delta: number): string {
+  const token = (monthText || "").trim();
+  if (token.length !== 7 || token[4] !== "-") return "";
+  const year = Number(token.slice(0, 4));
+  const month = Number(token.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return "";
+  const monthIndex = year * 12 + (month - 1) + delta;
+  const targetYear = Math.floor(monthIndex / 12);
+  const targetMonth = (monthIndex % 12) + 1;
+  return `${targetYear.toString().padStart(4, "0")}-${targetMonth.toString().padStart(2, "0")}`;
+}
+
+function applyConvertBillingDefaults() {
+  if (convertBillingForm.charge_mode === "ONE_TIME") {
+    convertBillingForm.amount_basis = "ONE_TIME";
+    convertBillingForm.period_start_month = "";
+    convertBillingForm.period_end_month = "";
+    if (!convertBillingForm.due_month) {
+      convertBillingForm.due_month = todayInBrowserTimeZone();
+    }
+  } else {
+    if (convertBillingForm.amount_basis === "ONE_TIME") {
+      convertBillingForm.amount_basis = "MONTHLY";
+    }
+    if (convertBillingForm.period_start_month && !convertBillingForm.period_end_month) {
+      convertBillingForm.period_end_month = shiftMonth(convertBillingForm.period_start_month, 11);
+    }
+  }
+}
+
+function onConvertBillingModeChange() {
+  applyConvertBillingDefaults();
+}
+
+function onConvertBillingStartMonthChange() {
+  if (convertBillingForm.charge_mode === "PERIODIC" && convertBillingForm.period_start_month) {
+    convertBillingForm.period_end_month = shiftMonth(convertBillingForm.period_start_month, 11);
+    convertBillingForm.collection_start_date = `${convertBillingForm.period_start_month}-01`;
+  }
+}
+
+function resetConvertBillingForm() {
+  convertBillingForm.serial_no = null;
+  convertBillingForm.customer_id = null;
+  convertBillingForm.charge_category = "代账";
+  convertBillingForm.charge_mode = "PERIODIC";
+  convertBillingForm.amount_basis = "MONTHLY";
+  convertBillingForm.summary = "";
+  convertBillingForm.total_fee = 0;
+  convertBillingForm.monthly_fee = 0;
+  convertBillingForm.billing_cycle_text = "按月（每月收）";
+  convertBillingForm.period_start_month = "";
+  convertBillingForm.period_end_month = "";
+  convertBillingForm.collection_start_date = "";
+  convertBillingForm.due_month = "";
+  convertBillingForm.payment_method = "预收";
+  convertBillingForm.status = "PARTIAL";
+  convertBillingForm.received_amount = 0;
+  convertBillingForm.note = "";
+  convertBillingForm.extra_note = "";
+  convertBillingForm.color_tag = "";
+  applyConvertBillingDefaults();
+}
+
+function validateConvertForm(): boolean {
   if (!convertForm.lead_id || !convertForm.accountant_id) {
     ElMessage.warning("请先选择分配会计");
-    return;
+    return false;
   }
   if (
     !convertForm.customer_name.trim() ||
@@ -302,8 +542,14 @@ async function submitConvert() {
     !convertForm.customer_phone.trim()
   ) {
     ElMessage.warning("请补充转化后的客户名称、联系人和电话");
-    return;
+    return false;
   }
+  return true;
+}
+
+async function performConvert(): Promise<{ id: number; name: string } | null> {
+  if (!validateConvertForm()) return null;
+  converting.value = true;
   try {
     const resp = await apiClient.post<{ customer: { id: number } }>(
       `/leads/${convertForm.lead_id}/convert`,
@@ -314,12 +560,61 @@ async function submitConvert() {
         customer_phone: convertForm.customer_phone.trim(),
       },
     );
-    ElMessage.success("已转化为客户");
     showConvertDialog.value = false;
     await fetchLeads();
-    router.push(`/customers/${resp.data.customer.id}?from=leads`);
+    return {
+      id: resp.data.customer.id,
+      name: convertForm.customer_name.trim(),
+    };
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "转化失败，可能已转化或无权限");
+    return null;
+  } finally {
+    converting.value = false;
+  }
+}
+
+async function submitConvert() {
+  const customer = await performConvert();
+  if (!customer) return;
+  ElMessage.success("已转化为客户");
+  router.push(`/customers/${customer.id}?from=leads`);
+}
+
+async function submitConvertAndAddBilling() {
+  const customer = await performConvert();
+  if (!customer) return;
+  ElMessage.success("已转化为客户，请继续填写收费信息");
+  resetConvertBillingForm();
+  convertBillingForm.customer_id = customer.id;
+  convertBillingTargetName.value = customer.name;
+  showConvertBillingDialog.value = true;
+}
+
+async function submitConvertBilling() {
+  if (!convertBillingForm.customer_id) {
+    ElMessage.warning("客户信息缺失，无法保存收费记录");
+    return;
+  }
+  applyConvertBillingDefaults();
+  if (convertBillingForm.charge_mode === "PERIODIC") {
+    if (convertBillingForm.period_start_month && !convertBillingForm.collection_start_date) {
+      convertBillingForm.collection_start_date = `${convertBillingForm.period_start_month}-01`;
+    }
+    if (convertBillingForm.period_end_month && !convertBillingForm.due_month) {
+      convertBillingForm.due_month = `${convertBillingForm.period_end_month}-28`;
+    }
+  }
+  creatingConvertBilling.value = true;
+  try {
+    await apiClient.post("/billing-records", convertBillingForm);
+    showConvertBillingDialog.value = false;
+    ElMessage.success("已完成转化并创建收费记录");
+    router.push("/billing");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "收费信息保存失败");
+  } finally {
+    creatingConvertBilling.value = false;
   }
 }
 
@@ -458,6 +753,7 @@ onMounted(async () => {
         <el-form-item>
           <el-button @click="fetchLeads">查询</el-button>
           <el-button type="primary" @click="openCreateLeadDialog">新增线索</el-button>
+          <el-button type="primary" plain @click="openRedevelopDialog">老客二次开发</el-button>
           <el-button @click="showGuideDialog = true">流程说明</el-button>
           <el-button @click="notifyImportTodo">导入 Excel</el-button>
         </el-form-item>
@@ -589,6 +885,7 @@ onMounted(async () => {
             <el-select v-model="leadForm.template_type">
               <el-option label="客户跟进模板" value="FOLLOWUP" />
               <el-option label="转化模板" value="CONVERSION" />
+              <el-option label="老客二开模板" value="REDEVELOP" />
             </el-select>
           </el-form-item>
         </el-col>
@@ -755,6 +1052,74 @@ onMounted(async () => {
     </template>
   </el-dialog>
 
+  <el-dialog v-model="showRedevelopDialog" title="老客二次开发" width="680px">
+    <el-form label-position="top">
+      <el-form-item label="搜索客户（客户名 / 老板 / 联系人）">
+        <el-select
+          v-model="redevelopForm.customer_id"
+          filterable
+          remote
+          reserve-keyword
+          clearable
+          placeholder="输入客户名称或联系人后搜索"
+          :remote-method="searchRedevelopCustomers"
+          :loading="redevelopSearchLoading"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="item in redevelopCustomerOptions"
+            :key="`redevelop-customer-${item.id}`"
+            :label="`${item.name}（${item.contact_name}）`"
+            :value="item.id"
+          >
+            <div class="redevelop-option">
+              <span>{{ item.name }}（{{ item.contact_name }}）</span>
+              <el-text type="info" size="small">{{ item.accountant_username }}</el-text>
+            </div>
+          </el-option>
+        </el-select>
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="线索来源">
+            <el-input v-model="redevelopForm.source" placeholder="默认：老客户二次开发" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="下次提醒">
+            <el-date-picker
+              v-model="redevelopForm.next_reminder_at"
+              type="date"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              :editable="true"
+              placeholder="YYYYMMDD 或 YYMMDD"
+              @keydown.enter.capture="commitDateInput((v) => (redevelopForm.next_reminder_at = v), $event)"
+              @blur.capture="commitDateInput((v) => (redevelopForm.next_reminder_at = v), $event)"
+            />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item label="本次开发需求">
+        <el-input
+          v-model="redevelopForm.notes"
+          type="textarea"
+          :rows="3"
+          placeholder="例如：新增股权变更服务，预计本周转成交并录入费用"
+        />
+      </el-form-item>
+      <el-text type="info" size="small">
+        创建后会生成一条“老客二开线索”，成交时复用原客户，不会重复建客户档案。
+      </el-text>
+    </el-form>
+    <template #footer>
+      <el-button @click="showRedevelopDialog = false">取消</el-button>
+      <el-button type="primary" :loading="creatingRedevelopLead" @click="createRedevelopLead">
+        创建二开线索
+      </el-button>
+    </template>
+  </el-dialog>
+
   <el-dialog v-model="showFollowupDialog" title="新增跟进" width="520px">
     <el-form label-position="top">
       <el-row :gutter="12">
@@ -833,7 +1198,187 @@ onMounted(async () => {
     </el-form>
     <template #footer>
       <el-button @click="showConvertDialog = false">取消</el-button>
-      <el-button type="primary" @click="submitConvert">确认转化</el-button>
+      <el-button type="primary" plain :loading="converting" @click="submitConvert">确认转化</el-button>
+      <el-button type="primary" :loading="converting" @click="submitConvertAndAddBilling">
+        确认转化并添加收费信息
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="showConvertBillingDialog" :title="`添加收费信息 - ${convertBillingTargetName}`" width="760px">
+    <el-form label-position="top">
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="序号">
+            <el-input-number
+              v-model="convertBillingForm.serial_no"
+              :min="1"
+              :controls="false"
+              style="width:100%"
+              placeholder="留空自动编号"
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="16">
+          <el-form-item label="客户">
+            <el-input :model-value="convertBillingTargetName" disabled />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="6">
+          <el-form-item label="收费类别">
+            <el-select v-model="convertBillingForm.charge_category">
+              <el-option
+                v-for="item in chargeCategoryOptions"
+                :key="`lead-convert-category-${item}`"
+                :label="item"
+                :value="item"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="计费方式">
+            <el-select v-model="convertBillingForm.charge_mode" @change="onConvertBillingModeChange">
+              <el-option
+                v-for="item in chargeModeOptions"
+                :key="`lead-convert-mode-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="金额口径">
+            <el-select v-model="convertBillingForm.amount_basis">
+              <el-option
+                v-for="item in amountBasisOptions"
+                :key="`lead-convert-basis-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="摘要">
+            <el-input v-model="convertBillingForm.summary" placeholder="例如：注册服务费" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="6"><el-form-item label="总费用"><el-input-number v-model="convertBillingForm.total_fee" :min="0" :controls="false" style="width:100%" /></el-form-item></el-col>
+        <el-col :span="6"><el-form-item label="月费用"><el-input-number v-model="convertBillingForm.monthly_fee" :min="0" :controls="false" style="width:100%" /></el-form-item></el-col>
+        <el-col :span="6">
+          <el-form-item label="开始月份">
+            <el-date-picker
+              v-model="convertBillingForm.period_start_month"
+              type="month"
+              format="YYYY-MM"
+              value-format="YYYY-MM"
+              :disabled="convertBillingForm.charge_mode === 'ONE_TIME'"
+              placeholder="YYYY-MM"
+              @change="onConvertBillingStartMonthChange"
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="结束月份">
+            <el-date-picker
+              v-model="convertBillingForm.period_end_month"
+              type="month"
+              format="YYYY-MM"
+              value-format="YYYY-MM"
+              :disabled="convertBillingForm.charge_mode === 'ONE_TIME'"
+              placeholder="YYYY-MM"
+            />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="6">
+          <el-form-item label="起收日期（精确）">
+            <el-date-picker
+              v-model="convertBillingForm.collection_start_date"
+              type="date"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              :editable="true"
+              placeholder="YYYYMMDD 或 YYMMDD"
+              @keydown.enter.capture="commitDateInput((v) => (convertBillingForm.collection_start_date = v), $event)"
+              @blur.capture="commitDateInput((v) => (convertBillingForm.collection_start_date = v), $event)"
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="到期日">
+            <el-date-picker
+              v-model="convertBillingForm.due_month"
+              type="date"
+              format="YYYY-MM-DD"
+              value-format="YYYY-MM-DD"
+              :editable="true"
+              placeholder="YYYYMMDD 或 YYMMDD"
+              @keydown.enter.capture="commitDateInput((v) => (convertBillingForm.due_month = v), $event)"
+              @blur.capture="commitDateInput((v) => (convertBillingForm.due_month = v), $event)"
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-text type="info" size="small">
+            {{ convertBillingForm.charge_mode === "ONE_TIME" ? "按次：默认当天到期" : "按期：默认结束月份=开始月份+11" }}
+          </el-text>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="付款方式">
+            <el-select v-model="convertBillingForm.payment_method">
+              <el-option
+                v-for="item in paymentMethodOptions"
+                :key="`lead-convert-method-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
+          <el-form-item label="台账状态">
+            <el-select v-model="convertBillingForm.status">
+              <el-option
+                v-for="item in billingStatusOptions"
+                :key="`lead-convert-status-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="8"><el-form-item label="已收金额"><el-input-number v-model="convertBillingForm.received_amount" :min="0" :controls="false" style="width:100%" /></el-form-item></el-col>
+      </el-row>
+      <el-form-item label="代账周期">
+        <el-select v-model="convertBillingForm.billing_cycle_text" placeholder="请选择代账周期">
+          <el-option
+            v-for="item in billingCycleOptions"
+            :key="`lead-convert-cycle-${item}`"
+            :label="item"
+            :value="item"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="convertBillingForm.note" type="textarea" :rows="2" />
+      </el-form-item>
+      <el-form-item label="扩展说明">
+        <el-input v-model="convertBillingForm.extra_note" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showConvertBillingDialog = false">稍后添加</el-button>
+      <el-button type="primary" :loading="creatingConvertBilling" @click="submitConvertBilling">保存收费信息</el-button>
     </template>
   </el-dialog>
 
@@ -867,6 +1412,9 @@ onMounted(async () => {
           </el-descriptions-item>
           <el-descriptions-item label="转化模板（CONVERSION）">
             适合转化导向字段：地区、联络时间、备用字段等。
+          </el-descriptions-item>
+          <el-descriptions-item label="老客二开模板（REDEVELOP）">
+            用于老客户二次开发，成交后复用原客户档案并直接录入新增费用。
           </el-descriptions-item>
           <el-descriptions-item label="页面顶部“模板筛选”">
             仅用于过滤列表显示，不会修改线索本身的数据。
@@ -911,6 +1459,13 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.redevelop-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 @media (max-width: 900px) {

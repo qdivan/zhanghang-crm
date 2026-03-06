@@ -25,6 +25,8 @@ class User(Base):
     leads: Mapped[list["Lead"]] = relationship(back_populates="owner")
     assigned_customers: Mapped[list["Customer"]] = relationship(back_populates="accountant")
     billing_activities: Mapped[list["BillingActivity"]] = relationship(back_populates="actor")
+    billing_execution_logs: Mapped[list["BillingExecutionLog"]] = relationship(back_populates="actor")
+    billing_payments: Mapped[list["BillingPayment"]] = relationship(back_populates="creator")
 
 
 class Lead(Base):
@@ -59,6 +61,7 @@ class Lead(Base):
     reminder_value: Mapped[str] = mapped_column(String(64), default="")
     last_feedback: Mapped[str] = mapped_column(Text, default="")
     notes: Mapped[str] = mapped_column(Text, default="")
+    related_customer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -77,7 +80,7 @@ class Lead(Base):
     @property
     def customer_id(self) -> Optional[int]:
         if self.customer is None:
-            return None
+            return self.related_customer_id
         return self.customer.id
 
 
@@ -141,9 +144,16 @@ class BillingRecord(Base):
         index=True,
     )
     customer_name: Mapped[str] = mapped_column(String(200), index=True)
+    charge_category: Mapped[str] = mapped_column(String(64), default="代账", index=True)
+    charge_mode: Mapped[str] = mapped_column(String(20), default="PERIODIC", index=True)
+    amount_basis: Mapped[str] = mapped_column(String(20), default="MONTHLY")
+    summary: Mapped[str] = mapped_column(String(255), default="")
     total_fee: Mapped[float] = mapped_column(Float, default=0)
     monthly_fee: Mapped[float] = mapped_column(Float, default=0)
     billing_cycle_text: Mapped[str] = mapped_column(String(255), default="")
+    period_start_month: Mapped[str] = mapped_column(String(7), default="")
+    period_end_month: Mapped[str] = mapped_column(String(7), default="")
+    collection_start_date: Mapped[str] = mapped_column(String(32), default="")
     due_month: Mapped[str] = mapped_column(String(32), default="")
     payment_method: Mapped[str] = mapped_column(String(64), default="")
     status: Mapped[str] = mapped_column(String(32), default="PARTIAL", index=True)
@@ -162,6 +172,18 @@ class BillingRecord(Base):
         back_populates="billing_record",
         cascade="all, delete-orphan",
     )
+    execution_logs: Mapped[list["BillingExecutionLog"]] = relationship(
+        back_populates="billing_record",
+        cascade="all, delete-orphan",
+    )
+    payment_allocations: Mapped[list["BillingPaymentAllocation"]] = relationship(
+        back_populates="billing_record",
+        cascade="all, delete-orphan",
+    )
+    assignments: Mapped[list["BillingAssignment"]] = relationship(
+        back_populates="billing_record",
+        cascade="all, delete-orphan",
+    )
     customer: Mapped[Optional["Customer"]] = relationship(back_populates="billing_records")
 
     @property
@@ -169,6 +191,12 @@ class BillingRecord(Base):
         if self.customer is None or self.customer.accountant is None:
             return ""
         return self.customer.accountant.username
+
+    @property
+    def customer_contact_name(self) -> str:
+        if self.customer is None:
+            return ""
+        return self.customer.contact_name or ""
 
 
 class BillingActivity(Base):
@@ -190,6 +218,136 @@ class BillingActivity(Base):
 
     billing_record: Mapped["BillingRecord"] = relationship(back_populates="activities")
     actor: Mapped["User"] = relationship(back_populates="billing_activities")
+
+
+class BillingExecutionLog(Base):
+    __tablename__ = "billing_execution_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    billing_record_id: Mapped[int] = mapped_column(ForeignKey("billing_records.id"), index=True)
+    occurred_at: Mapped[date] = mapped_column(Date, default=date.today)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    progress_type: Mapped[str] = mapped_column(String(20), default="UPDATE", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    next_action: Mapped[str] = mapped_column(Text, default="")
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    billing_record: Mapped["BillingRecord"] = relationship(back_populates="execution_logs")
+    actor: Mapped["User"] = relationship(back_populates="billing_execution_logs")
+
+    @property
+    def actor_username(self) -> str:
+        if self.actor is None:
+            return ""
+        return self.actor.username
+
+
+class BillingPayment(Base):
+    __tablename__ = "billing_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    occurred_at: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    strategy: Mapped[str] = mapped_column(String(32), default="DUE_DATE_ASC")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    customer: Mapped["Customer"] = relationship()
+    creator: Mapped["User"] = relationship(back_populates="billing_payments")
+    allocations: Mapped[list["BillingPaymentAllocation"]] = relationship(
+        back_populates="payment",
+        cascade="all, delete-orphan",
+    )
+
+
+class BillingPaymentAllocation(Base):
+    __tablename__ = "billing_payment_allocations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("billing_payments.id"), index=True)
+    billing_record_id: Mapped[int] = mapped_column(ForeignKey("billing_records.id"), index=True)
+    allocated_amount: Mapped[float] = mapped_column(Float, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    payment: Mapped["BillingPayment"] = relationship(back_populates="allocations")
+    billing_record: Mapped["BillingRecord"] = relationship(back_populates="payment_allocations")
+
+
+class BillingAssignment(Base):
+    __tablename__ = "billing_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    billing_record_id: Mapped[int] = mapped_column(ForeignKey("billing_records.id"), index=True)
+    assignee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    assignment_role: Mapped[str] = mapped_column(String(32), default="DELIVERY")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    billing_record: Mapped["BillingRecord"] = relationship(back_populates="assignments")
+    assignee: Mapped[Optional["User"]] = relationship(foreign_keys=[assignee_user_id])
+
+    @property
+    def assignee_username(self) -> str:
+        if self.assignee is None:
+            return ""
+        return self.assignee.username
+
+    @property
+    def assignee_role(self) -> str:
+        if self.assignee is None:
+            return ""
+        return self.assignee.role
+
+
+class TodoItem(Base):
+    __tablename__ = "todo_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    priority: Mapped[str] = mapped_column(String(20), default="MEDIUM", index=True)
+    due_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    my_day_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", index=True)
+    assignee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
+class DataAccessGrant(Base):
+    __tablename__ = "data_access_grants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    grantee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    module: Mapped[str] = mapped_column(String(20), index=True)  # CUSTOMER / BILLING
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    starts_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    granted_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
 
 class OperationLog(Base):

@@ -36,7 +36,9 @@ const followupForm = reactive({
 });
 
 function templateLabel(templateType: string) {
-  return templateType === "FOLLOWUP" ? "客户跟进模板" : "转化模板";
+  if (templateType === "FOLLOWUP") return "客户跟进模板";
+  if (templateType === "REDEVELOP") return "老客二开模板";
+  return "转化模板";
 }
 
 function statusLabel(status: string) {

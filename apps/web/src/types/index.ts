@@ -75,8 +75,42 @@ export interface OperationLogItem {
   created_at: string;
 }
 
+export type DataAccessModule = "CUSTOMER" | "BILLING";
+
+export interface DataAccessGrantItem {
+  id: number;
+  grantee_user_id: number;
+  grantee_username: string;
+  module: DataAccessModule;
+  is_active: boolean;
+  is_effective: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  reason: string;
+  granted_by_user_id: number | null;
+  granted_by_username: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DataAccessGrantCreatePayload {
+  grantee_user_id: number;
+  module: DataAccessModule;
+  starts_at?: string;
+  ends_at?: string;
+  reason?: string;
+  is_active?: boolean;
+}
+
+export interface DataAccessGrantUpdatePayload {
+  starts_at?: string;
+  ends_at?: string;
+  reason?: string;
+  is_active?: boolean;
+}
+
 export type LeadStatus = "NEW" | "FOLLOWING" | "CONVERTED" | "LOST";
-export type LeadTemplateType = "FOLLOWUP" | "CONVERSION";
+export type LeadTemplateType = "FOLLOWUP" | "CONVERSION" | "REDEVELOP";
 
 export interface LeadItem {
   id: number;
@@ -102,6 +136,7 @@ export interface LeadItem {
   reserve_2: string;
   reserve_3: string;
   reserve_4: string;
+  related_customer_id: number | null;
   customer_id: number | null;
   status: LeadStatus;
   next_reminder_at: string | null;
@@ -174,10 +209,18 @@ export interface BillingRecord {
   serial_no: number;
   customer_id: number | null;
   customer_name: string;
+  charge_category: string;
+  charge_mode: "PERIODIC" | "ONE_TIME";
+  amount_basis: "MONTHLY" | "YEARLY" | "ONE_TIME" | "PERIOD_TOTAL";
+  summary: string;
+  customer_contact_name: string;
   accountant_username: string;
   total_fee: number;
   monthly_fee: number;
   billing_cycle_text: string;
+  period_start_month: string;
+  period_end_month: string;
+  collection_start_date: string;
   due_month: string;
   payment_method: string;
   status: "CLEARED" | "FULL_ARREARS" | "PARTIAL";
@@ -204,4 +247,150 @@ export interface BillingActivity {
   next_followup_at: string | null;
   note: string;
   created_at: string;
+}
+
+export type BillingAssignmentRole = "REGISTRATION" | "DELIVERY" | "OTHER";
+
+export interface BillingAssignmentItem {
+  id: number;
+  billing_record_id: number;
+  assignee_user_id: number;
+  assignee_username: string;
+  assignee_role: UserRole | string;
+  assignment_role: BillingAssignmentRole;
+  is_active: boolean;
+  note: string;
+  created_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BillingExecutionProgressType = "UPDATE" | "MILESTONE" | "BLOCKER" | "DONE";
+
+export interface BillingExecutionLogItem {
+  id: number;
+  billing_record_id: number;
+  occurred_at: string;
+  actor_id: number;
+  actor_username: string;
+  progress_type: BillingExecutionProgressType | string;
+  content: string;
+  next_action: string;
+  due_date: string | null;
+  note: string;
+  created_at: string;
+}
+
+export type BillingPaymentStrategy = "DUE_DATE_ASC" | "SERIAL_ASC" | "AMOUNT_DESC";
+
+export interface BillingPaymentSuggestedAllocation {
+  billing_record_id: number;
+  serial_no: number;
+  summary: string;
+  due_month: string;
+  outstanding_amount: number;
+  suggested_amount: number;
+}
+
+export interface BillingPaymentSuggestion {
+  customer_id: number;
+  amount: number;
+  strategy: BillingPaymentStrategy | string;
+  outstanding_total: number;
+  suggested_total: number;
+  remaining_amount: number;
+  allocations: BillingPaymentSuggestedAllocation[];
+}
+
+export interface BillingLedgerEntryItem {
+  occurred_at: string;
+  summary: string;
+  receivable_amount: number;
+  received_amount: number;
+  balance: number;
+  source_type: "RECEIVABLE" | "PAYMENT" | string;
+  billing_record_id: number | null;
+}
+
+export interface BillingLedgerMonthlySummaryItem {
+  month: string;
+  receivable_total: number;
+  received_total: number;
+  net_change: number;
+  ending_balance: number;
+}
+
+export interface BillingLedgerData {
+  customer_id: number;
+  customer_name: string;
+  date_from: string | null;
+  date_to: string | null;
+  receivable_total: number;
+  received_total: number;
+  balance: number;
+  monthly_summaries: BillingLedgerMonthlySummaryItem[];
+  entries: BillingLedgerEntryItem[];
+}
+
+export type TodoPriority = "HIGH" | "MEDIUM" | "LOW";
+export type TodoStatus = "OPEN" | "DONE";
+
+export interface TodoItem {
+  id: number;
+  title: string;
+  description: string;
+  priority: TodoPriority;
+  due_date: string | null;
+  my_day_date: string | null;
+  is_in_today: boolean;
+  status: TodoStatus;
+  assignee_user_id: number;
+  assignee_username: string;
+  created_by_user_id: number;
+  created_by_username: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TodoCreatePayload {
+  title: string;
+  description?: string;
+  priority?: TodoPriority;
+  due_date?: string;
+  assignee_user_id?: number;
+  is_in_today?: boolean;
+}
+
+export interface TodoUpdatePayload {
+  title?: string;
+  description?: string;
+  priority?: TodoPriority;
+  due_date?: string | null;
+  status?: TodoStatus;
+  is_in_today?: boolean;
+}
+
+export interface SystemTodoItem {
+  id: string;
+  module: "LEAD" | "BILLING";
+  priority: TodoPriority;
+  title: string;
+  description: string;
+  due_date: string | null;
+  action_path: string;
+  action_label: string;
+  assignee_user_id: number | null;
+  assignee_username: string;
+}
+
+export interface DashboardSummary {
+  month: string;
+  lead_new_count: number;
+  lead_following_count: number;
+  customer_count: number;
+  billing_record_count: number;
+  outstanding_amount_total: number;
+  manual_open_todo_count: number;
+  system_todo_count: number;
 }

@@ -9,13 +9,25 @@ from app.db.session import get_db
 from app.models import Customer, Lead, LeadFollowup, User
 from app.schemas.customer import CustomerDetailOut, CustomerListOut, CustomerUpdate
 from app.services.audit import write_operation_log
+from app.services.data_access import has_module_read_grant
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
 
-def _ensure_customer_access(customer: Customer, current_user: User) -> None:
-    if current_user.role == "ACCOUNTANT" and customer.assigned_accountant_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this customer")
+def _ensure_customer_access(
+    customer: Customer,
+    current_user: User,
+    db: Session,
+    *,
+    for_write: bool = False,
+) -> None:
+    if current_user.role != "ACCOUNTANT":
+        return
+    if customer.assigned_accountant_id == current_user.id:
+        return
+    if not for_write and has_module_read_grant(db, current_user.id, "CUSTOMER"):
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this customer")
 
 
 @router.get("", response_model=list[CustomerListOut])
@@ -24,6 +36,10 @@ def list_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    has_customer_read_grant = False
+    if current_user.role == "ACCOUNTANT":
+        has_customer_read_grant = has_module_read_grant(db, current_user.id, "CUSTOMER")
+
     stmt = (
         select(Customer, User.username, Lead.template_type, Lead.grade, Lead.last_followup_date, Lead.reminder_value)
         .join(User, Customer.assigned_accountant_id == User.id)
@@ -40,7 +56,7 @@ def list_customers(
                 User.username.ilike(key),
             )
         )
-    if current_user.role == "ACCOUNTANT":
+    if current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
         stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
 
     rows = db.execute(stmt).all()
@@ -78,7 +94,7 @@ def get_customer_detail(
     )
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    _ensure_customer_access(customer, current_user)
+    _ensure_customer_access(customer, current_user, db)
 
     lead = (
         db.execute(select(Lead).options(selectinload(Lead.customer)).where(Lead.id == customer.source_lead_id))
@@ -124,7 +140,7 @@ def update_customer(
     customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    _ensure_customer_access(customer, current_user)
+    _ensure_customer_access(customer, current_user, db, for_write=True)
 
     lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id)).scalar_one_or_none()
     if lead is None:

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   CollectionTag,
+  House,
   Location,
   Management,
   Menu as MenuIcon,
@@ -13,6 +14,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "../stores/auth";
+import TodoDock from "../components/TodoDock.vue";
 
 const router = useRouter();
 const route = useRoute();
@@ -21,15 +23,19 @@ const isMobile = ref(false);
 const mobileMenuVisible = ref(false);
 
 const canOpenAdminPanel = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canOpenCostView = computed(() => auth.user?.role === "OWNER");
 
 const menuItems = computed(() => {
   const items = [
+    { path: "/dashboard", label: "工作台", icon: House },
     { path: "/leads", label: "客户开发", icon: Management },
     { path: "/customers", label: "客户列表", icon: User },
     { path: "/address-resources", label: "地址资源", icon: Location },
     { path: "/billing", label: "收费收款", icon: Money },
-    { path: "/costs", label: "成本与老板视图", icon: CollectionTag },
   ];
+  if (canOpenCostView.value) {
+    items.push({ path: "/costs", label: "成本与老板视图", icon: CollectionTag });
+  }
   if (canOpenAdminPanel.value) {
     items.push({ path: "/admin/users", label: "管理员面板", icon: Setting });
   }
@@ -42,6 +48,7 @@ function onMenuSelect(path: string) {
 }
 
 const activeMenu = computed(() => {
+  if (route.path.startsWith("/dashboard")) return "/dashboard";
   if (route.path.startsWith("/leads")) return "/leads";
   if (route.path.startsWith("/customers")) return "/customers";
   if (route.path.startsWith("/address-resources")) return "/address-resources";
@@ -151,7 +158,10 @@ watch(
         </div>
       </el-header>
       <el-main class="main-area">
-        <router-view />
+        <div class="content-main">
+          <router-view />
+        </div>
+        <TodoDock />
       </el-main>
     </el-container>
   </el-container>
@@ -243,6 +253,9 @@ watch(
 .main-area {
   background: #f7f8fa;
   padding: 16px;
+}
+
+.content-main {
   overflow-x: auto;
 }
 
@@ -281,6 +294,7 @@ watch(
   .main-area {
     padding: 10px;
   }
+
 }
 
 .topbar :deep(.el-tag__content) {

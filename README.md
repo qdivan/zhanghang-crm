@@ -24,33 +24,70 @@
    - 台账状态（清账/全欠/部分收费）与已收/未收金额
    - 催收/收款日志（可登记收款、预付、结清）
    - 管理员面板（用户检索、创建、编辑、删除、重置密码）
+   - 临时只读数据授权（老板/管理员可给会计临时开放“客户列表/收费收款”查看权限）
+   - 工作台 Dashboard（首页统计）+ 右侧 Todo 栏（手动待办 + 系统待办，支持“今日任务/全部任务”）
    - 用户权限边界：管理员可管理全部本地账号，老板仅可管理非管理员账号
    - 用户最近登录时间展示（管理员面板）
    - 操作日志（登录/用户管理/核心业务写操作）
    - LDAP 设置与账号同步（支持群晖 LDAP）
 
-## 本地开发
+## 常用命令（推荐）
 
-### 后端
+### 首次初始化（本地）
 ```bash
+npm install
 cd apps/api
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
 ```
 
-### 前端
+### 一体化本地开发（默认）
 ```bash
-cd apps/web
-npm install
 npm run dev
+```
+
+说明：
+1. 同时启动本地 API（`http://127.0.0.1:8000`）和前端 Vite（`http://127.0.0.1:5173`）。
+2. `Ctrl + C` 会同时停止两者。
+3. 若你此前启动了 Docker 开发环境，请先执行 `npm run stop:docker` 释放 8000/5173 端口。
+4. 本地 API 默认自动注入演示数据（可通过环境变量覆盖：`BOOTSTRAP_DEMO_DATA=false`）。
+
+### 本地单独启动
+```bash
+npm run dev:api
+npm run dev:web
+```
+
+### 本地测试
+```bash
+npm run test
+```
+
+等价拆分：
+```bash
+npm run test:api
+npm run test:web
 ```
 
 ## Docker 启动
 ```bash
-cd infra
-docker compose up --build
+npm run dev:docker
+```
+
+停止：
+```bash
+npm run stop:docker
+```
+
+## 生产镜像本地演练
+```bash
+npm run prod:up
+```
+
+停止：
+```bash
+npm run prod:down
 ```
 
 说明：

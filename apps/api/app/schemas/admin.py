@@ -50,3 +50,35 @@ class OperationLogOut(BaseModel):
     entity_id: str
     detail: str
     created_at: datetime
+
+
+class DataAccessGrantCreate(BaseModel):
+    grantee_user_id: int = Field(gt=0)
+    module: Literal["CUSTOMER", "BILLING"]
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    reason: str = Field(default="", max_length=2000)
+    is_active: bool = True
+
+
+class DataAccessGrantUpdate(BaseModel):
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    reason: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
+
+
+class DataAccessGrantOut(BaseModel):
+    id: int
+    grantee_user_id: int
+    grantee_username: str
+    module: Literal["CUSTOMER", "BILLING"]
+    is_active: bool
+    is_effective: bool
+    starts_at: Optional[datetime]
+    ends_at: Optional[datetime]
+    reason: str
+    granted_by_user_id: Optional[int]
+    granted_by_username: str
+    created_at: datetime
+    updated_at: datetime

@@ -7,7 +7,18 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_roles
 from app.core.security import hash_password
 from app.db.session import get_db
-from app.models import BillingActivity, Customer, Lead, OperationLog, User
+from app.models import (
+    BillingActivity,
+    BillingAssignment,
+    BillingExecutionLog,
+    BillingPayment,
+    Customer,
+    DataAccessGrant,
+    Lead,
+    OperationLog,
+    TodoItem,
+    User,
+)
 from app.schemas.auth import UserOut
 from app.schemas.user_admin import UserCreate, UserUpdate
 from app.services.audit import write_operation_log
@@ -47,14 +58,39 @@ def _count_user_dependencies(db: Session, user_id: int) -> dict[str, int]:
     activity_count = db.execute(
         select(func.count(BillingActivity.id)).where(BillingActivity.actor_id == user_id),
     ).scalar_one()
+    assignment_count = db.execute(
+        select(func.count(BillingAssignment.id)).where(BillingAssignment.assignee_user_id == user_id),
+    ).scalar_one()
+    execution_log_count = db.execute(
+        select(func.count(BillingExecutionLog.id)).where(BillingExecutionLog.actor_id == user_id),
+    ).scalar_one()
+    payment_count = db.execute(
+        select(func.count(BillingPayment.id)).where(BillingPayment.created_by_user_id == user_id),
+    ).scalar_one()
     operation_log_count = db.execute(
         select(func.count(OperationLog.id)).where(OperationLog.actor_id == user_id),
+    ).scalar_one()
+    data_grant_count = db.execute(
+        select(func.count(DataAccessGrant.id)).where(DataAccessGrant.grantee_user_id == user_id),
+    ).scalar_one()
+    todo_count = db.execute(
+        select(func.count(TodoItem.id)).where(
+            or_(
+                TodoItem.assignee_user_id == user_id,
+                TodoItem.created_by_user_id == user_id,
+            )
+        ),
     ).scalar_one()
     return {
         "线索": int(lead_count or 0),
         "客户": int(customer_count or 0),
         "催收收款日志": int(activity_count or 0),
+        "执行进度日志": int(execution_log_count or 0),
+        "收款分摊单": int(payment_count or 0),
+        "执行分派": int(assignment_count or 0),
         "操作日志": int(operation_log_count or 0),
+        "数据授权": int(data_grant_count or 0),
+        "待办": int(todo_count or 0),
     }
 
 

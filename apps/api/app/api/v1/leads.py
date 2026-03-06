@@ -18,6 +18,7 @@ from app.schemas.lead import (
     LeadUpdate,
 )
 from app.services.audit import write_operation_log
+from app.services.data_access import has_module_read_grant
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -29,7 +30,7 @@ def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
     return lead
 
 
-def _ensure_lead_access(lead: Lead, current_user: User) -> None:
+def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_write: bool = False) -> None:
     if current_user.role != "ACCOUNTANT":
         return
     if lead.owner_id == current_user.id:
@@ -37,6 +38,18 @@ def _ensure_lead_access(lead: Lead, current_user: User) -> None:
     # 转化后的客户，允许被分配的会计继续写跟进
     if lead.customer is not None and lead.customer.assigned_accountant_id == current_user.id:
         return
+    if lead.related_customer_id is not None:
+        related_customer_assignee = db.execute(
+            select(Customer.assigned_accountant_id).where(Customer.id == lead.related_customer_id)
+        ).scalar_one_or_none()
+        if related_customer_assignee == current_user.id:
+            return
+        if (
+            not for_write
+            and related_customer_assignee is not None
+            and has_module_read_grant(db, current_user.id, "CUSTOMER")
+        ):
+            return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this lead")
 
 
@@ -63,7 +76,12 @@ def list_leads(
     if owner_id:
         stmt = stmt.where(Lead.owner_id == owner_id)
     if current_user.role == "ACCOUNTANT":
-        stmt = stmt.where(Lead.owner_id == current_user.id)
+        stmt = stmt.where(
+            or_(
+                Lead.owner_id == current_user.id,
+                Lead.customer.has(Customer.assigned_accountant_id == current_user.id),
+            )
+        )
 
     return db.execute(stmt).scalars().all()
 
@@ -80,7 +98,7 @@ def get_lead(
     )
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
-    _ensure_lead_access(lead, current_user)
+    _ensure_lead_access(lead, current_user, db)
     return lead
 
 
@@ -98,6 +116,22 @@ def create_lead(
     owner = db.execute(select(User).where(User.id == target_owner_id)).scalar_one_or_none()
     if owner is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner not found")
+
+    related_customer_id = payload.related_customer_id
+    if related_customer_id is not None:
+        related_customer = db.execute(select(Customer).where(Customer.id == related_customer_id)).scalar_one_or_none()
+        if related_customer is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
+        if current_user.role == "ACCOUNTANT":
+            can_link_related_customer = (
+                related_customer.assigned_accountant_id == current_user.id
+                or has_module_read_grant(db, current_user.id, "CUSTOMER")
+            )
+            if not can_link_related_customer:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No access to related customer",
+                )
 
     lead = Lead(
         template_type=payload.template_type,
@@ -126,6 +160,7 @@ def create_lead(
         next_reminder_at=payload.next_reminder_at,
         reminder_value=payload.reminder_value,
         notes=payload.notes,
+        related_customer_id=related_customer_id,
         owner_id=target_owner_id,
     )
     db.add(lead)
@@ -135,7 +170,10 @@ def create_lead(
         action="LEAD_CREATED",
         entity_type="LEAD",
         entity_id=lead.name,
-        detail=f"template={lead.template_type},owner={lead.owner_id}",
+        detail=(
+            f"template={lead.template_type},owner={lead.owner_id},"
+            f"related_customer_id={lead.related_customer_id or ''}"
+        ),
     )
     db.commit()
     db.refresh(lead)
@@ -150,7 +188,7 @@ def update_lead(
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
-    _ensure_lead_access(lead, current_user)
+    _ensure_lead_access(lead, current_user, db, for_write=True)
 
     if payload.name is not None:
         lead.name = payload.name
@@ -204,6 +242,11 @@ def update_lead(
         lead.reminder_value = payload.reminder_value
     if payload.notes is not None:
         lead.notes = payload.notes
+    if payload.related_customer_id is not None:
+        related_customer = db.execute(select(Customer).where(Customer.id == payload.related_customer_id)).scalar_one_or_none()
+        if related_customer is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
+        lead.related_customer_id = related_customer.id
 
     lead.updated_at = datetime.utcnow()
     db.commit()
@@ -219,7 +262,7 @@ def create_followup(
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
-    _ensure_lead_access(lead, current_user)
+    _ensure_lead_access(lead, current_user, db, for_write=True)
 
     followup = LeadFollowup(
         lead_id=lead_id,
@@ -257,7 +300,7 @@ def list_followups(
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
-    _ensure_lead_access(lead, current_user)
+    _ensure_lead_access(lead, current_user, db)
 
     stmt = (
         select(LeadFollowup)
@@ -282,44 +325,70 @@ def convert_lead(
     if lead.status == "CONVERTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lead already converted")
 
+    requested_name = (payload.customer_name or "").strip()
+    requested_contact_name = (payload.customer_contact_name or "").strip()
+    requested_phone = (payload.customer_phone or "").strip()
+
+    customer: Customer
     assigned_accountant_id = payload.accountant_id
-    if assigned_accountant_id is None:
-        owner = db.execute(select(User).where(User.id == lead.owner_id)).scalar_one_or_none()
-        if owner is not None and owner.role == "ACCOUNTANT":
-            assigned_accountant_id = owner.id
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="accountant_id is required",
-            )
+    if lead.related_customer_id is not None:
+        customer = db.execute(select(Customer).where(Customer.id == lead.related_customer_id)).scalar_one_or_none()
+        if customer is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
+        if assigned_accountant_id is None:
+            assigned_accountant_id = customer.assigned_accountant_id
+    else:
+        if assigned_accountant_id is None:
+            owner = db.execute(select(User).where(User.id == lead.owner_id)).scalar_one_or_none()
+            if owner is not None and owner.role == "ACCOUNTANT":
+                assigned_accountant_id = owner.id
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="accountant_id is required",
+                )
+
     accountant = db.execute(select(User).where(User.id == assigned_accountant_id)).scalar_one_or_none()
     if accountant is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned accountant not found")
     if accountant.role != "ACCOUNTANT":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be ACCOUNTANT")
 
-    customer_name = (payload.customer_name or "").strip() or lead.name
-    customer_contact_name = (payload.customer_contact_name or "").strip() or lead.contact_name
-    customer_phone = (payload.customer_phone or "").strip() or lead.phone
+    if lead.related_customer_id is not None:
+        old_customer_name = customer.name
+        customer.name = requested_name or customer.name or lead.name
+        customer.contact_name = requested_contact_name or customer.contact_name or lead.contact_name
+        customer.phone = requested_phone or customer.phone or lead.phone
+        customer.assigned_accountant_id = assigned_accountant_id
+        if customer.name != old_customer_name:
+            for record in customer.billing_records:
+                record.customer_name = customer.name
+    else:
+        customer_name = requested_name or lead.name
+        customer_contact_name = requested_contact_name or lead.contact_name
+        customer_phone = requested_phone or lead.phone
+        customer = Customer(
+            name=customer_name,
+            contact_name=customer_contact_name,
+            phone=customer_phone,
+            assigned_accountant_id=assigned_accountant_id,
+            source_lead_id=lead.id,
+        )
+        db.add(customer)
 
-    customer = Customer(
-        name=customer_name,
-        contact_name=customer_contact_name,
-        phone=customer_phone,
-        assigned_accountant_id=assigned_accountant_id,
-        source_lead_id=lead.id,
-    )
     lead.status = "CONVERTED"
     lead.updated_at = datetime.utcnow()
 
-    db.add(customer)
     write_operation_log(
         db,
         actor_id=current_user.id,
         action="LEAD_CONVERTED",
         entity_type="LEAD",
         entity_id=lead.id,
-        detail=f"customer={customer_name},accountant_id={assigned_accountant_id}",
+        detail=(
+            f"customer={customer.name},accountant_id={assigned_accountant_id},"
+            f"reused_customer={'Y' if lead.related_customer_id is not None else 'N'}"
+        ),
     )
     db.commit()
     db.refresh(lead)

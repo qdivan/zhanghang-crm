@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
 import { useAuthStore } from "../stores/auth";
 import { formatDateTimeInBrowserTimeZone } from "../utils/time";
 import type {
+  DataAccessGrantCreatePayload,
+  DataAccessGrantItem,
+  DataAccessGrantUpdatePayload,
+  DataAccessModule,
   LdapSettings,
   LdapSettingsUpdatePayload,
   LdapSyncResult,
@@ -17,9 +22,11 @@ import type {
 } from "../types";
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
+type GrantStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "EFFECTIVE";
 
 const auth = useAuthStore();
-const activeTab = ref<"users" | "ldap" | "logs">("users");
+const route = useRoute();
+const activeTab = ref<"users" | "grants" | "ldap" | "logs">("users");
 
 const loading = ref(false);
 const createLoading = ref(false);
@@ -78,6 +85,26 @@ const logFilters = reactive({
   limit: 200,
 });
 
+const grantLoading = ref(false);
+const grantCreateLoading = ref(false);
+const grantToggleLoadingId = ref<number | null>(null);
+const showGrantDialog = ref(false);
+const grantRows = ref<DataAccessGrantItem[]>([]);
+const grantUserOptions = ref<ManagedUser[]>([]);
+const grantFilters = reactive({
+  keyword: "",
+  module: "",
+  status: "ALL" as GrantStatusFilter,
+});
+const grantForm = reactive({
+  grantee_user_id: null as number | null,
+  module: "CUSTOMER" as DataAccessModule,
+  starts_at: "" as string,
+  ends_at: "" as string,
+  reason: "",
+  is_active: true,
+});
+
 const canManageAdminUsers = computed(() => auth.user?.role === "ADMIN");
 const editingSelf = computed(() => editForm.id === auth.user?.id);
 
@@ -100,11 +127,30 @@ const visibleRows = computed(() => {
   return rows.value.filter((item) => !item.is_active);
 });
 
+const grantModuleOptions: Array<{ label: string; value: DataAccessModule }> = [
+  { label: "客户列表", value: "CUSTOMER" },
+  { label: "收费收款", value: "BILLING" },
+];
+
+const filteredGrantRows = computed(() => {
+  if (grantFilters.status === "ALL") return grantRows.value;
+  if (grantFilters.status === "ACTIVE") return grantRows.value.filter((item) => item.is_active);
+  if (grantFilters.status === "INACTIVE") return grantRows.value.filter((item) => !item.is_active);
+  return grantRows.value.filter((item) => item.is_effective);
+});
+
 const panelScopeText = computed(() =>
   canManageAdminUsers.value
     ? "管理员可管理全部本地用户（含管理员）"
     : "老板可管理除管理员以外的用户",
 );
+
+function resolveTab(tab: unknown): "users" | "grants" | "ldap" | "logs" {
+  if (tab === "grants") return "grants";
+  if (tab === "ldap") return "ldap";
+  if (tab === "logs") return "logs";
+  return "users";
+}
 
 function roleLabel(role: UserRole): string {
   if (role === "OWNER") return "老板";
@@ -141,8 +187,23 @@ function actionLabel(action: string): string {
     CUSTOMER_UPDATED: "客户档案更新",
     ADDRESS_RESOURCE_CREATED: "地址资源创建",
     ADDRESS_RESOURCE_UPDATED: "地址资源更新",
+    DATA_ACCESS_GRANT_CREATED: "数据授权创建",
+    DATA_ACCESS_GRANT_UPDATED: "数据授权更新",
+    DATA_ACCESS_GRANT_REVOKED: "数据授权停用",
+    DATA_ACCESS_GRANT_REACTIVATED: "数据授权启用",
+    DATA_ACCESS_GRANT_DELETED: "数据授权删除",
+    TODO_CREATED: "待办创建",
+    TODO_UPDATED: "待办更新",
+    TODO_DELETED: "待办删除",
+    TODO_MY_DAY_BULK_ADD: "待办批量加入今日",
+    TODO_MY_DAY_CLEARED: "待办今日清空",
   };
   return map[action] || action;
+}
+
+function moduleLabel(module: DataAccessModule): string {
+  if (module === "CUSTOMER") return "客户列表";
+  return "收费收款";
 }
 
 function resolveErrorMessage(error: any, fallback: string): string {
@@ -406,9 +467,109 @@ async function fetchLogs() {
   }
 }
 
+function resetGrantForm() {
+  grantForm.grantee_user_id = null;
+  grantForm.module = "CUSTOMER";
+  grantForm.starts_at = "";
+  grantForm.ends_at = "";
+  grantForm.reason = "";
+  grantForm.is_active = true;
+}
+
+async function fetchGrantUsers() {
+  try {
+    const resp = await apiClient.get<ManagedUser[]>("/users", {
+      params: {
+        role: "ACCOUNTANT",
+        include_inactive: true,
+      },
+    });
+    grantUserOptions.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载可授权会计失败");
+  }
+}
+
+async function fetchDataAccessGrants() {
+  grantLoading.value = true;
+  try {
+    const resp = await apiClient.get<DataAccessGrantItem[]>("/admin/data-access-grants", {
+      params: {
+        keyword: grantFilters.keyword || undefined,
+        module: grantFilters.module || undefined,
+        include_inactive: true,
+      },
+    });
+    grantRows.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载数据授权失败");
+  } finally {
+    grantLoading.value = false;
+  }
+}
+
+function openGrantDialog() {
+  resetGrantForm();
+  showGrantDialog.value = true;
+}
+
+async function submitGrantCreate() {
+  if (!grantForm.grantee_user_id) {
+    ElMessage.warning("请选择被授权会计");
+    return;
+  }
+  if (grantForm.starts_at && grantForm.ends_at && grantForm.ends_at <= grantForm.starts_at) {
+    ElMessage.warning("失效时间必须晚于生效时间");
+    return;
+  }
+
+  const payload: DataAccessGrantCreatePayload = {
+    grantee_user_id: grantForm.grantee_user_id,
+    module: grantForm.module,
+    reason: grantForm.reason.trim() || undefined,
+    is_active: grantForm.is_active,
+  };
+  if (grantForm.starts_at) payload.starts_at = grantForm.starts_at;
+  if (grantForm.ends_at) payload.ends_at = grantForm.ends_at;
+
+  grantCreateLoading.value = true;
+  try {
+    await apiClient.post("/admin/data-access-grants", payload);
+    ElMessage.success("临时只读授权已创建");
+    showGrantDialog.value = false;
+    await Promise.all([fetchDataAccessGrants(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "创建数据授权失败");
+  } finally {
+    grantCreateLoading.value = false;
+  }
+}
+
+async function toggleGrantActive(row: DataAccessGrantItem, isActive: boolean) {
+  const payload: DataAccessGrantUpdatePayload = { is_active: isActive };
+  grantToggleLoadingId.value = row.id;
+  try {
+    await apiClient.patch(`/admin/data-access-grants/${row.id}`, payload);
+    ElMessage.success(isActive ? "授权已启用" : "授权已停用");
+    await Promise.all([fetchDataAccessGrants(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "更新授权状态失败");
+  } finally {
+    grantToggleLoadingId.value = null;
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([fetchUsers(), fetchLdapSettings(), fetchLogs()]);
+  await Promise.all([fetchUsers(), fetchGrantUsers(), fetchDataAccessGrants(), fetchLdapSettings(), fetchLogs()]);
 });
+
+watch(
+  () => route.query.tab,
+  (value) => {
+    activeTab.value = resolveTab(value);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -514,6 +675,116 @@ onMounted(async () => {
                     @click="removeUser(row)"
                   >
                     删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-space>
+      </el-tab-pane>
+
+      <el-tab-pane label="数据授权" name="grants">
+        <el-space direction="vertical" fill :size="12">
+          <el-card shadow="never">
+            <el-form inline @submit.prevent="fetchDataAccessGrants" class="admin-filter-form">
+              <el-form-item label="关键词">
+                <el-input
+                  v-model="grantFilters.keyword"
+                  placeholder="会计/授权原因"
+                  clearable
+                  @keyup.enter="fetchDataAccessGrants"
+                />
+              </el-form-item>
+              <el-form-item label="模块">
+                <el-select v-model="grantFilters.module" placeholder="全部" clearable>
+                  <el-option
+                    v-for="item in grantModuleOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="状态">
+                <el-select v-model="grantFilters.status" placeholder="全部">
+                  <el-option label="全部" value="ALL" />
+                  <el-option label="生效中" value="EFFECTIVE" />
+                  <el-option label="启用" value="ACTIVE" />
+                  <el-option label="停用" value="INACTIVE" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <el-button @click="fetchDataAccessGrants">查询</el-button>
+                <el-button type="primary" @click="openGrantDialog">新增授权</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="head">
+                <span>临时只读授权</span>
+                <el-tag type="warning" effect="plain">{{ filteredGrantRows.length }} 条</el-tag>
+              </div>
+            </template>
+            <el-table v-loading="grantLoading" :data="filteredGrantRows" stripe border>
+              <el-table-column prop="id" label="ID" width="80" />
+              <el-table-column prop="grantee_username" label="被授权会计" width="130" />
+              <el-table-column label="模块" width="110">
+                <template #default="{ row }">{{ moduleLabel(row.module) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+                    {{ row.is_active ? "启用" : "停用" }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="当前生效" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_effective ? 'success' : 'warning'" size="small">
+                    {{ row.is_effective ? "是" : "否" }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="生效时间" min-width="165" class-name="mobile-hide" label-class-name="mobile-hide">
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.starts_at) }}</template>
+              </el-table-column>
+              <el-table-column label="失效时间" min-width="165" class-name="mobile-hide" label-class-name="mobile-hide">
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.ends_at) }}</template>
+              </el-table-column>
+              <el-table-column
+                prop="reason"
+                label="授权原因"
+                min-width="180"
+                show-overflow-tooltip
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column
+                prop="granted_by_username"
+                label="授权人"
+                width="110"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column
+                label="创建时间"
+                min-width="165"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="110">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    :type="row.is_active ? 'danger' : 'primary'"
+                    :loading="grantToggleLoadingId === row.id"
+                    @click="toggleGrantActive(row, !row.is_active)"
+                  >
+                    {{ row.is_active ? "停用" : "启用" }}
                   </el-button>
                 </template>
               </el-table-column>
@@ -758,6 +1029,82 @@ onMounted(async () => {
     <template #footer>
       <el-button @click="showEditDialog = false">取消</el-button>
       <el-button type="primary" :loading="editLoading" @click="submitEdit">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="showGrantDialog" title="新增临时只读授权" width="560px">
+    <el-form label-position="top">
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="被授权会计">
+            <el-select v-model="grantForm.grantee_user_id" placeholder="请选择会计">
+              <el-option
+                v-for="item in grantUserOptions"
+                :key="item.id"
+                :label="`${item.username}${item.is_active ? '' : '（停用）'}`"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="授权模块">
+            <el-select v-model="grantForm.module">
+              <el-option
+                v-for="item in grantModuleOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="生效时间（可留空=立即）">
+            <el-date-picker
+              v-model="grantForm.starts_at"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              format="YYYY-MM-DD HH:mm:ss"
+              placeholder="立即生效"
+              clearable
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="失效时间（可留空）">
+            <el-date-picker
+              v-model="grantForm.ends_at"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              format="YYYY-MM-DD HH:mm:ss"
+              placeholder="不设置失效时间"
+              clearable
+            />
+          </el-form-item>
+        </el-col>
+      </el-row>
+
+      <el-form-item label="授权原因">
+        <el-input v-model="grantForm.reason" type="textarea" :rows="3" placeholder="如：月底工资核算临时查看" />
+      </el-form-item>
+
+      <el-form-item label="启用状态">
+        <el-switch v-model="grantForm.is_active" active-text="启用" inactive-text="停用" />
+      </el-form-item>
+
+      <el-alert
+        title="此授权仅放开查看权限，不放开编辑/催收/收款写入权限。"
+        type="info"
+        :closable="false"
+      />
+    </el-form>
+    <template #footer>
+      <el-button @click="showGrantDialog = false">取消</el-button>
+      <el-button type="primary" :loading="grantCreateLoading" @click="submitGrantCreate">创建授权</el-button>
     </template>
   </el-dialog>
 </template>
