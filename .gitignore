@@ -25,6 +25,7 @@ __pycache__/
 # Playwright local artifacts
 .playwright-cli/
 output/playwright/
+output/spreadsheet/
 
 # Local SQLite runtime data
 apps/api/*.db
