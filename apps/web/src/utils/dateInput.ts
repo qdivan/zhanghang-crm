@@ -1,5 +1,3 @@
-export type DateSetter = (value: string) => void;
-
 function formatDate(year: number, month: number, day: number): string | null {
   if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) {
     return null;
@@ -11,7 +9,10 @@ function formatDate(year: number, month: number, day: number): string | null {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export function normalizeDateInput(raw: string): string | null {
+export function normalizeDateText(raw: string | null | undefined): string | null {
+  if (!raw) {
+    return null;
+  }
   const digits = raw.replace(/\D/g, "");
   if (digits.length === 8) {
     return formatDate(
@@ -28,20 +29,4 @@ export function normalizeDateInput(raw: string): string | null {
     );
   }
   return null;
-}
-
-export function commitDateInput(setter: DateSetter, event: Event): void {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement) || !target.value) {
-    return;
-  }
-  const normalized = normalizeDateInput(target.value);
-  if (!normalized) {
-    return;
-  }
-  setter(normalized);
-  target.value = normalized;
-  if (event instanceof KeyboardEvent) {
-    event.preventDefault();
-  }
 }

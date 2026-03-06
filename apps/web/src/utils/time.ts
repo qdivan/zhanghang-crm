@@ -19,7 +19,7 @@ function normalizeBackendTime(value: string): string {
   return normalized;
 }
 
-export function parseBackendDateTime(value: string | null | undefined): Date | null {
+function parseBackendDateTime(value: string | null | undefined): Date | null {
   if (!value) return null;
   const normalized = normalizeBackendTime(value);
   const parsed = new Date(normalized);

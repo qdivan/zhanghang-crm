@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ArrowLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import type { LeadItem } from "../types";
-import { commitDateInput } from "../utils/dateInput";
 import { todayInBrowserTimeZone } from "../utils/time";
 
 type FollowupItem = {
@@ -27,6 +27,28 @@ const followupLoading = ref(false);
 const lead = ref<LeadItem | null>(null);
 const followups = ref<FollowupItem[]>([]);
 const showFollowupDialog = ref(false);
+const backTarget = computed(() => {
+  const from = String(route.query.from || "");
+  if (from === "customers") {
+    return {
+      label: "返回客户列表",
+      to: "/customers",
+    };
+  }
+  if (from.startsWith("customer:")) {
+    const customerId = Number(from.split(":")[1]);
+    if (customerId) {
+      return {
+        label: "返回客户档案",
+        to: `/customers/${customerId}`,
+      };
+    }
+  }
+  return {
+    label: "返回客户开发",
+    to: "/leads",
+  };
+});
 
 const followupForm = reactive({
   followup_at: todayInBrowserTimeZone(),
@@ -97,19 +119,7 @@ async function submitFollowup() {
 }
 
 function backToLeads() {
-  const from = String(route.query.from || "");
-  if (from === "customers") {
-    router.push("/customers");
-    return;
-  }
-  if (from.startsWith("customer:")) {
-    const customerId = Number(from.split(":")[1]);
-    if (customerId) {
-      router.push(`/customers/${customerId}`);
-      return;
-    }
-  }
-  router.push("/leads");
+  router.push(backTarget.value.to);
 }
 
 onMounted(fetchLeadDetail);
@@ -119,7 +129,7 @@ onMounted(fetchLeadDetail);
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
       <el-space>
-        <el-button :icon="ArrowLeft" @click="backToLeads">返回客户开发</el-button>
+        <el-button :icon="ArrowLeft" @click="backToLeads">{{ backTarget.label }}</el-button>
         <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增跟进</el-button>
       </el-space>
     </el-card>
@@ -127,37 +137,57 @@ onMounted(fetchLeadDetail);
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>线索详情（总览 -> 明细）</span>
-          <el-tag v-if="lead" type="info" effect="plain">{{ templateLabel(lead.template_type) }}</el-tag>
+          <span>线索详情（对齐 Excel 明细页）</span>
+          <el-space v-if="lead">
+            <el-tag type="info" effect="plain">{{ templateLabel(lead.template_type) }}</el-tag>
+            <el-tag effect="plain">{{ statusLabel(lead.status) }}</el-tag>
+          </el-space>
         </div>
       </template>
 
       <el-empty v-if="!lead" description="未找到线索" />
       <template v-else>
-        <el-descriptions :column="3" border>
+        <el-descriptions v-if="lead.template_type === 'FOLLOWUP'" :column="2" border>
           <el-descriptions-item label="公司名">{{ lead.name }}</el-descriptions-item>
           <el-descriptions-item label="等级">{{ lead.grade || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ statusLabel(lead.status) }}</el-descriptions-item>
-          <el-descriptions-item label="联系人">{{ lead.contact_name }}</el-descriptions-item>
-          <el-descriptions-item label="电话">{{ lead.phone }}</el-descriptions-item>
-          <el-descriptions-item label="微信">{{ lead.contact_wechat || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="传真">{{ lead.fax || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="其他联系方式">{{ lead.other_contact || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="地区">{{ lead.region || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="国家/类型">{{ lead.country || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="国家">{{ lead.country || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="服务开始时间">{{ lead.service_start_text || '-' }}</el-descriptions-item>
           <el-descriptions-item label="企业性质">{{ lead.company_nature || '-' }}</el-descriptions-item>
           <el-descriptions-item label="服务方式">{{ lead.service_mode || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="服务开始时间">{{ lead.service_start_text || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="联络开始时间">{{ lead.contact_start_date || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="对接人及电话">
+            {{ [lead.contact_name, lead.phone].filter(Boolean).join(' / ') || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="微信">{{ lead.contact_wechat || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="其他联系人">{{ lead.other_contact || '-' }}</el-descriptions-item>
           <el-descriptions-item label="收费标准">{{ lead.fee_standard || '-' }}</el-descriptions-item>
           <el-descriptions-item label="首期账单期间">{{ lead.first_billing_period || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="最后跟进日期">{{ lead.last_followup_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="提醒值">{{ lead.reminder_value || '-' }}</el-descriptions-item>
           <el-descriptions-item label="下次提醒">{{ lead.next_reminder_at || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="主营产品" :span="2">{{ lead.main_business || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍" :span="2">{{ lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备注" :span="2">{{ lead.notes || '-' }}</el-descriptions-item>
+        </el-descriptions>
+        <el-descriptions v-else :column="2" border>
+          <el-descriptions-item label="公司名">{{ lead.name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="等级">{{ lead.grade || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="地区">{{ lead.region || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="联络开始时间">{{ lead.contact_start_date || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="联系人（微信号）">
+            {{ lead.contact_wechat ? `${lead.contact_name} / ${lead.contact_wechat}` : lead.contact_name || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="电话">{{ lead.phone || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="传真">{{ lead.fax || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="其他联系方式">{{ lead.other_contact || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备注">{{ lead.notes || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍">{{ lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="主营" :span="2">{{ lead.main_business || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备用2">{{ lead.reserve_2 || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备用3">{{ lead.reserve_3 || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备用4">{{ lead.reserve_4 || '-' }}</el-descriptions-item>
           <el-descriptions-item label="最后跟进日期">{{ lead.last_followup_date || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="来源">{{ lead.source || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="主营/需求" :span="3">{{ lead.main_business || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍" :span="3">{{ lead.intro || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="备注" :span="3">{{ lead.notes || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="提醒值">{{ lead.reminder_value || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="下次提醒">{{ lead.next_reminder_at || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
     </el-card>
@@ -183,30 +213,12 @@ onMounted(fetchLeadDetail);
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="跟进日期">
-            <el-date-picker
-              v-model="followupForm.followup_at"
-              type="date"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              :editable="true"
-              placeholder="YYYYMMDD 或 YYMMDD"
-              @keydown.enter.capture="commitDateInput((v) => (followupForm.followup_at = v), $event)"
-              @blur.capture="commitDateInput((v) => (followupForm.followup_at = v), $event)"
-            />
+            <FlexibleDateInput v-model="followupForm.followup_at" :empty-value="''" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
           <el-form-item label="下次提醒">
-            <el-date-picker
-              v-model="followupForm.next_reminder_at"
-              type="date"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              :editable="true"
-              placeholder="YYYYMMDD 或 YYMMDD"
-              @keydown.enter.capture="commitDateInput((v) => (followupForm.next_reminder_at = v), $event)"
-              @blur.capture="commitDateInput((v) => (followupForm.next_reminder_at = v), $event)"
-            />
+            <FlexibleDateInput v-model="followupForm.next_reminder_at" clearable />
           </el-form-item>
         </el-col>
       </el-row>
@@ -229,5 +241,13 @@ onMounted(fetchLeadDetail);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import type { DashboardSummary, SystemTodoItem, TodoItem } from "../types";
 
+const router = useRouter();
 const loading = ref(false);
 const summary = ref<DashboardSummary>({
   month: "",
@@ -23,6 +25,19 @@ function priorityLabel(priority: string): string {
   if (priority === "HIGH") return "高";
   if (priority === "LOW") return "低";
   return "中";
+}
+
+function hasSystemTodoAction(todo: SystemTodoItem): boolean {
+  return Boolean((todo.action_path || "").trim() && (todo.action_label || "").trim());
+}
+
+function openSystemTodo(todo: SystemTodoItem) {
+  const target = (todo.action_path || "").trim();
+  if (!target) {
+    ElMessage.warning("该待办未配置跳转地址");
+    return;
+  }
+  router.push(target);
 }
 
 async function fetchDashboardData() {
@@ -91,6 +106,19 @@ onMounted(fetchDashboardData);
               </template>
             </el-table-column>
             <el-table-column prop="due_date" label="截止" width="110" />
+            <el-table-column label="操作" width="110">
+              <template #default="{ row }">
+                <el-button
+                  v-if="hasSystemTodoAction(row)"
+                  link
+                  type="primary"
+                  @click="openSystemTodo(row)"
+                >
+                  {{ row.action_label }}
+                </el-button>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
           </el-table>
         </el-card>
       </el-col>

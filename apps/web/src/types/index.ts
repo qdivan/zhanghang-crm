@@ -160,6 +160,18 @@ export interface CustomerListItem {
   source_lead_id: number;
   source_template_type: LeadTemplateType;
   source_grade: string;
+  source_country: string;
+  source_service_start_text: string;
+  source_area_display: string;
+  source_service_start_display: string;
+  source_company_nature: string;
+  source_service_mode: string;
+  source_contact_wechat: string;
+  source_other_contact: string;
+  source_main_business: string;
+  source_intro: string;
+  source_fee_standard: string;
+  source_first_billing_period: string;
   source_last_followup_date: string | null;
   source_reminder_value: string;
   created_at: string;
@@ -231,6 +243,28 @@ export interface BillingRecord {
   color_tag: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface BillingCreatePayload {
+  serial_no: number | null;
+  customer_id: number | null;
+  charge_category: string;
+  charge_mode: "PERIODIC" | "ONE_TIME";
+  amount_basis: "MONTHLY" | "YEARLY" | "ONE_TIME" | "PERIOD_TOTAL";
+  summary: string;
+  total_fee: number;
+  monthly_fee: number;
+  billing_cycle_text: string;
+  period_start_month: string;
+  period_end_month: string;
+  collection_start_date: string;
+  due_month: string;
+  payment_method: string;
+  status: "CLEARED" | "FULL_ARREARS" | "PARTIAL";
+  received_amount: number;
+  note: string;
+  extra_note: string;
+  color_tag: string;
 }
 
 export interface BillingActivity {
@@ -359,15 +393,6 @@ export interface TodoCreatePayload {
   priority?: TodoPriority;
   due_date?: string;
   assignee_user_id?: number;
-  is_in_today?: boolean;
-}
-
-export interface TodoUpdatePayload {
-  title?: string;
-  description?: string;
-  priority?: TodoPriority;
-  due_date?: string | null;
-  status?: TodoStatus;
   is_in_today?: boolean;
 }
 

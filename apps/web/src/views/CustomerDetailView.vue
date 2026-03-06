@@ -5,9 +5,9 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useAuthStore } from "../stores/auth";
 import type { CustomerDetail } from "../types";
-import { commitDateInput } from "../utils/dateInput";
 import { todayInBrowserTimeZone } from "../utils/time";
 
 const route = useRoute();
@@ -39,6 +39,15 @@ const backTarget = computed(() => {
   };
 });
 
+const displayCountry = computed(() => detail.value?.lead.country || detail.value?.lead.region || "-");
+const displayServiceStart = computed(
+  () => detail.value?.lead.service_start_text || detail.value?.lead.contact_start_date || "-",
+);
+const displayContactLine = computed(() => {
+  if (!detail.value) return "-";
+  return [detail.value.contact_name, detail.value.phone].filter(Boolean).join(" / ") || "-";
+});
+
 const followupForm = reactive({
   followup_at: todayInBrowserTimeZone(),
   feedback: "",
@@ -51,19 +60,16 @@ const editForm = reactive({
   contact_name: "",
   phone: "",
   lead_grade: "",
-  lead_contact_wechat: "",
-  lead_fax: "",
-  lead_other_contact: "",
-  lead_region: "",
   lead_country: "",
   lead_service_start_text: "",
   lead_company_nature: "",
   lead_service_mode: "",
+  lead_contact_wechat: "",
+  lead_other_contact: "",
   lead_fee_standard: "",
   lead_first_billing_period: "",
   lead_reminder_value: "",
   lead_next_reminder_at: null as string | null,
-  lead_source: "",
   lead_main_business: "",
   lead_intro: "",
   lead_notes: "",
@@ -148,19 +154,16 @@ function openEditDialog() {
   editForm.contact_name = detail.value.contact_name;
   editForm.phone = detail.value.phone;
   editForm.lead_grade = detail.value.lead.grade;
-  editForm.lead_contact_wechat = detail.value.lead.contact_wechat;
-  editForm.lead_fax = detail.value.lead.fax;
-  editForm.lead_other_contact = detail.value.lead.other_contact;
-  editForm.lead_region = detail.value.lead.region;
-  editForm.lead_country = detail.value.lead.country;
-  editForm.lead_service_start_text = detail.value.lead.service_start_text;
+  editForm.lead_country = detail.value.lead.country || detail.value.lead.region;
+  editForm.lead_service_start_text = detail.value.lead.service_start_text || detail.value.lead.contact_start_date || "";
   editForm.lead_company_nature = detail.value.lead.company_nature;
   editForm.lead_service_mode = detail.value.lead.service_mode;
+  editForm.lead_contact_wechat = detail.value.lead.contact_wechat;
+  editForm.lead_other_contact = detail.value.lead.other_contact;
   editForm.lead_fee_standard = detail.value.lead.fee_standard;
   editForm.lead_first_billing_period = detail.value.lead.first_billing_period;
   editForm.lead_reminder_value = detail.value.lead.reminder_value;
   editForm.lead_next_reminder_at = detail.value.lead.next_reminder_at;
-  editForm.lead_source = detail.value.lead.source;
   editForm.lead_main_business = detail.value.lead.main_business;
   editForm.lead_intro = detail.value.lead.intro;
   editForm.lead_notes = detail.value.lead.notes;
@@ -178,7 +181,25 @@ async function submitEdit() {
   }
   editLoading.value = true;
   try {
-    await apiClient.patch(`/customers/${detail.value.id}`, editForm);
+    await apiClient.patch(`/customers/${detail.value.id}`, {
+      name: editForm.name,
+      contact_name: editForm.contact_name,
+      phone: editForm.phone,
+      lead_grade: editForm.lead_grade,
+      lead_country: editForm.lead_country,
+      lead_service_start_text: editForm.lead_service_start_text,
+      lead_company_nature: editForm.lead_company_nature,
+      lead_service_mode: editForm.lead_service_mode,
+      lead_contact_wechat: editForm.lead_contact_wechat,
+      lead_other_contact: editForm.lead_other_contact,
+      lead_fee_standard: editForm.lead_fee_standard,
+      lead_first_billing_period: editForm.lead_first_billing_period,
+      lead_reminder_value: editForm.lead_reminder_value,
+      lead_next_reminder_at: editForm.lead_next_reminder_at,
+      lead_main_business: editForm.lead_main_business,
+      lead_intro: editForm.lead_intro,
+      lead_notes: editForm.lead_notes,
+    });
     ElMessage.success("客户档案已更新");
     showEditDialog.value = false;
     await fetchDetail();
@@ -201,44 +222,42 @@ onMounted(fetchDetail);
         <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openFollowupDialog">
           新增跟进
         </el-button>
-        <el-button :disabled="!detail" @click="openLeadDetail">查看线索详情</el-button>
+        <el-button :disabled="!detail" @click="openLeadDetail">查看开发来源</el-button>
       </el-space>
     </el-card>
 
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>客户档案</span>
-          <el-tag v-if="detail" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+          <span>客户档案（对齐 `客户跟进表` 明细页）</span>
+          <el-space v-if="detail" class="meta-tags" wrap>
+            <el-tag type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+            <el-tag type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
+            <el-tag effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
+          </el-space>
         </div>
       </template>
 
       <el-empty v-if="!detail" description="未找到客户" />
       <template v-else>
-        <el-descriptions :column="3" border>
-          <el-descriptions-item label="客户名称">{{ detail.name }}</el-descriptions-item>
-          <el-descriptions-item label="联系人">{{ detail.contact_name }}</el-descriptions-item>
-          <el-descriptions-item label="电话">{{ detail.phone }}</el-descriptions-item>
-          <el-descriptions-item label="分配会计">{{ detail.accountant_username }}</el-descriptions-item>
-          <el-descriptions-item label="来源模板">{{ templateLabel(detail.lead.template_type) }}</el-descriptions-item>
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="公司名">{{ detail.name }}</el-descriptions-item>
           <el-descriptions-item label="等级">{{ detail.lead.grade || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="微信">{{ detail.lead.contact_wechat || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="传真">{{ detail.lead.fax || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="其他联系方式">{{ detail.lead.other_contact || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="地区">{{ detail.lead.region || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="国家/类型">{{ detail.lead.country || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="服务开始时间">{{ detail.lead.service_start_text || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="国家">{{ displayCountry }}</el-descriptions-item>
+          <el-descriptions-item label="服务开始时间">{{ displayServiceStart }}</el-descriptions-item>
           <el-descriptions-item label="企业性质">{{ detail.lead.company_nature || '-' }}</el-descriptions-item>
           <el-descriptions-item label="服务方式">{{ detail.lead.service_mode || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="对接人及电话">{{ displayContactLine }}</el-descriptions-item>
+          <el-descriptions-item label="微信">{{ detail.lead.contact_wechat || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="其他联系人">{{ detail.lead.other_contact || '-' }}</el-descriptions-item>
           <el-descriptions-item label="收费标准">{{ detail.lead.fee_standard || '-' }}</el-descriptions-item>
           <el-descriptions-item label="首期账单期间">{{ detail.lead.first_billing_period || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="最后跟进日期">{{ detail.lead.last_followup_date || '-' }}</el-descriptions-item>
           <el-descriptions-item label="提醒值">{{ detail.lead.reminder_value || '-' }}</el-descriptions-item>
           <el-descriptions-item label="下次提醒">{{ detail.lead.next_reminder_at || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="最后跟进日期">{{ detail.lead.last_followup_date || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="来源">{{ detail.lead.source || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="主营/需求" :span="3">{{ detail.lead.main_business || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍" :span="3">{{ detail.lead.intro || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="备注" :span="3">{{ detail.lead.notes || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="主营产品" :span="2">{{ detail.lead.main_business || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍" :span="2">{{ detail.lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="备注" :span="2">{{ detail.lead.notes || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
     </el-card>
@@ -264,30 +283,12 @@ onMounted(fetchDetail);
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="跟进日期">
-            <el-date-picker
-              v-model="followupForm.followup_at"
-              type="date"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              :editable="true"
-              placeholder="YYYYMMDD 或 YYMMDD"
-              @keydown.enter.capture="commitDateInput((v) => (followupForm.followup_at = v), $event)"
-              @blur.capture="commitDateInput((v) => (followupForm.followup_at = v), $event)"
-            />
+            <FlexibleDateInput v-model="followupForm.followup_at" :empty-value="''" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
           <el-form-item label="下次提醒">
-            <el-date-picker
-              v-model="followupForm.next_reminder_at"
-              type="date"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              :editable="true"
-              placeholder="YYYYMMDD 或 YYMMDD"
-              @keydown.enter.capture="commitDateInput((v) => (followupForm.next_reminder_at = v), $event)"
-              @blur.capture="commitDateInput((v) => (followupForm.next_reminder_at = v), $event)"
-            />
+            <FlexibleDateInput v-model="followupForm.next_reminder_at" clearable />
           </el-form-item>
         </el-col>
       </el-row>
@@ -304,16 +305,16 @@ onMounted(fetchDetail);
     </template>
   </el-dialog>
 
-  <el-dialog v-model="showEditDialog" title="编辑客户档案" width="900px">
+  <el-dialog v-model="showEditDialog" title="编辑客户档案" width="760px">
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="8">
-          <el-form-item label="客户名称">
+          <el-form-item label="公司名">
             <el-input v-model="editForm.name" />
           </el-form-item>
         </el-col>
         <el-col :span="8">
-          <el-form-item label="联系人">
+          <el-form-item label="对接人">
             <el-input v-model="editForm.contact_name" />
           </el-form-item>
         </el-col>
@@ -324,50 +325,23 @@ onMounted(fetchDetail);
         </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :span="6">
+        <el-col :span="8">
           <el-form-item label="等级">
             <el-input v-model="editForm.lead_grade" />
           </el-form-item>
         </el-col>
-        <el-col :span="6">
-          <el-form-item label="微信">
-            <el-input v-model="editForm.lead_contact_wechat" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="6">
-          <el-form-item label="传真">
-            <el-input v-model="editForm.lead_fax" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="6">
-          <el-form-item label="提醒值">
-            <el-input v-model="editForm.lead_reminder_value" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-      <el-row :gutter="12">
         <el-col :span="8">
-          <el-form-item label="地区">
-            <el-input v-model="editForm.lead_region" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="8">
-          <el-form-item label="国家/类型">
+          <el-form-item label="国家">
             <el-input v-model="editForm.lead_country" />
           </el-form-item>
         </el-col>
         <el-col :span="8">
-          <el-form-item label="来源">
-            <el-input v-model="editForm.lead_source" />
+          <el-form-item label="服务开始时间">
+            <el-input v-model="editForm.lead_service_start_text" placeholder="如 2025.07.02" />
           </el-form-item>
         </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :span="8">
-          <el-form-item label="服务开始时间">
-            <el-input v-model="editForm.lead_service_start_text" />
-          </el-form-item>
-        </el-col>
         <el-col :span="8">
           <el-form-item label="企业性质">
             <el-input v-model="editForm.lead_company_nature" />
@@ -378,41 +352,46 @@ onMounted(fetchDetail);
             <el-input v-model="editForm.lead_service_mode" />
           </el-form-item>
         </el-col>
+        <el-col :span="8">
+          <el-form-item label="微信">
+            <el-input v-model="editForm.lead_contact_wechat" />
+          </el-form-item>
+        </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :span="8">
+        <el-col :span="12">
+          <el-form-item label="其他联系人">
+            <el-input v-model="editForm.lead_other_contact" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
           <el-form-item label="收费标准">
             <el-input v-model="editForm.lead_fee_standard" />
           </el-form-item>
         </el-col>
+      </el-row>
+      <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="首期账单期间">
             <el-input v-model="editForm.lead_first_billing_period" />
           </el-form-item>
         </el-col>
         <el-col :span="8">
+          <el-form-item label="提醒值">
+            <el-input v-model="editForm.lead_reminder_value" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="8">
           <el-form-item label="下次提醒">
-            <el-date-picker
-              v-model="editForm.lead_next_reminder_at"
-              type="date"
-              format="YYYY-MM-DD"
-              value-format="YYYY-MM-DD"
-              :editable="true"
-              placeholder="YYYYMMDD 或 YYMMDD"
-              @keydown.enter.capture="commitDateInput((v) => (editForm.lead_next_reminder_at = v), $event)"
-              @blur.capture="commitDateInput((v) => (editForm.lead_next_reminder_at = v), $event)"
-            />
+            <FlexibleDateInput v-model="editForm.lead_next_reminder_at" clearable />
           </el-form-item>
         </el-col>
       </el-row>
-      <el-form-item label="其他联系方式">
-        <el-input v-model="editForm.lead_other_contact" />
-      </el-form-item>
-      <el-form-item label="主营/需求">
+      <el-form-item label="主营产品">
         <el-input v-model="editForm.lead_main_business" type="textarea" :rows="2" />
       </el-form-item>
       <el-form-item label="介绍">
-        <el-input v-model="editForm.lead_intro" />
+        <el-input v-model="editForm.lead_intro" type="textarea" :rows="2" />
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="editForm.lead_notes" type="textarea" :rows="2" />
@@ -430,5 +409,17 @@ onMounted(fetchDetail);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+}
+
+.meta-tags {
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>
