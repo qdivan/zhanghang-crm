@@ -86,10 +86,10 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore();
   if (!auth.ready) {
-    auth.hydrate();
+    await auth.hydrate();
   }
 
   if (to.path !== "/login" && !auth.isLoggedIn) {
@@ -99,7 +99,7 @@ router.beforeEach((to) => {
     return "/dashboard";
   }
   const roleLimit = to.meta.roles as UserRole[] | undefined;
-  if (roleLimit && auth.user && !roleLimit.includes(auth.user.role)) {
+  if (roleLimit && (!auth.user || !roleLimit.includes(auth.user.role))) {
     return "/dashboard";
   }
   return true;

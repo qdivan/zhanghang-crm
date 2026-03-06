@@ -12,6 +12,34 @@ type State = {
   ready: boolean;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isUserInfo(value: unknown): value is UserInfo {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "number" &&
+    typeof value.username === "string" &&
+    typeof value.role === "string" &&
+    typeof value.auth_source === "string" &&
+    typeof value.ldap_dn === "string" &&
+    typeof value.is_active === "boolean" &&
+    typeof value.created_at === "string" &&
+    (typeof value.last_login_at === "string" || value.last_login_at === null)
+  );
+}
+
+function clearAuthStorage() {
+  window.localStorage.removeItem(tokenKey);
+  window.localStorage.removeItem(userKey);
+}
+
+function persistSession(token: string, user: UserInfo) {
+  window.localStorage.setItem(tokenKey, token);
+  window.localStorage.setItem(userKey, JSON.stringify(user));
+}
+
 export const useAuthStore = defineStore("auth", {
   state: (): State => ({
     token: "",
@@ -19,13 +47,40 @@ export const useAuthStore = defineStore("auth", {
     ready: false,
   }),
   getters: {
-    isLoggedIn: (state) => Boolean(state.token),
+    isLoggedIn: (state) => Boolean(state.token && state.user),
   },
   actions: {
-    hydrate() {
-      this.token = window.localStorage.getItem(tokenKey) ?? "";
+    async hydrate() {
+      const token = window.localStorage.getItem(tokenKey);
       const userRaw = window.localStorage.getItem(userKey);
-      this.user = userRaw ? (JSON.parse(userRaw) as UserInfo) : null;
+      if (!token || token === "undefined" || token === "null" || !userRaw) {
+        this.logout();
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(userRaw);
+        if (!isUserInfo(parsed)) {
+          throw new Error("invalid stored user");
+        }
+        this.token = token;
+        this.user = parsed;
+
+        const meResp = await apiClient.get<UserInfo>("/auth/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isUserInfo(meResp.data)) {
+          throw new Error("invalid me response");
+        }
+        this.user = meResp.data;
+        persistSession(token, meResp.data);
+      } catch {
+        this.logout();
+        return;
+      }
+
       this.ready = true;
     },
     async login(username: string, password: string) {
@@ -33,18 +88,34 @@ export const useAuthStore = defineStore("auth", {
         username,
         password,
       });
-      this.token = tokenResp.data.access_token;
-      window.localStorage.setItem(tokenKey, this.token);
+      const token = isRecord(tokenResp.data) && typeof tokenResp.data.access_token === "string"
+        ? tokenResp.data.access_token
+        : "";
+      if (!token) {
+        this.logout();
+        throw new Error("invalid login response");
+      }
 
-      const meResp = await apiClient.get<UserInfo>("/auth/me");
+      const meResp = await apiClient.get<UserInfo>("/auth/me", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!isUserInfo(meResp.data)) {
+        this.logout();
+        throw new Error("invalid me response");
+      }
+
+      this.token = token;
       this.user = meResp.data;
-      window.localStorage.setItem(userKey, JSON.stringify(this.user));
+      this.ready = true;
+      persistSession(this.token, this.user);
     },
     logout() {
       this.token = "";
       this.user = null;
-      window.localStorage.removeItem(tokenKey);
-      window.localStorage.removeItem(userKey);
+      this.ready = true;
+      clearAuthStorage();
     },
   },
 });

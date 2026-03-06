@@ -109,9 +109,11 @@ npm run prod:down
 
 ## 群晖 DS920+ 双环境部署（dev + prd）
 - 部署文档：`infra/DEPLOY_SYNOLOGY.md`
+- 测试环境 runbook：`infra/DEPLOY_SYNOLOGY_TEST.md`
 - 关键文件：
   - `infra/docker-compose.dev.yml`
   - `infra/docker-compose.prd.yml`
+  - `infra/docker-compose.test.localbuild.yml`
   - `.github/workflows/build-and-deploy-synology.yml`
 
 > 说明：`infra/DEPLOY_SYNOLOGY.md` 已按中国大陆网络环境补充企业级部署方案（国内镜像仓库、回滚、备份、监控、安全加固）。

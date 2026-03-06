@@ -2,7 +2,7 @@ name: daizhang-prd
 
 services:
   postgres:
-    image: docker.1ms.run/postgres:16-alpine
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/postgres:16-alpine
     container_name: daizhang-prd-postgres
     restart: unless-stopped
     env_file:
@@ -27,7 +27,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "31000:8000"
+      - "127.0.0.1:31000:8000"
     networks:
       - daizhang-prd
 
@@ -38,7 +38,7 @@ services:
     depends_on:
       - api
     ports:
-      - "31080:80"
+      - "127.0.0.1:31080:80"
     networks:
       - daizhang-prd
 

@@ -1,4 +1,8 @@
-FROM docker.1ms.run/library/python:3.11-slim
+ARG PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
+
+ARG APT_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources 2>/dev/null || true
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs npm \
@@ -6,8 +10,11 @@ RUN apt-get update \
 
 WORKDIR /app
 
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN npm config set registry "${NPM_REGISTRY}"
+
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY . .
 

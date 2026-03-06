@@ -1,0 +1,59 @@
+name: daizhang-test
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/postgres:16-alpine}
+    container_name: daizhang-test-postgres
+    restart: unless-stopped
+    env_file:
+      - ./env/postgres.test.env
+    volumes:
+      - ./data/test/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - daizhang-test
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile.prod
+      args:
+        PYTHON_IMAGE: ${API_PYTHON_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+    image: daizhang-api:test-local
+    container_name: daizhang-test-api
+    restart: unless-stopped
+    env_file:
+      - ./env/api.test.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "32000:8000"
+    networks:
+      - daizhang-test
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile.test
+      args:
+        NODE_IMAGE: ${WEB_NODE_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:20-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    image: daizhang-web:test-local
+    container_name: daizhang-test-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "32080:80"
+    networks:
+      - daizhang-test
+
+networks:
+  daizhang-test:
+    name: daizhang-test-net

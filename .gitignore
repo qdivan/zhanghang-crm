@@ -26,8 +26,10 @@ __pycache__/
 .playwright-cli/
 output/playwright/
 output/spreadsheet/
+output/release/
 
 # Local SQLite runtime data
+/test.db
 apps/api/*.db
 apps/api/*.sqlite
 apps/api/*.sqlite3

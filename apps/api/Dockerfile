@@ -1,9 +1,13 @@
-FROM docker.1ms.run/library/python:3.11-slim
+ARG PYTHON_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_INDEX_URL=${PIP_INDEX_URL}
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

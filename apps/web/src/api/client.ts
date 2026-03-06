@@ -13,14 +13,17 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   const token = window.localStorage.getItem(tokenKey);
-  if (token) {
+  if (token && token !== "undefined" && token !== "null") {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    redirectedToLogin = false;
+    return response;
+  },
   (error) => {
     const status = error?.response?.status;
     if (status === 401) {
