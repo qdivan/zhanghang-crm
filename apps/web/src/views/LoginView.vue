@@ -41,8 +41,6 @@ async function login() {
       <template #header>
         <div class="head">
           <div class="title">账航·一帆财税</div>
-          <div class="subtitle">本地账号（LDAP 二期接入）</div>
-          <div class="hint">演示账号：boss / admin / accountant，密码均为 Demo@12345</div>
         </div>
       </template>
       <el-form :model="form" label-position="top" @submit.prevent="login">
@@ -86,21 +84,11 @@ async function login() {
 .head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
 .title {
   font-size: 20px;
   font-weight: 700;
-}
-
-.subtitle {
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.hint {
-  font-size: 12px;
-  color: #9ca3af;
 }
 </style>

@@ -8,6 +8,7 @@ API_DIR="$ROOT_DIR/apps/api"
 # - bootstrap demo users/data so fresh sqlite can login immediately
 # - keep existing local data by default (no reset)
 export BOOTSTRAP_DEMO_DATA="${BOOTSTRAP_DEMO_DATA:-true}"
+export BOOTSTRAP_DEMO_PASSWORD="${BOOTSTRAP_DEMO_PASSWORD:-Daizhang#2026!}"
 export RESET_DB_ON_STARTUP="${RESET_DB_ON_STARTUP:-false}"
 
 find_uvicorn() {

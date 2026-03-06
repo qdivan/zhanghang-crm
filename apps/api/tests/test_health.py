@@ -1,8 +1,11 @@
+import os
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
 from app.main import app
+
+DEMO_PASSWORD = os.environ.get("BOOTSTRAP_DEMO_PASSWORD", "Daizhang#2026!")
 
 
 def test_health():
@@ -16,7 +19,7 @@ def test_login_and_me():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert login_response.status_code == 200
         token = login_response.json()["access_token"]
@@ -33,7 +36,7 @@ def test_billing_records():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -71,7 +74,7 @@ def test_billing_records_support_contact_filter_and_keyword():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -144,7 +147,7 @@ def test_billing_defaults_for_periodic_and_one_time_modes():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert login_response.status_code == 200
         headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
@@ -187,7 +190,7 @@ def test_billing_batch_create_supports_multiple_rows_for_same_customer():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -237,7 +240,7 @@ def test_accountant_can_only_access_own_billing_records():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -322,7 +325,7 @@ def test_accountant_can_only_access_own_billing_records():
 
         accountant2_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant2", "password": "Demo@12345"},
+            json={"username": "accountant2", "password": DEMO_PASSWORD},
         )
         assert accountant2_login.status_code == 200
         accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
@@ -361,7 +364,7 @@ def test_billing_assignment_grants_read_visibility_to_executor():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -410,7 +413,7 @@ def test_billing_assignment_grants_read_visibility_to_executor():
 
         accountant2_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant2", "password": "Demo@12345"},
+            json={"username": "accountant2", "password": DEMO_PASSWORD},
         )
         assert accountant2_login.status_code == 200
         accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
@@ -503,7 +506,7 @@ def test_accountant_read_only_data_grant_for_customer_and_billing():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -586,7 +589,7 @@ def test_accountant_read_only_data_grant_for_customer_and_billing():
 
         accountant2_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant2", "password": "Demo@12345"},
+            json={"username": "accountant2", "password": DEMO_PASSWORD},
         )
         assert accountant2_login.status_code == 200
         accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
@@ -679,7 +682,7 @@ def test_lead_detail_and_convert_customer_flow():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -732,7 +735,7 @@ def test_lead_detail_and_convert_customer_flow():
 
         accountant_login = client.post(
             "/api/v1/auth/login",
-            json={"username": accountant["username"], "password": "Demo@12345"},
+            json={"username": accountant["username"], "password": DEMO_PASSWORD},
         )
         assert accountant_login.status_code == 200
         accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
@@ -763,7 +766,7 @@ def test_redevelop_lead_convert_reuses_existing_customer():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -844,7 +847,7 @@ def test_address_resources():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -893,7 +896,7 @@ def test_billing_activities_update_amounts():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -956,7 +959,7 @@ def test_payment_split_suggestion_and_apply_updates_multiple_records():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1078,7 +1081,7 @@ def test_renew_and_terminate_billing_record_lifecycle():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1162,7 +1165,7 @@ def test_renew_billing_record_supports_form_overrides():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1255,7 +1258,7 @@ def test_terminate_billing_record_rejects_date_outside_service_window():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1331,7 +1334,7 @@ def test_customer_billing_ledger_entries_and_balance():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1437,7 +1440,7 @@ def test_customer_update():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -1466,7 +1469,7 @@ def test_convert_reject_non_accountant_assignment():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -1485,7 +1488,7 @@ def test_convert_reject_non_accountant_assignment():
         lead_id = create_lead.json()["id"]
 
         # admin 不是会计角色，应该被拒绝
-        me_admin = client.post("/api/v1/auth/login", json={"username": "admin", "password": "Demo@12345"})
+        me_admin = client.post("/api/v1/auth/login", json={"username": "admin", "password": DEMO_PASSWORD})
         assert me_admin.status_code == 200
         admin_me = client.get(
             "/api/v1/auth/me",
@@ -1505,7 +1508,7 @@ def test_convert_requires_accountant_when_owner_not_accountant():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         token = login_response.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -1535,7 +1538,7 @@ def test_user_admin_scope_owner_vs_admin():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
 
@@ -1548,7 +1551,7 @@ def test_user_admin_scope_owner_vs_admin():
             headers=owner_headers,
             json={
                 "username": "owner_created_acc",
-                "password": "Demo@12345",
+                "password": DEMO_PASSWORD,
                 "role": "ACCOUNTANT",
                 "is_active": True,
             },
@@ -1560,7 +1563,7 @@ def test_user_admin_scope_owner_vs_admin():
             headers=owner_headers,
             json={
                 "username": "owner_created_admin",
-                "password": "Demo@12345",
+                "password": DEMO_PASSWORD,
                 "role": "ADMIN",
             },
         )
@@ -1568,7 +1571,7 @@ def test_user_admin_scope_owner_vs_admin():
 
         admin_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Demo@12345"},
+            json={"username": "admin", "password": DEMO_PASSWORD},
         )
         admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
         admin_me = client.get("/api/v1/auth/me", headers=admin_headers)
@@ -1586,7 +1589,7 @@ def test_user_admin_scope_owner_vs_admin():
             headers=admin_headers,
             json={
                 "username": "admin_created_admin",
-                "password": "Demo@12345",
+                "password": DEMO_PASSWORD,
                 "role": "ADMIN",
             },
         )
@@ -1597,7 +1600,7 @@ def test_user_update_self_protection():
     with TestClient(app) as client:
         admin_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Demo@12345"},
+            json={"username": "admin", "password": DEMO_PASSWORD},
         )
         headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
         me_resp = client.get("/api/v1/auth/me", headers=headers)
@@ -1622,7 +1625,7 @@ def test_user_delete_flow_and_dependency_guard():
     with TestClient(app) as client:
         admin_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Demo@12345"},
+            json={"username": "admin", "password": DEMO_PASSWORD},
         )
         headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
@@ -1631,7 +1634,7 @@ def test_user_delete_flow_and_dependency_guard():
             headers=headers,
             json={
                 "username": "delete_me",
-                "password": "Demo@12345",
+                "password": DEMO_PASSWORD,
                 "role": "ACCOUNTANT",
                 "is_active": True,
             },
@@ -1648,7 +1651,7 @@ def test_user_delete_flow_and_dependency_guard():
 
         login_deleted = client.post(
             "/api/v1/auth/login",
-            json={"username": "delete_me", "password": "Demo@12345"},
+            json={"username": "delete_me", "password": DEMO_PASSWORD},
         )
         assert login_deleted.status_code == 401
 
@@ -1657,7 +1660,7 @@ def test_user_delete_flow_and_dependency_guard():
             headers=headers,
             json={
                 "username": "bound_acc",
-                "password": "Demo@12345",
+                "password": DEMO_PASSWORD,
                 "role": "ACCOUNTANT",
                 "is_active": True,
             },
@@ -1667,7 +1670,7 @@ def test_user_delete_flow_and_dependency_guard():
 
         bound_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "bound_acc", "password": "Demo@12345"},
+            json={"username": "bound_acc", "password": DEMO_PASSWORD},
         )
         assert bound_login.status_code == 200
         bound_headers = {"Authorization": f"Bearer {bound_login.json()['access_token']}"}
@@ -1692,7 +1695,7 @@ def test_login_updates_last_login_and_operation_log():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert login_response.status_code == 200
         token = login_response.json()["access_token"]
@@ -1718,13 +1721,13 @@ def test_ldap_settings_permission_and_sync_guard():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
 
         admin_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": "Demo@12345"},
+            json={"username": "admin", "password": DEMO_PASSWORD},
         )
         admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
@@ -1760,7 +1763,7 @@ def test_dashboard_and_todo_flow():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1786,7 +1789,7 @@ def test_dashboard_and_todo_flow():
 
         accountant_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant2", "password": "Demo@12345"},
+            json={"username": "accountant2", "password": DEMO_PASSWORD},
         )
         assert accountant_login.status_code == 200
         accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
@@ -1819,7 +1822,7 @@ def test_billing_due_system_todo_lifecycle():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1867,7 +1870,7 @@ def test_billing_due_system_todo_lifecycle():
 
         accountant_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant", "password": "Demo@12345"},
+            json={"username": "accountant", "password": DEMO_PASSWORD},
         )
         assert accountant_login.status_code == 200
         accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
@@ -1919,7 +1922,7 @@ def test_billing_renew_system_todo_contains_action_path():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -1969,7 +1972,7 @@ def test_billing_renew_system_todo_contains_action_path():
 
         accountant_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant", "password": "Demo@12345"},
+            json={"username": "accountant", "password": DEMO_PASSWORD},
         )
         assert accountant_login.status_code == 200
         accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
@@ -1985,7 +1988,7 @@ def test_system_billing_todo_only_for_assigned_accountant():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -2064,7 +2067,7 @@ def test_system_billing_todo_only_for_assigned_accountant():
 
         accountant2_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant2", "password": "Demo@12345"},
+            json={"username": "accountant2", "password": DEMO_PASSWORD},
         )
         assert accountant2_login.status_code == 200
         accountant2_headers = {"Authorization": f"Bearer {accountant2_login.json()['access_token']}"}
@@ -2085,7 +2088,7 @@ def test_todo_my_day_toggle_and_carry_behavior():
     with TestClient(app) as client:
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": "accountant", "password": "Demo@12345"},
+            json={"username": "accountant", "password": DEMO_PASSWORD},
         )
         assert login_response.status_code == 200
         headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
@@ -2159,7 +2162,7 @@ def test_periodic_billing_service_dates_auto_derive_due_date_and_month_range():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -2235,7 +2238,7 @@ def test_one_time_billing_forces_one_time_basis_and_same_day_due_date():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
@@ -2292,7 +2295,7 @@ def test_periodic_billing_rejects_due_date_before_service_start_date():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"username": "boss", "password": "Demo@12345"},
+            json={"username": "boss", "password": DEMO_PASSWORD},
         )
         assert owner_login.status_code == 200
         headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}

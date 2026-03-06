@@ -212,11 +212,13 @@ JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=720
 CORS_ALLOW_ORIGINS=http://192.168.6.6:32080,https://192.168.6.6:32080
 BOOTSTRAP_DEMO_DATA=true
+BOOTSTRAP_DEMO_PASSWORD=<测试演示账号强密码>
 RESET_DB_ON_STARTUP=false
 ```
 
 说明：
 - 测试环境可以保留 `BOOTSTRAP_DEMO_DATA=true`
+- `BOOTSTRAP_DEMO_PASSWORD` 必须改成你自己的测试密码，不要在登录页展示
 - `RESET_DB_ON_STARTUP` 必须保持 `false`
 - 如果测试环境改成其他内网地址、内网域名或端口，要同步修改 `CORS_ALLOW_ORIGINS`
 
@@ -307,10 +309,10 @@ curl -i http://192.168.6.6:32000/api/v1/health
 curl -I http://192.168.6.6:32080
 curl -i -X POST http://192.168.6.6:32080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  --data '{"username":"not-exists-user","password":"Demo@12345"}'
+  --data '{"username":"not-exists-user","password":"<测试密码>"}'
 curl -i -X POST http://192.168.6.6:32080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  --data '{"username":"boss","password":"Demo@12345"}'
+  --data '{"username":"boss","password":"<测试密码>"}'
 ```
 
 本次实测结果：

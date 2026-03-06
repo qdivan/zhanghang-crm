@@ -98,13 +98,14 @@ npm run prod:down
 1. Web: `http://localhost:5173`
 2. API: `http://localhost:8000`
 3. API Health: `http://localhost:8000/api/v1/health`
-4. 演示账号：`boss` / `admin` / `accountant` / `accountant2` / `accountant3` / `accountant4`，密码统一 `Demo@12345`
+4. 演示账号：`boss` / `admin` / `accountant` / `accountant2` / `accountant3` / `accountant4`
 
 备注：
 1. `infra/docker-compose.yml` 默认使用 PostgreSQL（`db` 服务）。
 2. 本地直接运行后端时，默认数据库为 SQLite（`apps/api/daizhang.db`）。
 3. 可通过环境变量控制启动行为：
    - `BOOTSTRAP_DEMO_DATA=true|false`（是否注入演示数据）
+   - `BOOTSTRAP_DEMO_PASSWORD=<强密码>`（演示账号默认密码，默认 `Daizhang#2026!`）
    - `RESET_DB_ON_STARTUP=true|false`（是否启动时重建数据库）
 
 ## 群晖 DS920+ 双环境部署（dev + prd）

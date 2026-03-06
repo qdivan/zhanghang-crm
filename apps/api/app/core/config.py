@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 720
     cors_allow_origins: str = "*"
     bootstrap_demo_data: bool = False
+    bootstrap_demo_password: str = "Daizhang#2026!"
     reset_db_on_startup: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

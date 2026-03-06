@@ -20,6 +20,7 @@ services:
       DATABASE_URL: postgresql+psycopg://daizhang:daizhang@db:5432/daizhang
       JWT_SECRET: change-me-in-production
       BOOTSTRAP_DEMO_DATA: "true"
+      BOOTSTRAP_DEMO_PASSWORD: ${BOOTSTRAP_DEMO_PASSWORD:-Daizhang#2026!}
       RESET_DB_ON_STARTUP: "true"
     ports:
       - "8000:8000"

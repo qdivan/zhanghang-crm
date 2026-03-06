@@ -3,23 +3,48 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password
+from app.core.config import settings
+from app.core.security import hash_password, verify_password
 from app.models import AddressResource, BillingActivity, BillingRecord, Customer, Lead, User
+
+DEMO_USER_SPECS = (
+    ("boss", "OWNER"),
+    ("admin", "ADMIN"),
+    ("accountant", "ACCOUNTANT"),
+    ("accountant2", "ACCOUNTANT"),
+    ("accountant3", "ACCOUNTANT"),
+    ("accountant4", "ACCOUNTANT"),
+)
 
 
 def bootstrap_data(db: Session) -> None:
     users = db.execute(select(User)).scalars().all()
-    if not users:
-        demo_users = [
-            User(username="boss", password_hash=hash_password("Demo@12345"), role="OWNER"),
-            User(username="admin", password_hash=hash_password("Demo@12345"), role="ADMIN"),
-            User(username="accountant", password_hash=hash_password("Demo@12345"), role="ACCOUNTANT"),
-            User(username="accountant2", password_hash=hash_password("Demo@12345"), role="ACCOUNTANT"),
-            User(username="accountant3", password_hash=hash_password("Demo@12345"), role="ACCOUNTANT"),
-            User(username="accountant4", password_hash=hash_password("Demo@12345"), role="ACCOUNTANT"),
-        ]
-        db.add_all(demo_users)
+    user_map = {user.username: user for user in users}
+    demo_users_changed = False
+    for username, role in DEMO_USER_SPECS:
+        existing_user = user_map.get(username)
+        if existing_user is None:
+            db.add(
+                User(
+                    username=username,
+                    password_hash=hash_password(settings.bootstrap_demo_password),
+                    role=role,
+                )
+            )
+            demo_users_changed = True
+            continue
+
+        if existing_user.role != role:
+            existing_user.role = role
+            demo_users_changed = True
+        if not verify_password(settings.bootstrap_demo_password, existing_user.password_hash):
+            existing_user.password_hash = hash_password(settings.bootstrap_demo_password)
+            demo_users_changed = True
+
+    if demo_users_changed:
         db.commit()
+        users = db.execute(select(User)).scalars().all()
+    elif not users:
         users = db.execute(select(User)).scalars().all()
 
     lead_exists = db.execute(select(Lead.id)).first()
