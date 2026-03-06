@@ -7,7 +7,9 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.services.bootstrap import bootstrap_data
-import app.models  # noqa: F401
+from app import models as app_models
+
+MODEL_IMPORT_GUARD = app_models
 
 app = FastAPI(title=settings.app_name)
 

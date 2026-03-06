@@ -185,7 +185,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 description=f"合同到期日 {due_date.isoformat()}，请确认是否续费并生成新周期",
                 due_date=due_date,
                 action_path=f"/billing?action=renew&record_id={record_id}",
-                action_label="一键续费",
+                action_label="确认续费",
                 assignee_user_id=assignee_user_id,
                 assignee_username=assignee_username or "-",
             )

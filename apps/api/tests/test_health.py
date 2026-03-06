@@ -183,6 +183,56 @@ def test_billing_defaults_for_periodic_and_one_time_modes():
         assert one_time_resp.json()["due_month"] == date.today().isoformat()
 
 
+def test_billing_batch_create_supports_multiple_rows_for_same_customer():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        customers_response = client.get("/api/v1/customers", headers=headers)
+        assert customers_response.status_code == 200
+        customer_id = customers_response.json()[0]["id"]
+
+        batch_resp = client.post(
+            "/api/v1/billing-records/batch",
+            headers=headers,
+            json={
+                "records": [
+                    {
+                        "customer_id": customer_id,
+                        "charge_category": "代账",
+                        "charge_mode": "PERIODIC",
+                        "amount_basis": "MONTHLY",
+                        "summary": "批量代账服务",
+                        "total_fee": 3600,
+                        "monthly_fee": 300,
+                        "period_start_month": "2026-04",
+                        "payment_method": "后收",
+                    },
+                    {
+                        "customer_id": customer_id,
+                        "charge_category": "注册",
+                        "charge_mode": "ONE_TIME",
+                        "summary": "批量注册服务",
+                        "total_fee": 1800,
+                        "payment_method": "预收",
+                    },
+                ]
+            },
+        )
+        assert batch_resp.status_code == 201
+        records = batch_resp.json()
+        assert len(records) == 2
+        assert records[0]["customer_id"] == customer_id
+        assert records[1]["customer_id"] == customer_id
+        assert records[0]["period_end_month"] == "2027-03"
+        assert records[1]["due_month"] == date.today().isoformat()
+        assert records[0]["serial_no"] + 1 == records[1]["serial_no"]
+
+
 def test_accountant_can_only_access_own_billing_records():
     with TestClient(app) as client:
         owner_login = client.post(
@@ -1108,6 +1158,175 @@ def test_renew_and_terminate_billing_record_lifecycle():
         assert "合同提前终止" in (terminated["note"] or "")
 
 
+def test_renew_billing_record_supports_form_overrides():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "续费覆盖测试客户",
+                "contact_name": "续费表单",
+                "phone": "13800138102",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "charge_category": "代账",
+                "amount_basis": "MONTHLY",
+                "period_start_month": "2026-02",
+                "period_end_month": "2027-01",
+                "collection_start_date": "2026-02-01",
+                "due_month": "2027-01-31",
+                "total_fee": 3600,
+                "monthly_fee": 300,
+                "payment_method": "后收",
+                "summary": "旧续费合同",
+                "note": "原备注",
+                "extra_note": "原扩展",
+            },
+        )
+        assert record_resp.status_code == 201
+        source_record_id = record_resp.json()["id"]
+
+        renew_resp = client.post(
+            f"/api/v1/billing-records/{source_record_id}/renew",
+            headers=headers,
+            json={
+                "charge_category": "代账并退税",
+                "summary": "续费后新合同",
+                "total_fee": 4200,
+                "monthly_fee": 350,
+                "period_start_month": "2027-02",
+                "period_end_month": "2028-01",
+                "collection_start_date": "2027-02-01",
+                "due_month": "2028-01-28",
+                "payment_method": "预收",
+                "status": "PARTIAL",
+                "received_amount": 1200,
+                "note": "续费后备注",
+                "extra_note": "续费后扩展",
+            },
+        )
+        assert renew_resp.status_code == 201
+        renewed = renew_resp.json()
+        assert renewed["charge_category"] == "代账并退税"
+        assert renewed["summary"] == "续费后新合同"
+        assert renewed["total_fee"] == 4200
+        assert renewed["monthly_fee"] == 350
+        assert renewed["period_start_month"] == "2027-02"
+        assert renewed["period_end_month"] == "2028-01"
+        assert renewed["collection_start_date"] == "2027-02-01"
+        assert renewed["due_month"] == "2028-01-28"
+        assert renewed["payment_method"] == "预收"
+        assert renewed["received_amount"] == 1200
+        assert renewed["outstanding_amount"] == 3000
+        assert renewed["status"] == "PARTIAL"
+        assert renewed["note"] == "续费后备注"
+        assert renewed["extra_note"] == "续费后扩展"
+
+
+def test_terminate_billing_record_rejects_date_outside_service_window():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "提前终止校验客户",
+                "contact_name": "校验人",
+                "phone": "13800138092",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "period_start_month": "2026-05",
+                "period_end_month": "2026-12",
+                "collection_start_date": "2026-05-01",
+                "due_month": "2026-12-31",
+                "total_fee": 2400,
+                "payment_method": "后收",
+                "summary": "终止日期校验合同",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        too_early_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/terminate",
+            headers=headers,
+            json={
+                "terminated_at": "2026-04-30",
+                "reduced_fee": 100,
+                "reason": "错误日期",
+            },
+        )
+        assert too_early_resp.status_code == 400
+        assert too_early_resp.json()["detail"] == "终止日期不能早于服务开始日期"
+
+        too_late_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/terminate",
+            headers=headers,
+            json={
+                "terminated_at": "2027-01-01",
+                "reduced_fee": 100,
+                "reason": "错误日期",
+            },
+        )
+        assert too_late_resp.status_code == 400
+        assert too_late_resp.json()["detail"] == "终止日期不能晚于当前到期日"
+
+
 def test_customer_billing_ledger_entries_and_balance():
     with TestClient(app) as client:
         owner_login = client.post(
@@ -1758,7 +1977,7 @@ def test_billing_renew_system_todo_contains_action_path():
         system_todos = client.get("/api/v1/dashboard/system-todos", headers=accountant_headers, params={"limit": 200})
         assert system_todos.status_code == 200
         renew_todo = next(item for item in system_todos.json() if item["id"] == f"renew:{record_id}")
-        assert renew_todo["action_label"] == "一键续费"
+        assert renew_todo["action_label"] == "确认续费"
         assert renew_todo["action_path"] == f"/billing?action=renew&record_id={record_id}"
 
 
@@ -1934,3 +2153,186 @@ def test_todo_my_day_toggle_and_carry_behavior():
         # 未完成任务不会因“今日”清空而消失，仍留在全部任务里。
         assert second_todo_id in all_items
         assert all_items[second_todo_id]["status"] == "OPEN"
+
+
+def test_periodic_billing_service_dates_auto_derive_due_date_and_month_range():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "自动推导账期客户",
+                "contact_name": "推导负责人",
+                "phone": "13800138131",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        monthly_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "amount_basis": "MONTHLY",
+                "collection_start_date": "2026-04-15",
+                "total_fee": 800,
+                "monthly_fee": 800,
+                "payment_method": "预收",
+                "summary": "4月月费代账",
+            },
+        )
+        assert monthly_resp.status_code == 201
+        monthly_record = monthly_resp.json()
+        assert monthly_record["collection_start_date"] == "2026-04-15"
+        assert monthly_record["due_month"] == "2026-05-14"
+        assert monthly_record["period_start_month"] == "2026-04"
+        assert monthly_record["period_end_month"] == "2026-05"
+
+        yearly_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "amount_basis": "YEARLY",
+                "collection_start_date": "2026-04-15",
+                "total_fee": 9600,
+                "monthly_fee": 800,
+                "payment_method": "预收",
+                "summary": "年度代账",
+            },
+        )
+        assert yearly_resp.status_code == 201
+        yearly_record = yearly_resp.json()
+        assert yearly_record["due_month"] == "2027-04-14"
+        assert yearly_record["period_start_month"] == "2026-04"
+        assert yearly_record["period_end_month"] == "2027-04"
+
+
+
+def test_one_time_billing_forces_one_time_basis_and_same_day_due_date():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "单次项目客户",
+                "contact_name": "单次负责人",
+                "phone": "13800138132",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "注册",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "YEARLY",
+                "collection_start_date": "2026-06-08",
+                "total_fee": 3200,
+                "payment_method": "预收",
+                "summary": "股权变更一次性服务",
+            },
+        )
+        assert record_resp.status_code == 201
+        record = record_resp.json()
+        assert record["amount_basis"] == "ONE_TIME"
+        assert record["collection_start_date"] == "2026-06-08"
+        assert record["due_month"] == "2026-06-08"
+        assert record["period_start_month"] == ""
+        assert record["period_end_month"] == ""
+
+
+
+def test_periodic_billing_rejects_due_date_before_service_start_date():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": "Demo@12345"},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "错误日期客户",
+                "contact_name": "日期校验",
+                "phone": "13800138133",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        create_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_mode": "PERIODIC",
+                "amount_basis": "MONTHLY",
+                "collection_start_date": "2026-08-15",
+                "due_month": "2026-08-01",
+                "total_fee": 1200,
+                "payment_method": "后收",
+            },
+        )
+        assert create_resp.status_code == 400
+        assert create_resp.json()["detail"] == "到期日期不能早于服务开始日期"

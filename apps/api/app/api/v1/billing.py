@@ -34,6 +34,7 @@ from app.schemas.billing import (
     BillingLedgerEntryOut,
     BillingLedgerMonthlySummaryOut,
     BillingLedgerOut,
+    BillingRecordBatchCreate,
     BillingRecordCreate,
     BillingRecordOut,
     BillingRenewRequest,
@@ -87,6 +88,19 @@ def _shift_month(month_text: str, delta: int) -> str:
     return f"{target_year:04d}-{target_month:02d}"
 
 
+def _month_end_date_text(month_text: str) -> str:
+    normalized = _normalize_month(month_text)
+    if not normalized:
+        return ""
+    year = int(normalized[:4])
+    month = int(normalized[5:7])
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    return (next_month - next_month.resolution).isoformat()
+
+
 def _shift_date_text(date_text: str, years: int) -> str:
     raw = (date_text or "").strip()
     if not raw:
@@ -106,6 +120,46 @@ def _shift_date_text(date_text: str, years: int) -> str:
     return target.isoformat()
 
 
+def _normalize_iso_date(value: Optional[str]) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError:
+        return ""
+
+
+def _format_date(value: date) -> str:
+    return value.isoformat()
+
+
+def _subtract_days(value: date, days: int) -> date:
+    return value.fromordinal(value.toordinal() - days)
+
+
+def _add_months_clamped(value: date, months: int) -> date:
+    month_index = value.year * 12 + (value.month - 1) + months
+    target_year = month_index // 12
+    target_month = month_index % 12 + 1
+    if target_month == 12:
+        next_month = date(target_year + 1, 1, 1)
+    else:
+        next_month = date(target_year, target_month + 1, 1)
+    last_day = (next_month - next_month.resolution).day
+    return date(target_year, target_month, min(value.day, last_day))
+
+
+def _add_years_clamped(value: date, years: int) -> date:
+    target_year = value.year + years
+    try:
+        return value.replace(year=target_year)
+    except ValueError:
+        if value.month == 2 and value.day == 29:
+            return value.replace(year=target_year, day=28)
+        raise
+
+
 def _parse_due_month(value: Optional[str]) -> Optional[date]:
     raw = (value or "").strip()
     if not raw:
@@ -114,6 +168,16 @@ def _parse_due_month(value: Optional[str]) -> Optional[date]:
         return date.fromisoformat(raw)
     except ValueError:
         return None
+
+
+def _parse_service_start_date(record: BillingRecord) -> Optional[date]:
+    collection_start = _parse_due_month(record.collection_start_date)
+    if collection_start is not None:
+        return collection_start
+    normalized_month = _normalize_month(record.period_start_month)
+    if not normalized_month:
+        return None
+    return date.fromisoformat(f"{normalized_month}-01")
 
 
 def _normalize_charge_category(value: Optional[str]) -> str:
@@ -125,16 +189,48 @@ def _apply_billing_business_defaults(record: BillingRecord) -> None:
     record.charge_mode = _normalize_charge_mode(record.charge_mode)
     record.charge_category = _normalize_charge_category(record.charge_category)
     record.amount_basis = _normalize_amount_basis(record.amount_basis, record.charge_mode)
+    record.collection_start_date = _normalize_iso_date(record.collection_start_date)
+    record.due_month = _normalize_iso_date(record.due_month)
     record.period_start_month = _normalize_month(record.period_start_month)
     record.period_end_month = _normalize_month(record.period_end_month)
     record.payment_method = _normalize_payment_method(record.payment_method)
     if record.charge_mode == "ONE_TIME":
         record.period_start_month = ""
         record.period_end_month = ""
-        if not (record.due_month or "").strip():
-            record.due_month = date.today().isoformat()
-    elif record.period_start_month and not record.period_end_month:
+        if not record.collection_start_date:
+            record.collection_start_date = record.due_month or date.today().isoformat()
+        if not record.due_month:
+            record.due_month = record.collection_start_date or date.today().isoformat()
+        return
+
+    if not record.collection_start_date and record.period_start_month:
+        record.collection_start_date = f"{record.period_start_month}-01"
+    if record.period_start_month and not record.period_end_month and not record.due_month:
         record.period_end_month = _shift_month(record.period_start_month, 11)
+        record.due_month = _month_end_date_text(record.period_end_month)
+    if record.collection_start_date and not record.due_month:
+        service_start = date.fromisoformat(record.collection_start_date)
+        if record.amount_basis == "MONTHLY":
+            record.due_month = _format_date(_subtract_days(_add_months_clamped(service_start, 1), 1))
+        else:
+            record.due_month = _format_date(_subtract_days(_add_years_clamped(service_start, 1), 1))
+    if not record.collection_start_date and record.due_month:
+        record.collection_start_date = f"{record.due_month[:7]}-01"
+    if not record.period_start_month and record.collection_start_date:
+        record.period_start_month = record.collection_start_date[:7]
+    if not record.period_end_month and record.due_month:
+        record.period_end_month = record.due_month[:7]
+
+
+def _ensure_valid_record_dates(record: BillingRecord) -> None:
+    service_start = _parse_due_month(record.collection_start_date)
+    due_date = _parse_due_month(record.due_month)
+    if service_start is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写服务开始日期")
+    if due_date is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写到期日期")
+    if due_date < service_start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="到期日期不能早于服务开始日期")
 
 
 def _refresh_record_amounts(record: BillingRecord) -> None:
@@ -226,6 +322,25 @@ def _get_record_or_404(db: Session, record_id: int) -> BillingRecord:
     record = db.execute(select(BillingRecord).where(BillingRecord.id == record_id)).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing record not found")
+    return record
+
+
+def _build_billing_record(
+    payload: BillingRecordCreate,
+    customer: Customer,
+    serial_no: int,
+) -> BillingRecord:
+    record = BillingRecord(
+        **payload.model_dump(exclude={"serial_no", "outstanding_amount", "customer_name", "payment_method"}),
+        serial_no=serial_no,
+        customer_name=customer.name,
+        payment_method=_normalize_payment_method(payload.payment_method),
+    )
+    _apply_billing_business_defaults(record)
+    _ensure_valid_record_dates(record)
+    if payload.outstanding_amount is not None:
+        record.outstanding_amount = payload.outstanding_amount
+    _refresh_record_amounts(record)
     return record
 
 
@@ -340,16 +455,7 @@ def create_billing_record(
         current_max = db.execute(select(func.max(BillingRecord.serial_no))).scalar() or 0
         serial_no = int(current_max) + 1
 
-    record = BillingRecord(
-        **payload.model_dump(exclude={"serial_no", "outstanding_amount", "customer_name", "payment_method"}),
-        serial_no=serial_no,
-        customer_name=customer.name,
-        payment_method=_normalize_payment_method(payload.payment_method),
-    )
-    _apply_billing_business_defaults(record)
-    if payload.outstanding_amount is not None:
-        record.outstanding_amount = payload.outstanding_amount
-    _refresh_record_amounts(record)
+    record = _build_billing_record(payload, customer, serial_no)
     db.add(record)
     write_operation_log(
         db,
@@ -362,6 +468,50 @@ def create_billing_record(
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.post(
+    "/batch",
+    response_model=list[BillingRecordOut],
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def create_billing_records_batch(
+    payload: BillingRecordBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    next_serial_no = int(db.execute(select(func.max(BillingRecord.serial_no))).scalar() or 0)
+    created_records: list[BillingRecord] = []
+
+    for item in payload.records:
+        customer = db.execute(select(Customer).where(Customer.id == item.customer_id)).scalar_one_or_none()
+        if customer is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
+
+        serial_no = item.serial_no
+        if serial_no is None:
+            next_serial_no += 1
+            serial_no = next_serial_no
+        else:
+            next_serial_no = max(next_serial_no, int(serial_no))
+
+        record = _build_billing_record(item, customer, serial_no)
+        db.add(record)
+        created_records.append(record)
+        write_operation_log(
+            db,
+            actor_id=current_user.id,
+            action="BILLING_RECORD_CREATED",
+            entity_type="BILLING",
+            entity_id=serial_no,
+            detail=f"customer_id={item.customer_id},total_fee={record.total_fee},batch=Y",
+        )
+
+    db.commit()
+    for record in created_records:
+        db.refresh(record)
+    return created_records
 
 
 @router.patch(
@@ -382,6 +532,7 @@ def update_billing_record(
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(record, key, value)
     _apply_billing_business_defaults(record)
+    _ensure_valid_record_dates(record)
     if payload.customer_id is not None:
         customer = db.execute(select(Customer).where(Customer.id == payload.customer_id)).scalar_one_or_none()
         if customer is None:
@@ -419,31 +570,58 @@ def renew_billing_record(
 ):
     record = _get_record_or_404(db, record_id)
     serial_no = int(db.execute(select(func.max(BillingRecord.serial_no))).scalar() or 0) + 1
+    provided_fields = set(payload.model_fields_set)
+    legacy_note_only = provided_fields.issubset({"note"}) and payload.note is not None
 
     renewed = BillingRecord(
         serial_no=serial_no,
         customer_id=record.customer_id,
         customer_name=record.customer_name,
-        charge_category=record.charge_category,
-        charge_mode=record.charge_mode,
-        amount_basis=record.amount_basis,
-        summary=(record.summary or "") + "（续费）",
-        total_fee=float(record.total_fee or 0),
-        monthly_fee=float(record.monthly_fee or 0),
-        billing_cycle_text=record.billing_cycle_text,
-        period_start_month=_shift_month(record.period_start_month, 12) if record.period_start_month else "",
-        period_end_month=_shift_month(record.period_end_month, 12) if record.period_end_month else "",
-        collection_start_date=_shift_date_text(record.collection_start_date, 1) if record.collection_start_date else "",
-        due_month=_shift_date_text(record.due_month, 1) if record.due_month else "",
-        payment_method=record.payment_method,
-        status="FULL_ARREARS",
-        received_amount=0,
+        charge_category=payload.charge_category if payload.charge_category is not None else record.charge_category,
+        charge_mode=payload.charge_mode if payload.charge_mode is not None else record.charge_mode,
+        amount_basis=payload.amount_basis if payload.amount_basis is not None else record.amount_basis,
+        summary=payload.summary if payload.summary is not None else f"{(record.summary or '').strip()}（续费）",
+        total_fee=float(payload.total_fee) if payload.total_fee is not None else float(record.total_fee or 0),
+        monthly_fee=float(payload.monthly_fee) if payload.monthly_fee is not None else float(record.monthly_fee or 0),
+        billing_cycle_text=payload.billing_cycle_text if payload.billing_cycle_text is not None else record.billing_cycle_text,
+        period_start_month=(
+            payload.period_start_month
+            if payload.period_start_month is not None
+            else (_shift_month(record.period_start_month, 12) if record.period_start_month else "")
+        ),
+        period_end_month=(
+            payload.period_end_month
+            if payload.period_end_month is not None
+            else (_shift_month(record.period_end_month, 12) if record.period_end_month else "")
+        ),
+        collection_start_date=(
+            payload.collection_start_date
+            if payload.collection_start_date is not None
+            else (_shift_date_text(record.collection_start_date, 1) if record.collection_start_date else "")
+        ),
+        due_month=(
+            payload.due_month
+            if payload.due_month is not None
+            else (_shift_date_text(record.due_month, 1) if record.due_month else "")
+        ),
+        payment_method=payload.payment_method if payload.payment_method is not None else record.payment_method,
+        status=payload.status if payload.status is not None else "FULL_ARREARS",
+        received_amount=float(payload.received_amount) if payload.received_amount is not None else 0,
         outstanding_amount=float(record.total_fee or 0),
-        note=f"{(record.note or '').strip()} 续费自#{record.serial_no}".strip(),
-        extra_note=payload.note.strip(),
-        color_tag=record.color_tag,
+        note=(
+            f"{(record.note or '').strip()} 续费自#{record.serial_no}".strip()
+            if legacy_note_only or payload.note is None
+            else payload.note
+        ),
+        extra_note=(
+            (payload.note or "").strip()
+            if legacy_note_only
+            else (payload.extra_note if payload.extra_note is not None else record.extra_note)
+        ),
+        color_tag=payload.color_tag if payload.color_tag is not None else record.color_tag,
     )
     _apply_billing_business_defaults(renewed)
+    _ensure_valid_record_dates(renewed)
     _refresh_record_amounts(renewed)
     db.add(renewed)
 
@@ -472,15 +650,29 @@ def terminate_billing_record(
     current_user: User = Depends(get_current_user),
 ):
     record = _get_record_or_404(db, record_id)
+    terminated_at = payload.terminated_at
+    service_start = _parse_service_start_date(record)
+    if service_start is not None and terminated_at < service_start:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="终止日期不能早于服务开始日期",
+        )
+    current_due_date = _parse_due_month(record.due_month)
+    if current_due_date is not None and terminated_at > current_due_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="终止日期不能晚于当前到期日",
+        )
+
     reduced_fee = float(payload.reduced_fee or 0)
     new_total = max(float(record.total_fee or 0) - reduced_fee, 0.0)
 
     record.total_fee = new_total
-    record.due_month = payload.terminated_at.isoformat()
+    record.due_month = terminated_at.isoformat()
     if record.charge_mode == "PERIODIC":
-        record.period_end_month = payload.terminated_at.isoformat()[:7]
+        record.period_end_month = terminated_at.isoformat()[:7]
     reason_text = payload.reason.strip() or "提前终止合同"
-    append_note = f"[{payload.terminated_at.isoformat()}]{reason_text}, 冲减费用:{reduced_fee:.2f}"
+    append_note = f"[{terminated_at.isoformat()}]{reason_text}, 冲减费用:{reduced_fee:.2f}"
     record.note = f"{(record.note or '').strip()} {append_note}".strip()
     _refresh_record_amounts(record)
 
@@ -490,7 +682,7 @@ def terminate_billing_record(
         action="BILLING_RECORD_TERMINATED",
         entity_type="BILLING",
         entity_id=record.id,
-        detail=f"terminated_at={payload.terminated_at},reduced_fee={reduced_fee}",
+        detail=f"terminated_at={terminated_at},reduced_fee={reduced_fee}",
     )
     db.commit()
     db.refresh(record)

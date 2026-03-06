@@ -3,6 +3,7 @@
 ## 1. Design Inputs
 1. `requirements.md`（全字段覆盖要求）
 2. `excel-analysis.md`（字段、含义、逻辑盘点）
+3. `old_example_table/转化2026.xls`、`old_example_table/客户跟进表.xls`、`old_example_table/周凤莲收费.xlsx`（界面原型来源）
 
 ## 2. Architecture
 
@@ -37,6 +38,21 @@
 11. LDAP 同步：管理员保存 LDAP 连接参数 -> 手动触发同步 -> 新增/更新本地账号。
 12. 审计日志：核心写操作与登录写入 `operation_logs`，管理员面板可检索；用户更新日志需记录字段 diff。
 
+### 2.3 Excel-First UI Mapping
+1. `转化2026.xls`
+   - `地址资源` = 地址资源页
+   - `客户总览` = 客户开发总览
+   - 数字 sheet = 线索详情页
+2. `客户跟进表.xls`
+   - `客户总览` = 客户列表
+   - 数字 sheet = 客户档案页
+3. `周凤莲收费.xlsx`
+   - `周 (2)` = 收费主台账
+4. 设计原则：
+   - 首屏优先复用 Excel 主字段顺序与命名。
+   - 系统内部规则字段允许存在，但默认隐藏、自动推导或放入高级项。
+   - 明细页结构遵循“上半区基础信息 + 下半区记录表”的 Excel 习惯。
+
 ## 3. Data Model（MVP）
 
 ### 3.1 `leads`
@@ -61,6 +77,10 @@
 ### 3.4 `customers`
 1. `name`, `contact_name`, `phone`, `assigned_accountant_id`, `source_lead_id`
 2. 查询接口附带：`accountant_username`, `source_lead_grade`, `source_lead_last_followup_date`
+3. 客户列表展示字段优先使用客户维护口径：
+   - `source_area_display = country || region`
+   - `source_service_start_display = service_start_text || contact_start_date`
+   - `source_contact_wechat`, `source_other_contact`, `source_main_business`, `source_intro`
 
 ### 3.5 `billing_records`
 对齐 `周 (2)`：
@@ -72,6 +92,7 @@
 6. `status(CLEARED|FULL_ARREARS|PARTIAL)`, `received_amount`, `outstanding_amount`
 7. `note`, `extra_note`
 8. `color_tag`（保留历史颜色，业务判断以后续状态字段为准）
+9. `charge_mode`、`amount_basis`、`period_start_month`、`period_end_month` 等规则字段保留为内部实现字段，不作为主台账首屏重点。
 
 ### 3.6 `billing_activities`
 1. `billing_record_id`
@@ -151,20 +172,25 @@
 ## 5. Frontend IA（按 Excel 习惯）
 1. 客户开发页：
    - 查询条件：关键词、状态、模板类型
-   - 首页表头保留核心字段：公司名、联系人、电话、来源、状态、提醒、最后跟进反馈
-   - 完整字段放入线索详情页，降低首页复杂度
+   - 对齐 `转化2026 > 客户总览`
+   - 首页表头以 Excel 列顺序为基础，保留高频列：公司名、等级、地区/国家、联络开始、联系人（微信号）、主营、电话、最后跟进、提醒值、状态
+   - 低频列放入线索详情页，降低首页复杂度
    - 默认排序：跟进中 -> 新线索 -> 已丢失 -> 已转化（置底）
    - 新增弹窗：覆盖两套模板字段
-   - 详情入口：进入线索独立档案页
+   - 公司名点击：已转化进客户档案，未转化进线索独立档案页
    - 流程说明弹窗：解释状态、流程、模板筛选用途
 2. 线索详情页：
-   - 上半区：固定字段（公司、等级、联系方式、服务/备注）
+   - 对齐 `转化2026` 数字 sheet
+   - 上半区：固定字段（公司、等级、地区、联络开始、联系人、电话、传真、其他联系方式、主营、介绍、备注、备用字段）
    - 下半区：跟进记录表（跟进日期、反馈、备注、提醒）
 3. 客户列表页：
-   - 已转化客户宽表：客户名、联系人、电话、会计、等级、最后跟进
+   - 对齐 `客户跟进表 > 客户总览`
+   - 已转化客户宽表：序号、等级、客户号+公司名、国家、服务开始时间、企业性质、服务方式、对接人及电话、微信、其他联系人、主营产品、介绍、收费标准、首期账单期间、最后跟进日期、提醒值、会计
    - 详情入口：进入客户档案页
 4. 客户档案页：
-   - 客户基础信息 + 来源线索详情 + 跟进历史
+   - 对齐 `客户跟进表` 数字 sheet
+   - 上半区：客户维护字段（公司名、等级、国家、服务开始时间、企业性质、服务方式、对接人及电话、微信、其他联系人、主营产品、介绍、收费标准、首期账单期间、提醒）
+   - 下半区：跟进历史
    - 可直接新增跟进
 5. 地址资源页：
    - 表头：分类、联系方式、资源说明、后续动作
@@ -176,6 +202,7 @@
    - 新增状态列：清账/全欠/部分收费
    - 记录详情：催收日志 + 收款日志
    - 统计卡：总记录数、总费用、月费用合计
+   - 系统规则字段仅在新增/编辑高级项中出现，不压过主表
 7. 日期输入：
    - 所有日期控件采用 `DatePicker + 可编辑输入`，支持弹出选择和键盘录入（`YYYYMMDD` / `YYMMDD`）。
 8. 管理员面板：

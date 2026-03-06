@@ -41,7 +41,26 @@ def list_customers(
         has_customer_read_grant = has_module_read_grant(db, current_user.id, "CUSTOMER")
 
     stmt = (
-        select(Customer, User.username, Lead.template_type, Lead.grade, Lead.last_followup_date, Lead.reminder_value)
+        select(
+            Customer,
+            User.username,
+            Lead.template_type,
+            Lead.grade,
+            Lead.region,
+            Lead.country,
+            Lead.contact_start_date,
+            Lead.service_start_text,
+            Lead.company_nature,
+            Lead.service_mode,
+            Lead.contact_wechat,
+            Lead.other_contact,
+            Lead.main_business,
+            Lead.intro,
+            Lead.fee_standard,
+            Lead.first_billing_period,
+            Lead.last_followup_date,
+            Lead.reminder_value,
+        )
         .join(User, Customer.assigned_accountant_id == User.id)
         .join(Lead, Customer.source_lead_id == Lead.id)
         .order_by(Customer.id.desc())
@@ -61,7 +80,30 @@ def list_customers(
 
     rows = db.execute(stmt).all()
     result: list[CustomerListOut] = []
-    for customer, accountant_username, template_type, grade, last_followup_date, reminder_value in rows:
+    for (
+        customer,
+        accountant_username,
+        template_type,
+        grade,
+        region,
+        country,
+        contact_start_date,
+        service_start_text,
+        company_nature,
+        service_mode,
+        contact_wechat,
+        other_contact,
+        main_business,
+        intro,
+        fee_standard,
+        first_billing_period,
+        last_followup_date,
+        reminder_value,
+    ) in rows:
+        source_area_display = country or region or ""
+        source_service_start_display = service_start_text or (
+            contact_start_date.isoformat() if contact_start_date else ""
+        )
         result.append(
             CustomerListOut(
                 id=customer.id,
@@ -74,6 +116,18 @@ def list_customers(
                 source_lead_id=customer.source_lead_id,
                 source_template_type=template_type or "",
                 source_grade=grade or "",
+                source_country=country or "",
+                source_service_start_text=service_start_text or "",
+                source_area_display=source_area_display,
+                source_service_start_display=source_service_start_display,
+                source_company_nature=company_nature or "",
+                source_service_mode=service_mode or "",
+                source_contact_wechat=contact_wechat or "",
+                source_other_contact=other_contact or "",
+                source_main_business=main_business or "",
+                source_intro=intro or "",
+                source_fee_standard=fee_standard or "",
+                source_first_billing_period=first_billing_period or "",
                 source_last_followup_date=last_followup_date,
                 source_reminder_value=reminder_value or "",
                 created_at=customer.created_at,

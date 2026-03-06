@@ -17,6 +17,18 @@ class CustomerListOut(BaseModel):
     source_lead_id: int
     source_template_type: str
     source_grade: str
+    source_country: str
+    source_service_start_text: str
+    source_area_display: str
+    source_service_start_display: str
+    source_company_nature: str
+    source_service_mode: str
+    source_contact_wechat: str
+    source_other_contact: str
+    source_main_business: str
+    source_intro: str
+    source_fee_standard: str
+    source_first_billing_period: str
     source_last_followup_date: Optional[date]
     source_reminder_value: str
     created_at: datetime

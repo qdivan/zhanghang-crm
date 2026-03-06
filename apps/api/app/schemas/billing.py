@@ -28,6 +28,10 @@ class BillingRecordCreate(BaseModel):
     color_tag: str = ""
 
 
+class BillingRecordBatchCreate(BaseModel):
+    records: list[BillingRecordCreate] = Field(min_length=1)
+
+
 class BillingRecordUpdate(BaseModel):
     serial_no: Optional[int] = None
     customer_id: Optional[int] = None
@@ -224,7 +228,23 @@ class BillingPaymentOut(BaseModel):
 
 
 class BillingRenewRequest(BaseModel):
-    note: str = ""
+    note: Optional[str] = None
+    extra_note: Optional[str] = None
+    charge_category: Optional[str] = None
+    charge_mode: Optional[Literal["PERIODIC", "ONE_TIME"]] = None
+    amount_basis: Optional[Literal["MONTHLY", "YEARLY", "ONE_TIME", "PERIOD_TOTAL"]] = None
+    summary: Optional[str] = None
+    total_fee: Optional[float] = None
+    monthly_fee: Optional[float] = None
+    billing_cycle_text: Optional[str] = None
+    period_start_month: Optional[str] = None
+    period_end_month: Optional[str] = None
+    collection_start_date: Optional[str] = None
+    due_month: Optional[str] = None
+    payment_method: Optional[str] = None
+    status: Optional[Literal["CLEARED", "FULL_ARREARS", "PARTIAL"]] = None
+    received_amount: Optional[float] = None
+    color_tag: Optional[str] = None
 
 
 class BillingTerminateRequest(BaseModel):
