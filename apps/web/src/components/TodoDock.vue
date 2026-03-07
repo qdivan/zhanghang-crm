@@ -603,8 +603,8 @@ onBeforeUnmount(() => {
 
 .todo-fab {
   position: fixed;
-  right: 14px;
-  bottom: 18px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
   z-index: 1100;
   box-shadow: 0 8px 18px rgba(24, 100, 255, 0.25);
 }
@@ -644,6 +644,11 @@ onBeforeUnmount(() => {
   .todo-toggle-btn,
   .todo-desktop-panel {
     display: none;
+  }
+
+  .todo-fab {
+    transform: scale(0.92);
+    transform-origin: bottom right;
   }
 
   .todo-scroll {

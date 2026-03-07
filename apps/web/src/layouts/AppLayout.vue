@@ -10,16 +10,17 @@ import {
   User,
 } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useAuthStore } from "../stores/auth";
 import TodoDock from "../components/TodoDock.vue";
+import { useResponsive } from "../composables/useResponsive";
 
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
-const isMobile = ref(false);
+const { isMobile } = useResponsive();
 const mobileMenuVisible = ref(false);
 
 const canOpenAdminPanel = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
@@ -71,28 +72,23 @@ function logout() {
   router.push("/login");
 }
 
-function syncViewport() {
-  isMobile.value = window.matchMedia("(max-width: 900px)").matches;
-  if (!isMobile.value) {
-    mobileMenuVisible.value = false;
-  }
-}
-
-onMounted(() => {
-  syncViewport();
-  window.addEventListener("resize", syncViewport);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener("resize", syncViewport);
-});
-
 watch(
   () => route.fullPath,
   () => {
     mobileMenuVisible.value = false;
   },
 );
+
+watch(isMobile, (value) => {
+  if (!value) {
+    mobileMenuVisible.value = false;
+  }
+});
+
+const userTagText = computed(() => {
+  const username = auth.user?.username ?? "未登录";
+  return isMobile.value ? username : `${username}（${roleLabel.value}）`;
+});
 </script>
 
 <template>
@@ -152,7 +148,7 @@ watch(
         <div class="top-right">
           <el-tag type="info" effect="plain" class="user-tag">
             <el-icon><User /></el-icon>
-            <span class="user-tag-text">{{ auth.user?.username ?? "未登录" }}（{{ roleLabel }}）</span>
+            <span class="user-tag-text">{{ userTagText }}</span>
           </el-tag>
           <el-button size="small" @click="logout">退出</el-button>
         </div>
@@ -253,34 +249,41 @@ watch(
 .main-area {
   background: #f7f8fa;
   padding: 16px;
+  overflow-x: hidden;
 }
 
 .content-main {
-  overflow-x: auto;
+  min-width: 0;
+  overflow-x: visible;
 }
 
 @media (max-width: 900px) {
   .topbar {
     padding: 8px;
-    align-items: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
     gap: 8px;
   }
 
   .top-left {
     flex: 1;
+    min-width: 0;
   }
 
   .top-right {
-    max-width: 50%;
+    width: 100%;
+    max-width: none;
     gap: 6px;
+    justify-content: space-between;
   }
 
   .user-tag {
-    max-width: 132px;
+    max-width: none;
+    flex: 1;
   }
 
   .user-tag-text {
-    max-width: 96px;
+    max-width: 100%;
   }
 
   .title {
@@ -288,13 +291,12 @@ watch(
   }
 
   .subtitle {
-    font-size: 11px;
+    display: none;
   }
 
   .main-area {
-    padding: 10px;
+    padding: 10px 10px 78px;
   }
-
 }
 
 .topbar :deep(.el-tag__content) {

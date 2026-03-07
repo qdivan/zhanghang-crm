@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models import DataAccessGrant, LdapSetting, OperationLog, User
+from app.models import DataAccessGrant, LdapSetting, OperationLog, SecuritySetting, User
 from app.schemas.admin import (
     DataAccessGrantCreate,
     DataAccessGrantOut,
@@ -16,9 +16,12 @@ from app.schemas.admin import (
     LdapSettingsUpdate,
     LdapSyncResponse,
     OperationLogOut,
+    SecuritySettingsOut,
+    SecuritySettingsUpdate,
 )
 from app.services.data_access import has_overlapping_active_grant
 from app.services.audit import write_operation_log
+from app.services.login_security import get_or_create_security_setting
 from app.services.ldap_sync import get_or_create_ldap_setting, sync_ldap_users
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles("OWNER", "ADMIN"))])
@@ -37,6 +40,17 @@ def _to_ldap_settings_out(setting: LdapSetting) -> LdapSettingsOut:
         username_attr=setting.username_attr,
         display_name_attr=setting.display_name_attr,
         default_role=setting.default_role,
+        created_at=setting.created_at,
+        updated_at=setting.updated_at,
+    )
+
+
+def _to_security_settings_out(setting: SecuritySetting) -> SecuritySettingsOut:
+    return SecuritySettingsOut(
+        id=setting.id,
+        local_ip_lock_enabled=setting.local_ip_lock_enabled,
+        local_ip_lock_window_minutes=setting.local_ip_lock_window_minutes,
+        local_ip_lock_max_attempts=setting.local_ip_lock_max_attempts,
         created_at=setting.created_at,
         updated_at=setting.updated_at,
     )
@@ -164,6 +178,39 @@ def trigger_ldap_sync(
         **sync_result,
         message="LDAP 同步完成",
     )
+
+
+@router.get("/security-settings", response_model=SecuritySettingsOut)
+def get_security_settings(
+    db: Session = Depends(get_db),
+):
+    setting = get_or_create_security_setting(db)
+    return _to_security_settings_out(setting)
+
+
+@router.put("/security-settings", response_model=SecuritySettingsOut)
+def update_security_settings(
+    payload: SecuritySettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    setting = get_or_create_security_setting(db)
+    changed_fields: list[str] = []
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(setting, key, value)
+        changed_fields.append(key)
+
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="SECURITY_SETTINGS_UPDATED",
+        entity_type="SECURITY",
+        entity_id=setting.id,
+        detail=f"fields={','.join(changed_fields) if changed_fields else 'none'}",
+    )
+    db.commit()
+    db.refresh(setting)
+    return _to_security_settings_out(setting)
 
 
 @router.get("/operation-logs", response_model=list[OperationLogOut])

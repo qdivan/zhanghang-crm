@@ -382,3 +382,35 @@ class LdapSetting(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+
+
+class SecuritySetting(Base):
+    __tablename__ = "security_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    local_ip_lock_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    local_ip_lock_window_minutes: Mapped[int] = mapped_column(Integer, default=5)
+    local_ip_lock_max_attempts: Mapped[int] = mapped_column(Integer, default=20)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
+class LoginIpLock(Base):
+    __tablename__ = "login_ip_locks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    ip_address: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    blocked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_username: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )

@@ -16,6 +16,8 @@ import type {
   LdapSyncResult,
   ManagedUser,
   OperationLogItem,
+  SecuritySettings,
+  SecuritySettingsUpdatePayload,
   UserCreatePayload,
   UserRole,
   UserUpdatePayload,
@@ -26,7 +28,7 @@ type GrantStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "EFFECTIVE";
 
 const auth = useAuthStore();
 const route = useRoute();
-const activeTab = ref<"users" | "grants" | "ldap" | "logs">("users");
+const activeTab = ref<"users" | "grants" | "security" | "ldap" | "logs">("users");
 
 const loading = ref(false);
 const createLoading = ref(false);
@@ -74,6 +76,14 @@ const ldapForm = reactive({
   username_attr: "uid",
   display_name_attr: "cn",
   default_role: "ACCOUNTANT" as UserRole,
+});
+
+const securityLoading = ref(false);
+const securitySaving = ref(false);
+const securityForm = reactive({
+  local_ip_lock_enabled: true,
+  local_ip_lock_window_minutes: 5,
+  local_ip_lock_max_attempts: 20,
 });
 
 const logLoading = ref(false);
@@ -145,8 +155,9 @@ const panelScopeText = computed(() =>
     : "老板可管理除管理员以外的用户",
 );
 
-function resolveTab(tab: unknown): "users" | "grants" | "ldap" | "logs" {
+function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" {
   if (tab === "grants") return "grants";
+  if (tab === "security") return "security";
   if (tab === "ldap") return "ldap";
   if (tab === "logs") return "logs";
   return "users";
@@ -175,6 +186,9 @@ function actionLabel(action: string): string {
     USER_CREATED: "创建用户",
     USER_UPDATED: "更新用户",
     USER_DELETED: "删除用户",
+    SECURITY_SETTINGS_UPDATED: "安全设置更新",
+    LOGIN_FAILED: "登录失败",
+    LOGIN_IP_BLOCKED: "IP锁定拦截",
     LDAP_SETTINGS_UPDATED: "LDAP设置更新",
     LDAP_SYNC: "LDAP同步",
     LEAD_CREATED: "线索创建",
@@ -403,6 +417,45 @@ async function fetchLdapSettings() {
   }
 }
 
+async function fetchSecuritySettings() {
+  securityLoading.value = true;
+  try {
+    const resp = await apiClient.get<SecuritySettings>("/admin/security-settings");
+    const data = resp.data;
+    securityForm.local_ip_lock_enabled = data.local_ip_lock_enabled;
+    securityForm.local_ip_lock_window_minutes = data.local_ip_lock_window_minutes;
+    securityForm.local_ip_lock_max_attempts = data.local_ip_lock_max_attempts;
+  } catch (error) {
+    ElMessage.error("加载安全设置失败");
+  } finally {
+    securityLoading.value = false;
+  }
+}
+
+async function saveSecuritySettings() {
+  if (securityForm.local_ip_lock_window_minutes < 1 || securityForm.local_ip_lock_max_attempts < 1) {
+    ElMessage.warning("锁定时长和失败次数都必须大于 0");
+    return;
+  }
+
+  const payload: SecuritySettingsUpdatePayload = {
+    local_ip_lock_enabled: securityForm.local_ip_lock_enabled,
+    local_ip_lock_window_minutes: Number(securityForm.local_ip_lock_window_minutes),
+    local_ip_lock_max_attempts: Number(securityForm.local_ip_lock_max_attempts),
+  };
+
+  securitySaving.value = true;
+  try {
+    await apiClient.put("/admin/security-settings", payload);
+    ElMessage.success("安全设置已保存");
+    await Promise.all([fetchSecuritySettings(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "保存安全设置失败");
+  } finally {
+    securitySaving.value = false;
+  }
+}
+
 async function saveLdapSettings() {
   const payload: LdapSettingsUpdatePayload = {
     enabled: ldapForm.enabled,
@@ -560,7 +613,14 @@ async function toggleGrantActive(row: DataAccessGrantItem, isActive: boolean) {
 }
 
 onMounted(async () => {
-  await Promise.all([fetchUsers(), fetchGrantUsers(), fetchDataAccessGrants(), fetchLdapSettings(), fetchLogs()]);
+  await Promise.all([
+    fetchUsers(),
+    fetchGrantUsers(),
+    fetchDataAccessGrants(),
+    fetchSecuritySettings(),
+    fetchLdapSettings(),
+    fetchLogs(),
+  ]);
 });
 
 watch(
@@ -791,6 +851,56 @@ watch(
             </el-table>
           </el-card>
         </el-space>
+      </el-tab-pane>
+
+      <el-tab-pane label="安全设置" name="security">
+        <el-card v-loading="securityLoading" shadow="never">
+          <el-form label-position="top">
+            <el-row :gutter="12">
+              <el-col :xs="24" :md="8">
+                <el-form-item label="启用本地账号 IP 锁定">
+                  <el-switch v-model="securityForm.local_ip_lock_enabled" active-text="启用" inactive-text="停用" />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :md="8">
+                <el-form-item label="统计窗口（分钟）">
+                  <el-input-number
+                    v-model="securityForm.local_ip_lock_window_minutes"
+                    :min="1"
+                    :max="1440"
+                    :controls="false"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :md="8">
+                <el-form-item label="失败阈值（次）">
+                  <el-input-number
+                    v-model="securityForm.local_ip_lock_max_attempts"
+                    :min="1"
+                    :max="1000"
+                    :controls="false"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-col>
+            </el-row>
+
+            <el-alert
+              title="仅作用于本地账号登录。默认规则是 5 分钟内同一 IP 连续输错 20 次后锁定该 IP。"
+              type="info"
+              :closable="false"
+              style="margin-bottom: 12px"
+            />
+
+            <el-space wrap>
+              <el-button type="primary" :loading="securitySaving" @click="saveSecuritySettings">保存安全设置</el-button>
+              <el-tag type="warning" effect="plain">
+                当前规则：{{ securityForm.local_ip_lock_window_minutes }} 分钟 / {{ securityForm.local_ip_lock_max_attempts }} 次
+              </el-tag>
+            </el-space>
+          </el-form>
+        </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="LDAP 设置" name="ldap">

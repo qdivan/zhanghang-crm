@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { MoreFilled } from "@element-plus/icons-vue";
+
+import { useResponsive } from "../../composables/useResponsive";
 import type { LeadItem } from "../../types";
 import {
   getLeadAreaText,
@@ -24,17 +27,123 @@ const emit = defineEmits<{
   convert: [row: LeadItem];
   revoke: [row: LeadItem];
 }>();
+
+const { isMobile } = useResponsive();
+
+function mobileMetrics(row: LeadItem) {
+  return [
+    { label: "地区/国家", value: getLeadAreaText(row) || "-" },
+    { label: "联络开始", value: getLeadStartText(row) || "-" },
+    { label: "电话", value: row.phone || "-" },
+    { label: "最后跟进", value: row.last_followup_date || row.last_feedback || "-" },
+    { label: "提醒值", value: row.reminder_value || "-" },
+  ].filter((item) => item.value !== "-");
+}
+
+function handleMobileCommand(command: string, row: LeadItem) {
+  if (command === "detail") emit("detail", row);
+  if (command === "followup") emit("followup", row);
+  if (command === "history") emit("history", row);
+  if (command === "customer") emit("customer", row);
+  if (command === "convert") emit("convert", row);
+  if (command === "revoke") emit("revoke", row);
+}
+
+function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
+  handleMobileCommand(command.action, command.row);
+}
 </script>
 
 <template>
   <el-card shadow="never">
     <template #header>
-      <div class="table-head">
-        <span>客户开发总览（对齐 `转化2026 > 客户总览`）</span>
+        <div class="table-head">
+        <span>{{ isMobile ? "客户开发总览" : "客户开发总览（对齐 `转化2026 > 客户总览`）" }}</span>
         <el-tag type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
     </template>
-    <el-table v-loading="props.loading" :data="props.rows" stripe border>
+    <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
+      <div v-for="row in props.rows" :key="row.id" class="mobile-record-card">
+        <div class="mobile-record-head">
+          <div class="mobile-record-main">
+            <div class="mobile-lead-title">
+              <el-button link type="primary" class="mobile-record-title" @click="emit('company', row)">
+                {{ row.name }}
+              </el-button>
+              <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
+            </div>
+            <div class="mobile-record-subtitle">
+              {{ getLeadContactText(row) || "未填写联系人" }}
+            </div>
+          </div>
+          <el-tag :type="statusTagType(row.status)" size="small">
+            {{ getStatusLabel(row.status) }}
+          </el-tag>
+        </div>
+
+        <div class="mobile-record-metrics">
+          <div v-for="item in mobileMetrics(row)" :key="`${row.id}-${item.label}`" class="mobile-metric">
+            <div class="mobile-metric-label">{{ item.label }}</div>
+            <div class="mobile-metric-value">{{ item.value }}</div>
+          </div>
+        </div>
+
+        <div v-if="row.main_business || row.reminder_value" class="mobile-record-note">
+          <div v-if="row.main_business">主营/需求：{{ row.main_business }}</div>
+          <div v-if="row.reminder_value">提醒值：{{ row.reminder_value }}</div>
+        </div>
+
+        <div class="mobile-actions">
+          <el-button size="small" @click="emit('detail', row)">详情</el-button>
+          <el-button size="small" type="primary" @click="emit('followup', row)">跟进</el-button>
+          <el-button
+            v-if="row.customer_id"
+            size="small"
+            type="success"
+            plain
+            @click="emit('customer', row)"
+          >
+            客户档案
+          </el-button>
+          <el-button
+            v-else
+            size="small"
+            type="success"
+            :disabled="!props.canConvert || row.status === 'CONVERTED'"
+            @click="emit('convert', row)"
+          >
+            转化
+          </el-button>
+          <el-dropdown trigger="click" @command="onMobileMenuCommand">
+            <el-button size="small" plain>
+              更多
+              <el-icon><MoreFilled /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item :command="{ action: 'history', row }">跟进历史</el-dropdown-item>
+                <el-dropdown-item v-if="row.customer_id" :command="{ action: 'customer', row }">客户档案</el-dropdown-item>
+                <el-dropdown-item
+                  v-else
+                  :command="{ action: 'convert', row }"
+                  :disabled="!props.canConvert || row.status === 'CONVERTED'"
+                >
+                  转化成交
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-if="row.status === 'CONVERTED'"
+                  :command="{ action: 'revoke', row }"
+                  :disabled="!props.canConvert"
+                >
+                  撤销转化
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
+    </div>
+    <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
       <el-table-column prop="id" label="序号" width="70" />
       <el-table-column label="公司名" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
@@ -169,5 +278,16 @@ const emit = defineEmits<{
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.mobile-lead-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobile-actions :deep(.el-button) {
+  margin-left: 0;
 }
 </style>

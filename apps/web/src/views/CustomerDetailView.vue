@@ -6,6 +6,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
+import { useResponsive } from "../composables/useResponsive";
 import { useAuthStore } from "../stores/auth";
 import type { CustomerDetail } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
@@ -13,6 +14,7 @@ import { todayInBrowserTimeZone } from "../utils/time";
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const { isMobile } = useResponsive();
 const loading = ref(false);
 const followupLoading = ref(false);
 const editLoading = ref(false);
@@ -216,7 +218,7 @@ onMounted(fetchDetail);
 <template>
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
-      <el-space>
+      <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="goBack">{{ backTarget.label }}</el-button>
         <el-button :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
         <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openFollowupDialog">
@@ -229,7 +231,7 @@ onMounted(fetchDetail);
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>客户档案（对齐 `客户跟进表` 明细页）</span>
+          <span>{{ isMobile ? "客户档案" : "客户档案（对齐 `客户跟进表` 明细页）" }}</span>
           <el-space v-if="detail" class="meta-tags" wrap>
             <el-tag type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
             <el-tag type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
@@ -240,7 +242,60 @@ onMounted(fetchDetail);
 
       <el-empty v-if="!detail" description="未找到客户" />
       <template v-else>
-        <el-descriptions :column="2" border>
+        <div v-if="isMobile" class="detail-mobile-stack">
+          <div class="mobile-record-card">
+            <div class="mobile-record-head">
+              <div class="mobile-record-main">
+                <div class="mobile-record-title">{{ detail.name }}</div>
+                <div class="mobile-record-subtitle">
+                  会计 {{ detail.accountant_username }} · {{ templateLabel(detail.lead.template_type) }}
+                </div>
+              </div>
+              <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+            </div>
+            <div class="mobile-record-metrics">
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">等级</div>
+                <div class="mobile-metric-value">{{ detail.lead.grade || "-" }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">国家</div>
+                <div class="mobile-metric-value">{{ displayCountry }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">服务开始</div>
+                <div class="mobile-metric-value">{{ displayServiceStart }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">服务方式</div>
+                <div class="mobile-metric-value">{{ detail.lead.service_mode || "-" }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">对接人</div>
+                <div class="mobile-metric-value">{{ displayContactLine }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">收费标准</div>
+                <div class="mobile-metric-value">{{ detail.lead.fee_standard || "-" }}</div>
+              </div>
+            </div>
+            <div class="detail-long-fields">
+              <div class="detail-long-field">
+                <div class="detail-long-label">主营产品</div>
+                <div class="detail-long-value">{{ detail.lead.main_business || "-" }}</div>
+              </div>
+              <div class="detail-long-field">
+                <div class="detail-long-label">介绍</div>
+                <div class="detail-long-value">{{ detail.lead.intro || "-" }}</div>
+              </div>
+              <div class="detail-long-field">
+                <div class="detail-long-label">备注</div>
+                <div class="detail-long-value">{{ detail.lead.notes || "-" }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <el-descriptions v-else :column="2" border>
           <el-descriptions-item label="公司名">{{ detail.name }}</el-descriptions-item>
           <el-descriptions-item label="等级">{{ detail.lead.grade || '-' }}</el-descriptions-item>
           <el-descriptions-item label="国家">{{ displayCountry }}</el-descriptions-item>
@@ -269,7 +324,27 @@ onMounted(fetchDetail);
           <el-tag type="info" effect="plain">{{ detail?.followups.length ?? 0 }} 条</el-tag>
         </div>
       </template>
-      <el-table :data="detail?.followups ?? []" stripe border>
+      <div v-if="isMobile" class="mobile-record-list">
+        <div v-for="item in detail?.followups ?? []" :key="item.id" class="mobile-record-card">
+          <div class="mobile-record-head">
+            <div class="mobile-record-main">
+              <div class="mobile-record-title">{{ item.followup_at }}</div>
+              <div class="mobile-record-subtitle">下次提醒：{{ item.next_reminder_at || "-" }}</div>
+            </div>
+          </div>
+          <div class="detail-long-fields">
+            <div class="detail-long-field">
+              <div class="detail-long-label">跟进反馈</div>
+              <div class="detail-long-value">{{ item.feedback || "-" }}</div>
+            </div>
+            <div class="detail-long-field">
+              <div class="detail-long-label">备注</div>
+              <div class="detail-long-value">{{ item.notes || "-" }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <el-table v-else :data="detail?.followups ?? []" stripe border>
         <el-table-column prop="followup_at" label="跟进日期" width="120" />
         <el-table-column prop="feedback" label="跟进反馈" min-width="300" />
         <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
@@ -420,6 +495,41 @@ onMounted(fetchDetail);
   .head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .action-bar {
+    width: 100%;
+  }
+
+  .detail-mobile-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .detail-long-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .detail-long-field {
+    border-top: 1px solid #eef2f7;
+    padding-top: 10px;
+  }
+
+  .detail-long-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+
+  .detail-long-value {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #111827;
+    word-break: break-word;
   }
 }
 </style>

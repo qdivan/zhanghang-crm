@@ -27,8 +27,8 @@ async function login() {
     await auth.login(form.username, form.password);
     ElMessage.success("登录成功");
     router.push("/leads");
-  } catch (error) {
-    ElMessage.error("账号或密码错误");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "账号或密码错误");
   } finally {
     state.loading = false;
   }

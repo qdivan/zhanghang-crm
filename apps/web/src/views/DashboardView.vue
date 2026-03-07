@@ -4,9 +4,11 @@ import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import { useResponsive } from "../composables/useResponsive";
 import type { DashboardSummary, SystemTodoItem, TodoItem } from "../types";
 
 const router = useRouter();
+const { isMobile } = useResponsive();
 const loading = ref(false);
 const summary = ref<DashboardSummary>({
   month: "",
@@ -95,7 +97,24 @@ onMounted(fetchDashboardData);
               <el-tag type="warning" effect="plain">{{ systemTodos.length }} 条</el-tag>
             </div>
           </template>
-          <el-table :data="systemTodos" stripe border>
+          <div v-if="isMobile" class="mobile-record-list">
+            <div v-for="row in systemTodos" :key="row.id" class="mobile-record-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.title }}</div>
+                  <div class="mobile-record-subtitle">{{ row.module }} · 截止 {{ row.due_date || "-" }}</div>
+                </div>
+                <el-tag size="small" :type="row.priority === 'HIGH' ? 'danger' : row.priority === 'LOW' ? 'info' : 'warning'">
+                  {{ priorityLabel(row.priority) }}
+                </el-tag>
+              </div>
+              <div v-if="row.description" class="mobile-record-note">{{ row.description }}</div>
+              <div v-if="hasSystemTodoAction(row)" class="mobile-actions">
+                <el-button size="small" type="primary" @click="openSystemTodo(row)">{{ row.action_label }}</el-button>
+              </div>
+            </div>
+          </div>
+          <el-table v-else :data="systemTodos" stripe border>
             <el-table-column prop="module" label="模块" width="80" />
             <el-table-column prop="title" label="任务" min-width="180" show-overflow-tooltip />
             <el-table-column label="优先级" width="90">
@@ -130,7 +149,20 @@ onMounted(fetchDashboardData);
               <el-tag type="success" effect="plain">{{ manualTodos.length }} 条</el-tag>
             </div>
           </template>
-          <el-table :data="manualTodos" stripe border>
+          <div v-if="isMobile" class="mobile-record-list">
+            <div v-for="row in manualTodos" :key="row.id" class="mobile-record-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.title }}</div>
+                  <div class="mobile-record-subtitle">截止 {{ row.due_date || "-" }}</div>
+                </div>
+                <el-tag size="small" :type="row.priority === 'HIGH' ? 'danger' : row.priority === 'LOW' ? 'info' : 'warning'">
+                  {{ priorityLabel(row.priority) }}
+                </el-tag>
+              </div>
+            </div>
+          </div>
+          <el-table v-else :data="manualTodos" stripe border>
             <el-table-column prop="title" label="任务" min-width="180" show-overflow-tooltip />
             <el-table-column label="优先级" width="90">
               <template #default="{ row }">
@@ -153,6 +185,7 @@ onMounted(fetchDashboardData);
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .title {

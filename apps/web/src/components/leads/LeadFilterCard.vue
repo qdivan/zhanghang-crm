@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+
+import { useResponsive } from "../../composables/useResponsive";
 import type { LeadFilters } from "../../views/lead/forms";
 import { statusOptions, templateOptions } from "../../views/lead/viewMeta";
 
@@ -13,6 +16,10 @@ const emit = defineEmits<{
   guide: [];
   importExcel: [];
 }>();
+
+const { isMobile } = useResponsive();
+const showAdvancedFilters = ref(false);
+const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.filters.template_type));
 </script>
 
 <template>
@@ -26,7 +33,7 @@ const emit = defineEmits<{
           @keyup.enter="emit('query')"
         />
       </el-form-item>
-      <el-form-item label="状态">
+      <el-form-item v-show="!isMobile || showAdvancedFilters" label="状态">
         <el-select v-model="props.filters.status" placeholder="全部" clearable>
           <el-option
             v-for="item in statusOptions"
@@ -36,7 +43,7 @@ const emit = defineEmits<{
           />
         </el-select>
       </el-form-item>
-      <el-form-item label="模板筛选">
+      <el-form-item v-show="!isMobile || showAdvancedFilters" label="模板筛选">
         <el-select v-model="props.filters.template_type" placeholder="全部" clearable>
           <el-option
             v-for="item in templateOptions"
@@ -46,12 +53,19 @@ const emit = defineEmits<{
           />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="isMobile">
+        <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
+          {{ showAdvancedFilters ? "收起筛选" : hasAdvancedValue ? "更多筛选（已选）" : "更多筛选" }}
+        </el-button>
+      </el-form-item>
       <el-form-item>
-        <el-button @click="emit('query')">查询</el-button>
-        <el-button type="primary" @click="emit('create')">新增线索</el-button>
-        <el-button type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
-        <el-button @click="emit('guide')">流程说明</el-button>
-        <el-button @click="emit('importExcel')">导入 Excel</el-button>
+        <div class="action-group">
+          <el-button @click="emit('query')">查询</el-button>
+          <el-button type="primary" @click="emit('create')">新增线索</el-button>
+          <el-button type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
+          <el-button @click="emit('guide')">流程说明</el-button>
+          <el-button @click="emit('importExcel')">导入 Excel</el-button>
+        </div>
       </el-form-item>
     </el-form>
     <el-text type="info">
@@ -61,10 +75,26 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .lead-filter-form {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .action-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .action-group :deep(.el-button) {
+    margin-left: 0;
   }
 }
 </style>

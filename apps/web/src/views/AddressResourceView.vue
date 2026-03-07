@@ -3,6 +3,7 @@ import { ElMessage } from "element-plus";
 import { onMounted, reactive, ref } from "vue";
 
 import { apiClient } from "../api/client";
+import { useResponsive } from "../composables/useResponsive";
 import type { AddressResource } from "../types";
 
 type ResourceForm = {
@@ -15,6 +16,7 @@ type ResourceForm = {
 };
 
 const loading = ref(false);
+const { isMobile } = useResponsive();
 const rows = ref<AddressResource[]>([]);
 const keyword = ref("");
 const showDialog = ref(false);
@@ -125,11 +127,33 @@ onMounted(fetchResources);
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>地址资源池（转化2026）</span>
+          <span>{{ isMobile ? "地址资源池" : "地址资源池（转化2026）" }}</span>
           <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
       </template>
-      <el-table v-loading="loading" :data="rows" stripe border>
+      <div v-if="isMobile" v-loading="loading" class="mobile-record-list">
+        <div v-for="row in rows" :key="row.id" class="mobile-record-card">
+          <div class="mobile-record-head">
+            <div class="mobile-record-main">
+              <div class="mobile-record-title">{{ row.category || "未分类资源" }}</div>
+              <div class="mobile-record-subtitle">{{ row.contact_info || "-" }}</div>
+            </div>
+            <el-button size="small" type="primary" plain @click="openEditDialog(row)">编辑</el-button>
+          </div>
+          <div class="mobile-record-metrics">
+            <div class="mobile-metric">
+              <div class="mobile-metric-label">资源说明</div>
+              <div class="mobile-metric-value">{{ row.description || "-" }}</div>
+            </div>
+            <div class="mobile-metric">
+              <div class="mobile-metric-label">后续动作</div>
+              <div class="mobile-metric-value">{{ row.next_action || "-" }}</div>
+            </div>
+          </div>
+          <div v-if="row.notes" class="mobile-record-note">备注：{{ row.notes }}</div>
+        </div>
+      </div>
+      <el-table v-else v-loading="loading" :data="rows" stripe border>
         <el-table-column prop="category" label="分类/区域" width="130" />
         <el-table-column
           prop="contact_info"

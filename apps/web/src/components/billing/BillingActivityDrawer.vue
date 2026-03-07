@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { useResponsive } from "../../composables/useResponsive";
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { BillingActivity, BillingRecord } from "../../types";
 import type { BillingActivityForm } from "../../views/billing/forms";
@@ -27,6 +28,7 @@ const drawerVisible = computed({
 
 const drawerTitle = computed(() => `催收/收款 - ${props.targetRecord?.customer_name ?? ""}`);
 const isPaymentActivity = computed(() => isPaymentActivityType(props.form.activity_type));
+const { isMobile } = useResponsive();
 </script>
 
 <template>
@@ -90,7 +92,27 @@ const isPaymentActivity = computed(() => isPaymentActivityType(props.form.activi
 
     <el-divider />
 
-    <el-table v-loading="props.loading" :data="props.rows" stripe border>
+    <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
+      <div v-for="row in props.rows" :key="row.id" class="mobile-record-card">
+        <div class="mobile-record-head">
+          <div class="mobile-record-main">
+            <div class="mobile-record-title">{{ row.occurred_at }}</div>
+            <div class="mobile-record-subtitle">{{ activityTypeLabel(row.activity_type) }} · 金额 {{ row.amount }}</div>
+          </div>
+        </div>
+        <div class="detail-long-fields">
+          <div class="detail-long-field">
+            <div class="detail-long-label">内容</div>
+            <div class="detail-long-value">{{ row.content || "-" }}</div>
+          </div>
+          <div class="detail-long-field">
+            <div class="detail-long-label">备注</div>
+            <div class="detail-long-value">{{ row.note || "-" }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
       <el-table-column prop="occurred_at" label="日期" width="120" />
       <el-table-column label="类型" width="80">
         <template #default="{ row }">
@@ -126,3 +148,30 @@ const isPaymentActivity = computed(() => isPaymentActivityType(props.form.activi
     </el-table>
   </el-drawer>
 </template>
+
+<style scoped>
+.detail-long-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.detail-long-field {
+  border-top: 1px solid #eef2f7;
+  padding-top: 10px;
+}
+
+.detail-long-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.detail-long-value {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #111827;
+  word-break: break-word;
+}
+</style>

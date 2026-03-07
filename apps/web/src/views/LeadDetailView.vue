@@ -6,6 +6,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
+import { useResponsive } from "../composables/useResponsive";
 import type { LeadItem } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
 
@@ -22,6 +23,7 @@ type FollowupItem = {
 
 const route = useRoute();
 const router = useRouter();
+const { isMobile } = useResponsive();
 const loading = ref(false);
 const followupLoading = ref(false);
 const lead = ref<LeadItem | null>(null);
@@ -128,7 +130,7 @@ onMounted(fetchLeadDetail);
 <template>
   <el-space direction="vertical" fill :size="12">
     <el-card shadow="never">
-      <el-space>
+      <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="backToLeads">{{ backTarget.label }}</el-button>
         <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增跟进</el-button>
       </el-space>
@@ -137,7 +139,7 @@ onMounted(fetchLeadDetail);
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>线索详情（对齐 Excel 明细页）</span>
+          <span>{{ isMobile ? "线索详情" : "线索详情（对齐 Excel 明细页）" }}</span>
           <el-space v-if="lead">
             <el-tag type="info" effect="plain">{{ templateLabel(lead.template_type) }}</el-tag>
             <el-tag effect="plain">{{ statusLabel(lead.status) }}</el-tag>
@@ -147,7 +149,67 @@ onMounted(fetchLeadDetail);
 
       <el-empty v-if="!lead" description="未找到线索" />
       <template v-else>
-        <el-descriptions v-if="lead.template_type === 'FOLLOWUP'" :column="2" border>
+        <div v-if="isMobile" class="detail-mobile-stack">
+          <div class="mobile-record-card">
+            <div class="mobile-record-head">
+              <div class="mobile-record-main">
+                <div class="mobile-record-title">{{ lead.name }}</div>
+                <div class="mobile-record-subtitle">
+                  {{ templateLabel(lead.template_type) }} · {{ statusLabel(lead.status) }}
+                </div>
+              </div>
+            </div>
+            <div class="mobile-record-metrics">
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">等级</div>
+                <div class="mobile-metric-value">{{ lead.grade || "-" }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">{{ lead.template_type === "FOLLOWUP" ? "国家" : "地区" }}</div>
+                <div class="mobile-metric-value">{{ lead.template_type === "FOLLOWUP" ? (lead.country || "-") : (lead.region || "-") }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">{{ lead.template_type === "FOLLOWUP" ? "服务开始" : "联络开始" }}</div>
+                <div class="mobile-metric-value">
+                  {{ lead.template_type === "FOLLOWUP" ? (lead.service_start_text || "-") : (lead.contact_start_date || "-") }}
+                </div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">电话</div>
+                <div class="mobile-metric-value">{{ lead.phone || "-" }}</div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">联系人</div>
+                <div class="mobile-metric-value">
+                  {{
+                    lead.template_type === "FOLLOWUP"
+                      ? [lead.contact_name, lead.contact_wechat].filter(Boolean).join(" / ") || "-"
+                      : (lead.contact_wechat ? `${lead.contact_name} / ${lead.contact_wechat}` : lead.contact_name || "-")
+                  }}
+                </div>
+              </div>
+              <div class="mobile-metric">
+                <div class="mobile-metric-label">下次提醒</div>
+                <div class="mobile-metric-value">{{ lead.next_reminder_at || "-" }}</div>
+              </div>
+            </div>
+            <div class="detail-long-fields">
+              <div class="detail-long-field">
+                <div class="detail-long-label">主营</div>
+                <div class="detail-long-value">{{ lead.main_business || "-" }}</div>
+              </div>
+              <div class="detail-long-field">
+                <div class="detail-long-label">介绍</div>
+                <div class="detail-long-value">{{ lead.intro || "-" }}</div>
+              </div>
+              <div class="detail-long-field">
+                <div class="detail-long-label">备注</div>
+                <div class="detail-long-value">{{ lead.notes || "-" }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <el-descriptions v-else-if="lead.template_type === 'FOLLOWUP'" :column="2" border>
           <el-descriptions-item label="公司名">{{ lead.name }}</el-descriptions-item>
           <el-descriptions-item label="等级">{{ lead.grade || '-' }}</el-descriptions-item>
           <el-descriptions-item label="国家">{{ lead.country || '-' }}</el-descriptions-item>
@@ -199,7 +261,27 @@ onMounted(fetchLeadDetail);
           <el-tag type="success" effect="plain">{{ followups.length }} 条</el-tag>
         </div>
       </template>
-      <el-table :data="followups" stripe border>
+      <div v-if="isMobile" class="mobile-record-list">
+        <div v-for="item in followups" :key="item.id" class="mobile-record-card">
+          <div class="mobile-record-head">
+            <div class="mobile-record-main">
+              <div class="mobile-record-title">{{ item.followup_at }}</div>
+              <div class="mobile-record-subtitle">下次提醒：{{ item.next_reminder_at || "-" }}</div>
+            </div>
+          </div>
+          <div class="detail-long-fields">
+            <div class="detail-long-field">
+              <div class="detail-long-label">跟进反馈</div>
+              <div class="detail-long-value">{{ item.feedback || "-" }}</div>
+            </div>
+            <div class="detail-long-field">
+              <div class="detail-long-label">备注</div>
+              <div class="detail-long-value">{{ item.notes || "-" }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <el-table v-else :data="followups" stripe border>
         <el-table-column prop="followup_at" label="跟进日期" width="120" />
         <el-table-column prop="feedback" label="跟进反馈" min-width="300" />
         <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
@@ -248,6 +330,41 @@ onMounted(fetchLeadDetail);
   .head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .action-bar {
+    width: 100%;
+  }
+
+  .detail-mobile-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .detail-long-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .detail-long-field {
+    border-top: 1px solid #eef2f7;
+    padding-top: 10px;
+  }
+
+  .detail-long-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+  }
+
+  .detail-long-value {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #111827;
+    word-break: break-word;
   }
 }
 </style>

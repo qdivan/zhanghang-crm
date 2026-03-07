@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { useResponsive } from "../../composables/useResponsive";
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { BillingExecutionLogItem, BillingRecord } from "../../types";
 import type { BillingExecutionForm } from "../../views/billing/forms";
@@ -26,6 +27,7 @@ const drawerVisible = computed({
 });
 
 const drawerTitle = computed(() => `执行进度 - ${props.targetRecord?.customer_name ?? ""}`);
+const { isMobile } = useResponsive();
 </script>
 
 <template>
@@ -69,7 +71,33 @@ const drawerTitle = computed(() => `执行进度 - ${props.targetRecord?.custome
 
     <el-divider />
 
-    <el-table v-loading="props.loading" :data="props.rows" stripe border>
+    <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
+      <div v-for="row in props.rows" :key="row.id" class="mobile-record-card">
+        <div class="mobile-record-head">
+          <div class="mobile-record-main">
+            <div class="mobile-record-title">{{ row.occurred_at }}</div>
+            <div class="mobile-record-subtitle">
+              {{ progressTypeLabel(row.progress_type) }} · 目标 {{ row.due_date || "-" }}
+            </div>
+          </div>
+        </div>
+        <div class="detail-long-fields">
+          <div class="detail-long-field">
+            <div class="detail-long-label">进度内容</div>
+            <div class="detail-long-value">{{ row.content || "-" }}</div>
+          </div>
+          <div class="detail-long-field">
+            <div class="detail-long-label">下一步</div>
+            <div class="detail-long-value">{{ row.next_action || "-" }}</div>
+          </div>
+          <div class="detail-long-field">
+            <div class="detail-long-label">备注</div>
+            <div class="detail-long-value">{{ row.note || "-" }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
       <el-table-column prop="occurred_at" label="日期" width="110" />
       <el-table-column label="类型" width="100">
         <template #default="{ row }">
@@ -86,3 +114,30 @@ const drawerTitle = computed(() => `执行进度 - ${props.targetRecord?.custome
     </el-table>
   </el-drawer>
 </template>
+
+<style scoped>
+.detail-long-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.detail-long-field {
+  border-top: 1px solid #eef2f7;
+  padding-top: 10px;
+}
+
+.detail-long-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.detail-long-value {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #111827;
+  word-break: break-word;
+}
+</style>

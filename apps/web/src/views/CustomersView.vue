@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import BillingDraftRowsEditor from "../components/BillingDraftRowsEditor.vue";
+import { useResponsive } from "../composables/useResponsive";
 import { useAuthStore } from "../stores/auth";
 import type { BillingRecord, BillingCreatePayload, CustomerListItem } from "../types";
 import {
@@ -15,6 +17,7 @@ import {
 
 const router = useRouter();
 const auth = useAuthStore();
+const { isMobile } = useResponsive();
 const loading = ref(false);
 const keyword = ref("");
 const rows = ref<CustomerListItem[]>([]);
@@ -24,6 +27,16 @@ const showCreateBillingDialog = ref(false);
 const creatingBilling = ref(false);
 const selectedCustomerForBilling = ref<CustomerListItem | null>(null);
 const billingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)]);
+
+function mobileMetrics(row: CustomerListItem) {
+  return [
+    { label: "国家/类型", value: row.source_area_display || "-" },
+    { label: "服务开始", value: row.source_service_start_display || "-" },
+    { label: "收费标准", value: row.source_fee_standard || "-" },
+    { label: "最后跟进", value: row.source_last_followup_date || "-" },
+    { label: "微信", value: row.source_contact_wechat || "-" },
+  ].filter((item) => item.value !== "-");
+}
 
 async function fetchCustomers() {
   loading.value = true;
@@ -68,6 +81,16 @@ function openCreateBillingDialog(row: CustomerListItem) {
   resetBillingRows(row.id);
   selectedCustomerForBilling.value = row;
   showCreateBillingDialog.value = true;
+}
+
+function handleMobileCommand(command: string, row: CustomerListItem) {
+  if (command === "detail") openCustomerDetail(row);
+  if (command === "billing") openCreateBillingDialog(row);
+  if (command === "lead") openLeadDetail(row);
+}
+
+function onMobileMenuCommand(command: { action: string; row: CustomerListItem }) {
+  handleMobileCommand(command.action, command.row);
 }
 
 function handleCreateBillingDialogClosed() {
@@ -123,11 +146,57 @@ onMounted(fetchCustomers);
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>客户列表（对齐 `客户跟进表 > 客户总览`）</span>
+          <span>{{ isMobile ? "客户列表" : "客户列表（对齐 `客户跟进表 > 客户总览`）" }}</span>
           <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
       </template>
-      <el-table v-loading="loading" :data="rows" stripe border>
+      <div v-if="isMobile" v-loading="loading" class="mobile-record-list">
+        <div v-for="row in rows" :key="row.id" class="mobile-record-card">
+          <div class="mobile-record-head">
+            <div class="mobile-record-main">
+              <el-button link type="primary" class="mobile-record-title" @click="openCustomerDetail(row)">
+                {{ row.name }}
+              </el-button>
+              <div class="mobile-record-subtitle">
+                {{ row.contact_name || "-" }} / {{ row.phone || "-" }}
+              </div>
+            </div>
+            <el-tag size="small" effect="plain">{{ row.accountant_username || "-" }}</el-tag>
+          </div>
+
+          <div class="mobile-record-metrics">
+            <div v-for="item in mobileMetrics(row)" :key="`${row.id}-${item.label}`" class="mobile-metric">
+              <div class="mobile-metric-label">{{ item.label }}</div>
+              <div class="mobile-metric-value">{{ item.value }}</div>
+            </div>
+          </div>
+
+          <div v-if="row.source_main_business || row.source_intro" class="mobile-record-note">
+            <div v-if="row.source_main_business">主营：{{ row.source_main_business }}</div>
+            <div v-if="row.source_intro">介绍：{{ row.source_intro }}</div>
+          </div>
+
+          <div class="mobile-actions">
+            <el-button size="small" type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
+            <el-button v-if="canCreateBilling" size="small" type="success" plain @click="openCreateBillingDialog(row)">
+              新增收费
+            </el-button>
+            <el-dropdown trigger="click" @command="onMobileMenuCommand">
+              <el-button size="small" plain>
+                更多
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :command="{ action: 'lead', row }">开发来源</el-dropdown-item>
+                  <el-dropdown-item v-if="canCreateBilling" :command="{ action: 'billing', row }">新增收费</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+      </div>
+      <el-table v-else v-loading="loading" :data="rows" stripe border>
         <el-table-column prop="id" label="序号" width="80" />
         <el-table-column label="客户号+公司名" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
@@ -297,12 +366,17 @@ onMounted(fetchCustomers);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 900px) {
   .customers-filter-form {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .mobile-actions :deep(.el-button) {
+    margin-left: 0;
   }
 }
 </style>

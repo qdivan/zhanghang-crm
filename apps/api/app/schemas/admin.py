@@ -41,6 +41,21 @@ class LdapSyncResponse(BaseModel):
     message: str = ""
 
 
+class SecuritySettingsOut(BaseModel):
+    id: int
+    local_ip_lock_enabled: bool
+    local_ip_lock_window_minutes: int
+    local_ip_lock_max_attempts: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class SecuritySettingsUpdate(BaseModel):
+    local_ip_lock_enabled: Optional[bool] = None
+    local_ip_lock_window_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    local_ip_lock_max_attempts: Optional[int] = Field(default=None, ge=1, le=1000)
+
+
 class OperationLogOut(BaseModel):
     id: int
     actor_id: Optional[int]

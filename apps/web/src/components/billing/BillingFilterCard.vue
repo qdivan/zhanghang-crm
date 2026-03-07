@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { QuestionFilled } from "@element-plus/icons-vue";
+import { computed, ref } from "vue";
 
+import { useResponsive } from "../../composables/useResponsive";
 import { billingStatusOptions, paymentMethodOptions } from "../../utils/billingDraft";
 import type { BillingFilters } from "../../views/billing/forms";
 import { billingStatusHelpLines, paymentMethodHelpLines } from "../../views/billing/viewMeta";
@@ -15,6 +17,10 @@ const emit = defineEmits<{
   create: [];
   grant: [];
 }>();
+
+const { isMobile } = useResponsive();
+const showAdvancedFilters = ref(false);
+const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || props.filters.payment_method || props.filters.status));
 </script>
 
 <template>
@@ -28,7 +34,7 @@ const emit = defineEmits<{
           @keyup.enter="emit('query')"
         />
       </el-form-item>
-      <el-form-item label="联系人">
+      <el-form-item v-show="!isMobile || showAdvancedFilters" label="联系人">
         <el-input
           v-model="props.filters.contact_name"
           placeholder="客户联系人"
@@ -36,7 +42,7 @@ const emit = defineEmits<{
           @keyup.enter="emit('query')"
         />
       </el-form-item>
-      <el-form-item>
+      <el-form-item v-show="!isMobile || showAdvancedFilters">
         <template #label>
           <span class="label-with-help">
             付款方式
@@ -57,7 +63,7 @@ const emit = defineEmits<{
           />
         </el-select>
       </el-form-item>
-      <el-form-item>
+      <el-form-item v-show="!isMobile || showAdvancedFilters">
         <template #label>
           <span class="label-with-help">
             台账状态
@@ -78,10 +84,17 @@ const emit = defineEmits<{
           />
         </el-select>
       </el-form-item>
+      <el-form-item v-if="isMobile">
+        <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
+          {{ showAdvancedFilters ? "收起筛选" : hasAdvancedValue ? "更多筛选（已选）" : "更多筛选" }}
+        </el-button>
+      </el-form-item>
       <el-form-item>
-        <el-button @click="emit('query')">查询</el-button>
-        <el-button type="primary" @click="emit('create')">新增收费记录</el-button>
-        <el-button v-if="props.canManageGrant" type="primary" plain @click="emit('grant')">数据授权配置</el-button>
+        <div class="action-group">
+          <el-button @click="emit('query')">查询</el-button>
+          <el-button type="primary" @click="emit('create')">新增收费记录</el-button>
+          <el-button v-if="props.canManageGrant" type="primary" plain @click="emit('grant')">数据授权配置</el-button>
+        </div>
       </el-form-item>
     </el-form>
   </el-card>
@@ -100,10 +113,26 @@ const emit = defineEmits<{
   cursor: help;
 }
 
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 900px) {
   .billing-filter-form {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .action-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .action-group :deep(.el-button) {
+    margin-left: 0;
   }
 }
 </style>

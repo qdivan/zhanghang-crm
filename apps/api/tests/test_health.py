@@ -32,6 +32,103 @@ def test_login_and_me():
         assert me_response.json()["username"] == "boss"
 
 
+def test_security_settings_default_and_update():
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert login_response.status_code == 200
+        headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+        get_resp = client.get("/api/v1/admin/security-settings", headers=headers)
+        assert get_resp.status_code == 200
+        assert get_resp.json()["local_ip_lock_enabled"] is True
+        assert get_resp.json()["local_ip_lock_window_minutes"] == 5
+        assert get_resp.json()["local_ip_lock_max_attempts"] == 20
+
+        update_resp = client.put(
+            "/api/v1/admin/security-settings",
+            headers=headers,
+            json={
+                "local_ip_lock_enabled": True,
+                "local_ip_lock_window_minutes": 7,
+                "local_ip_lock_max_attempts": 9,
+            },
+        )
+        assert update_resp.status_code == 200
+        updated = update_resp.json()
+        assert updated["local_ip_lock_window_minutes"] == 7
+        assert updated["local_ip_lock_max_attempts"] == 9
+
+
+def test_local_login_ip_lock_blocks_after_threshold_and_success_clears_counter():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        settings_resp = client.put(
+            "/api/v1/admin/security-settings",
+            headers=headers,
+            json={
+                "local_ip_lock_enabled": True,
+                "local_ip_lock_window_minutes": 5,
+                "local_ip_lock_max_attempts": 3,
+            },
+        )
+        assert settings_resp.status_code == 200
+
+        blocked_ip_headers = {"x-forwarded-for": "198.51.100.20"}
+        for _ in range(2):
+            fail_resp = client.post(
+                "/api/v1/auth/login",
+                headers=blocked_ip_headers,
+                json={"username": "boss", "password": "wrong-password"},
+            )
+            assert fail_resp.status_code == 401
+
+        threshold_resp = client.post(
+            "/api/v1/auth/login",
+            headers=blocked_ip_headers,
+            json={"username": "boss", "password": "wrong-password"},
+        )
+        assert threshold_resp.status_code == 429
+        assert "已锁定 5 分钟" in threshold_resp.json()["detail"]
+
+        blocked_valid_resp = client.post(
+            "/api/v1/auth/login",
+            headers=blocked_ip_headers,
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert blocked_valid_resp.status_code == 429
+
+        safe_ip_headers = {"x-forwarded-for": "198.51.100.30"}
+        first_fail_resp = client.post(
+            "/api/v1/auth/login",
+            headers=safe_ip_headers,
+            json={"username": "boss", "password": "wrong-password"},
+        )
+        assert first_fail_resp.status_code == 401
+
+        success_resp = client.post(
+            "/api/v1/auth/login",
+            headers=safe_ip_headers,
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert success_resp.status_code == 200
+
+        after_success_fail_resp = client.post(
+            "/api/v1/auth/login",
+            headers=safe_ip_headers,
+            json={"username": "boss", "password": "wrong-password"},
+        )
+        assert after_success_fail_resp.status_code == 401
+
+
 def test_billing_records():
     with TestClient(app) as client:
         login_response = client.post(

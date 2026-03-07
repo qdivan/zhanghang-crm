@@ -64,6 +64,21 @@ export interface LdapSyncResult {
   message: string;
 }
 
+export interface SecuritySettings {
+  id: number;
+  local_ip_lock_enabled: boolean;
+  local_ip_lock_window_minutes: number;
+  local_ip_lock_max_attempts: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecuritySettingsUpdatePayload {
+  local_ip_lock_enabled?: boolean;
+  local_ip_lock_window_minutes?: number;
+  local_ip_lock_max_attempts?: number;
+}
+
 export interface OperationLogItem {
   id: number;
   actor_id: number | null;

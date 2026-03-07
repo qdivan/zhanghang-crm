@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { MoreFilled } from "@element-plus/icons-vue";
+
+import { useResponsive } from "../../composables/useResponsive";
 import type { BillingRecord } from "../../types";
 import { normalizePaymentMethod, statusLabel, statusTagType } from "../../views/billing/viewMeta";
 
@@ -20,17 +23,101 @@ const emit = defineEmits<{
   renew: [row: BillingRecord];
   terminate: [row: BillingRecord];
 }>();
+
+const { isMobile } = useResponsive();
+
+function mobileMetrics(row: BillingRecord) {
+  return [
+    { label: "未收", value: String(row.outstanding_amount) },
+    { label: "总费用", value: String(row.total_fee) },
+    { label: "到期日", value: row.due_month || "-" },
+    { label: "负责会计", value: row.accountant_username || "-" },
+    { label: "付款方式", value: normalizePaymentMethod(row.payment_method) },
+  ].filter((item) => item.value !== "-");
+}
+
+function handleMobileCommand(command: string, row: BillingRecord) {
+  if (command === "customer") emit("customer", row);
+  if (command === "ledger") emit("ledger", row);
+  if (command === "split") emit("split", row);
+  if (command === "execution") emit("execution", row);
+  if (command === "activity") emit("activity", row);
+  if (command === "assignment") emit("assignment", row);
+  if (command === "renew") emit("renew", row);
+  if (command === "terminate") emit("terminate", row);
+}
+
+function onMobileMenuCommand(command: { action: string; row: BillingRecord }) {
+  handleMobileCommand(command.action, command.row);
+}
 </script>
 
 <template>
   <el-card shadow="never">
     <template #header>
-      <div class="table-head">
-        <span>收费主台账（对齐 `周 (2)`）</span>
+        <div class="table-head">
+        <span>{{ isMobile ? "收费主台账" : "收费主台账（对齐 `周 (2)`）" }}</span>
         <el-tag type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
     </template>
-    <el-table v-loading="props.loading" :data="props.rows" stripe border>
+    <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
+      <div v-for="row in props.rows" :key="row.id" class="mobile-record-card">
+        <div class="mobile-record-head">
+          <div class="mobile-record-main">
+            <div class="mobile-billing-title">
+              <el-tag size="small" effect="plain">#{{ row.serial_no }}</el-tag>
+              <el-button link type="primary" class="mobile-record-title" @click="emit('customer', row)">
+                {{ row.customer_name }}
+              </el-button>
+            </div>
+            <div class="mobile-record-subtitle">
+              {{ row.charge_category || "代账" }} ·
+              {{ row.charge_mode === "ONE_TIME" ? "按次" : "按期" }} ·
+              {{ normalizePaymentMethod(row.payment_method) }}
+            </div>
+          </div>
+          <el-tag :type="statusTagType(row.status)" size="small">
+            {{ statusLabel(row.status) }}
+          </el-tag>
+        </div>
+
+        <div class="mobile-record-metrics">
+          <div v-for="item in mobileMetrics(row)" :key="`${row.id}-${item.label}`" class="mobile-metric">
+            <div class="mobile-metric-label">{{ item.label }}</div>
+            <div class="mobile-metric-value">{{ item.value }}</div>
+          </div>
+        </div>
+
+        <div v-if="row.summary || row.note" class="mobile-record-note">
+          <div v-if="row.summary">摘要：{{ row.summary }}</div>
+          <div v-if="row.note">备注：{{ row.note }}</div>
+        </div>
+
+        <div class="mobile-actions">
+          <el-button size="small" @click="emit('ledger', row)">明细账</el-button>
+          <el-button size="small" type="primary" :disabled="!props.canWriteRecord(row)" @click="emit('activity', row)">
+            催收/收款
+          </el-button>
+          <el-button size="small" type="warning" @click="emit('execution', row)">执行进度</el-button>
+          <el-dropdown trigger="click" @command="onMobileMenuCommand">
+            <el-button size="small" plain>
+              更多
+              <el-icon><MoreFilled /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item :command="{ action: 'customer', row }">客户档案</el-dropdown-item>
+                <el-dropdown-item :command="{ action: 'split', row }" :disabled="!props.canWriteRecord(row)">分摊收款</el-dropdown-item>
+                <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
+                <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
+                <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </div>
+    </div>
+    <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
       <el-table-column prop="serial_no" label="序号" width="70" />
       <el-table-column label="名称" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">
@@ -210,5 +297,16 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.mobile-billing-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mobile-actions :deep(.el-button) {
+  margin-left: 0;
 }
 </style>
