@@ -27,6 +27,7 @@ __pycache__/
 output/playwright/
 output/spreadsheet/
 output/release/
+old_example_table/
 
 # Local SQLite runtime data
 /test.db
