@@ -105,6 +105,8 @@ class LeadOut(BaseModel):
 
 class LeadFollowupCreate(BaseModel):
     followup_at: date
+    grade: str = ""
+    reminder_value: str = ""
     feedback: str
     next_reminder_at: Optional[date] = None
     notes: str = ""
@@ -120,6 +122,7 @@ class LeadFollowupOut(BaseModel):
     next_reminder_at: Optional[date]
     notes: str
     created_by: int
+    created_by_username: str
     created_at: datetime
 
 

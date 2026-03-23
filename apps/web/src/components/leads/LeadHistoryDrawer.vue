@@ -11,6 +11,7 @@ type FollowupItem = {
   next_reminder_at: string | null;
   notes: string;
   created_by: number;
+  created_by_username: string;
   created_at: string;
 };
 
@@ -30,7 +31,7 @@ const drawerVisible = computed({
   set: (value: boolean) => emit("update:visible", value),
 });
 
-const drawerTitle = computed(() => `跟进历史 - ${props.leadName}`);
+const drawerTitle = computed(() => `开发跟进历史 - ${props.leadName}`);
 const { isMobile } = useResponsive();
 </script>
 
@@ -41,7 +42,9 @@ const { isMobile } = useResponsive();
         <div class="mobile-record-head">
           <div class="mobile-record-main">
             <div class="mobile-record-title">{{ row.followup_at }}</div>
-            <div class="mobile-record-subtitle">下次提醒：{{ row.next_reminder_at || "-" }}</div>
+            <div class="mobile-record-subtitle">
+              记录人：{{ row.created_by_username || "-" }} · 下次提醒：{{ row.next_reminder_at || "-" }}
+            </div>
           </div>
         </div>
         <div class="detail-long-fields">
@@ -74,6 +77,7 @@ const { isMobile } = useResponsive();
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
+      <el-table-column prop="created_by_username" label="记录人" width="100" />
     </el-table>
   </el-drawer>
 </template>

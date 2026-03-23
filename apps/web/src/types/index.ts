@@ -211,8 +211,39 @@ export interface CustomerDetail {
     next_reminder_at: string | null;
     notes: string;
     created_by: number;
+    created_by_username: string;
     created_at: string;
   }>;
+  timeline: CustomerTimelineEntry[];
+}
+
+export type CustomerTimelineSourceType =
+  | "LEAD_CREATED"
+  | "LEAD_FOLLOWUP"
+  | "CONVERTED"
+  | "BILLING_RECORD"
+  | "BILLING_ACTIVITY"
+  | "EXECUTION_LOG"
+  | "CUSTOMER_EVENT";
+
+export interface CustomerTimelineEntry {
+  occurred_at: string;
+  source_type: CustomerTimelineSourceType | string;
+  source_id: number | null;
+  title: string;
+  content: string;
+  note: string;
+  amount: number | null;
+  actor_username: string;
+  extra: string;
+}
+
+export interface CustomerTimelineEventCreatePayload {
+  occurred_at: string;
+  event_type: string;
+  content: string;
+  note: string;
+  amount: number | null;
 }
 
 export interface AddressResource {
@@ -288,6 +319,7 @@ export interface BillingActivity {
   activity_type: "REMINDER" | "PAYMENT";
   occurred_at: string;
   actor_id: number;
+  actor_username: string;
   amount: number;
   payment_nature: "" | "MONTHLY" | "YEARLY" | "ONE_OFF";
   is_prepay: boolean;

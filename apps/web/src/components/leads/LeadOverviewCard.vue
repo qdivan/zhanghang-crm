@@ -158,7 +158,8 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       <el-table-column
         prop="grade"
         label="等级"
-        width="70"
+        width="130"
+        show-overflow-tooltip
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />

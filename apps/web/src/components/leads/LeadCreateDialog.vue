@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { LeadCreateForm } from "../../views/lead/forms";
-import { buildLeadDialogSheetHint, templateOptions } from "../../views/lead/viewMeta";
+import {
+  searchLeadCustomers,
+  type LeadCustomerSearchItem,
+} from "../../views/lead/customerSearch";
+import {
+  buildLeadDialogSheetHint,
+  buildNextReminderDate,
+  getDefaultReminderValueForGrade,
+  leadGradeOptions,
+  leadReminderOptions,
+  templateOptions,
+} from "../../views/lead/viewMeta";
 
 const props = defineProps<{
   visible: boolean;
@@ -22,13 +33,92 @@ const dialogVisible = computed({
 
 const isConversionLikeTemplate = computed(() => props.form.template_type !== "FOLLOWUP");
 const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.template_type));
+
+type CompanySuggestionItem = LeadCustomerSearchItem & {
+  value: string;
+};
+
+const selectedCustomer = ref<LeadCustomerSearchItem | null>(null);
+
+async function fetchCompanySuggestions(
+  queryString: string,
+  callback: (items: CompanySuggestionItem[]) => void,
+) {
+  const q = queryString.trim();
+  if (!q) {
+    callback([]);
+    return;
+  }
+
+  try {
+    const items = await searchLeadCustomers(q);
+    callback(items.map((item) => ({ ...item, value: item.name })));
+  } catch {
+    callback([]);
+  }
+}
+
+function handleCompanySelect(item: CompanySuggestionItem) {
+  selectedCustomer.value = item;
+  props.form.related_customer_id = item.id;
+  props.form.name = item.name;
+  if (!props.form.contact_name) {
+    props.form.contact_name = item.contact_name;
+  }
+  if (!props.form.phone) {
+    props.form.phone = item.phone;
+  }
+}
+
+watch(
+  () => props.form.name,
+  (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      selectedCustomer.value = null;
+      props.form.related_customer_id = null;
+      return;
+    }
+    if (selectedCustomer.value && trimmed !== selectedCustomer.value.name) {
+      selectedCustomer.value = null;
+      props.form.related_customer_id = null;
+    }
+  },
+);
+
+watch(
+  () => props.visible,
+  (visible) => {
+    if (!visible) {
+      selectedCustomer.value = null;
+    }
+  },
+);
+
+watch(
+  () => props.form.grade,
+  (grade) => {
+    const reminderValue = getDefaultReminderValueForGrade(grade);
+    if (reminderValue) {
+      props.form.reminder_value = reminderValue;
+    }
+  },
+);
+
+watch(
+  [() => props.form.contact_start_date, () => props.form.reminder_value],
+  ([contactStartDate, reminderValue]) => {
+    props.form.next_reminder_at = buildNextReminderDate(contactStartDate, reminderValue);
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
   <el-dialog v-model="dialogVisible" title="新增线索（按 Excel 原型录入）" width="860px">
     <el-form label-position="top">
       <el-row :gutter="12">
-        <el-col :span="8">
+        <el-col :span="6">
           <el-form-item label="来源模板">
             <el-select v-model="props.form.template_type">
               <el-option
@@ -42,12 +132,51 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
         </el-col>
         <el-col :span="8">
           <el-form-item label="公司名">
-            <el-input v-model="props.form.name" />
+            <el-autocomplete
+              v-model="props.form.name"
+              :fetch-suggestions="fetchCompanySuggestions"
+              :trigger-on-focus="false"
+              :debounce="200"
+              clearable
+              placeholder="输入公司名称，可关联已有客户"
+              @select="handleCompanySelect"
+            >
+              <template #default="{ item }">
+                <div class="company-suggestion">
+                  <span class="company-suggestion__name">{{ item.name }}</span>
+                  <el-text size="small" type="info">
+                    {{ item.contact_name || "无联系人" }} / {{ item.phone || "无电话" }}
+                  </el-text>
+                </div>
+              </template>
+            </el-autocomplete>
+            <el-text v-if="props.form.related_customer_id" size="small" type="primary">
+              已关联现有客户，后续转化会复用客户档案，避免重复建客户。
+            </el-text>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="5">
           <el-form-item label="等级">
-            <el-input v-model="props.form.grade" placeholder="A/B/C..." />
+            <el-select v-model="props.form.grade">
+              <el-option
+                v-for="item in leadGradeOptions"
+                :key="`lead-grade-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="5">
+          <el-form-item label="提醒值">
+            <el-select v-model="props.form.reminder_value">
+              <el-option
+                v-for="item in leadReminderOptions"
+                :key="`lead-reminder-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
           </el-form-item>
         </el-col>
       </el-row>
@@ -81,25 +210,7 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
           </el-col>
           <el-col :span="8">
             <el-form-item label="联络开始时间">
-              <FlexibleDateInput v-model="props.form.contact_start_date" clearable />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="提醒值">
-              <el-input v-model="props.form.reminder_value" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :span="8">
-            <el-form-item label="传真">
-              <el-input v-model="props.form.fax" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="其他联系方式">
-              <el-input v-model="props.form.other_contact" />
+              <FlexibleDateInput v-model="props.form.contact_start_date" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -109,10 +220,23 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
           </el-col>
         </el-row>
 
+        <el-row :gutter="12">
+          <el-col :span="16">
+            <el-form-item label="其他联系方式">
+              <el-input v-model="props.form.other_contact" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="来源">
+              <el-input v-model="props.form.source" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
         <el-form-item label="主营/需求">
           <el-input v-model="props.form.main_business" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="介绍">
+        <el-form-item label="介绍人">
           <el-input v-model="props.form.intro" />
         </el-form-item>
 
@@ -152,8 +276,8 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="提醒值">
-              <el-input v-model="props.form.reminder_value" />
+            <el-form-item label="下次提醒">
+              <FlexibleDateInput v-model="props.form.next_reminder_at" clearable />
             </el-form-item>
           </el-col>
         </el-row>
@@ -182,7 +306,19 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
               <el-input v-model="props.form.source" />
             </el-form-item>
           </el-col>
-          <el-col :span="16">
+          <el-col :span="8">
+            <el-form-item label="提醒值">
+              <el-select v-model="props.form.reminder_value">
+                <el-option
+                  v-for="item in leadReminderOptions"
+                  :key="`lead-followup-reminder-${item.value}`"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
             <el-form-item label="其他联系人">
               <el-input v-model="props.form.other_contact" />
             </el-form-item>
@@ -192,7 +328,7 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
         <el-form-item label="主营产品">
           <el-input v-model="props.form.main_business" type="textarea" :rows="2" />
         </el-form-item>
-        <el-form-item label="介绍">
+        <el-form-item label="介绍人">
           <el-input v-model="props.form.intro" />
         </el-form-item>
 
@@ -224,5 +360,18 @@ const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.t
 <style scoped>
 .lead-dialog-alert {
   margin-bottom: 12px;
+}
+
+.company-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.company-suggestion__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

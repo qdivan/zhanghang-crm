@@ -69,7 +69,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
       </el-form-item>
     </el-form>
     <el-text type="info">
-      当前排序：跟进中（按下次提醒） -> 新线索 -> 已丢失 -> 已转化（置底）
+      这里仅显示未成单线索；已成单客户统一进入“客户列表”。当前排序：跟进中（按下次提醒） -> 新线索 -> 已丢失
     </el-text>
   </el-card>
 </template>

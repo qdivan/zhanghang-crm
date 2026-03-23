@@ -77,7 +77,7 @@ const { isMobile } = useResponsive();
           <div class="mobile-record-main">
             <div class="mobile-record-title">{{ row.occurred_at }}</div>
             <div class="mobile-record-subtitle">
-              {{ progressTypeLabel(row.progress_type) }} · 目标 {{ row.due_date || "-" }}
+              {{ progressTypeLabel(row.progress_type) }} · {{ row.actor_username || "-" }} · 目标 {{ row.due_date || "-" }}
             </div>
           </div>
         </div>

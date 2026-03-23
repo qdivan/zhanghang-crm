@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,12 +22,39 @@ from app.services.data_access import has_module_read_grant
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
+GRADE_REMINDER_MAP = {
+    "已签合同/待交费": "1天",
+    "待下单": "3天",
+    "意向中": "7天",
+    "放弃": "不跟进",
+}
+
+REMINDER_DAY_MAP = {
+    "1天": 1,
+    "3天": 3,
+    "7天": 7,
+    "不跟进": None,
+}
+
 
 def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
     lead = db.execute(select(Lead).where(Lead.id == lead_id)).scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     return lead
+
+
+def _default_reminder_value_for_grade(grade: str) -> str:
+    return GRADE_REMINDER_MAP.get((grade or "").strip(), "")
+
+
+def _next_reminder_date(base_date: Optional[date], reminder_value: str) -> Optional[date]:
+    if base_date is None:
+        return None
+    days = REMINDER_DAY_MAP.get((reminder_value or "").strip())
+    if days is None:
+        return None
+    return base_date + timedelta(days=int(days))
 
 
 def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_write: bool = False) -> None:
@@ -133,6 +160,13 @@ def create_lead(
                     detail="No access to related customer",
                 )
 
+    contact_start_date = payload.contact_start_date
+    if contact_start_date is None and payload.template_type != "FOLLOWUP":
+        contact_start_date = date.today()
+
+    reminder_value = (payload.reminder_value or "").strip() or _default_reminder_value_for_grade(payload.grade)
+    next_reminder_at = payload.next_reminder_at or _next_reminder_date(contact_start_date, reminder_value)
+
     lead = Lead(
         template_type=payload.template_type,
         name=payload.name,
@@ -145,7 +179,7 @@ def create_lead(
         contact_wechat=payload.contact_wechat,
         fax=payload.fax,
         other_contact=payload.other_contact,
-        contact_start_date=payload.contact_start_date,
+        contact_start_date=contact_start_date,
         service_start_text=payload.service_start_text,
         company_nature=payload.company_nature,
         service_mode=payload.service_mode,
@@ -157,8 +191,8 @@ def create_lead(
         reserve_3=payload.reserve_3,
         reserve_4=payload.reserve_4,
         status="NEW",
-        next_reminder_at=payload.next_reminder_at,
-        reminder_value=payload.reminder_value,
+        next_reminder_at=next_reminder_at,
+        reminder_value=reminder_value,
         notes=payload.notes,
         related_customer_id=related_customer_id,
         owner_id=target_owner_id,
@@ -264,19 +298,32 @@ def create_followup(
     lead = _get_lead_or_404(db, lead_id)
     _ensure_lead_access(lead, current_user, db, for_write=True)
 
+    grade = (payload.grade or "").strip() or (lead.grade or "").strip()
+    reminder_value = (payload.reminder_value or "").strip() or _default_reminder_value_for_grade(grade) or (
+        lead.reminder_value or ""
+    ).strip()
+    next_reminder_at = payload.next_reminder_at
+    if next_reminder_at is None:
+        next_reminder_at = _next_reminder_date(payload.followup_at, reminder_value)
+
     followup = LeadFollowup(
         lead_id=lead_id,
         followup_at=payload.followup_at,
         feedback=payload.feedback,
-        next_reminder_at=payload.next_reminder_at,
+        next_reminder_at=next_reminder_at,
         notes=payload.notes,
         created_by=current_user.id,
     )
     lead.last_feedback = payload.feedback
-    lead.next_reminder_at = payload.next_reminder_at
+    lead.grade = grade
+    lead.next_reminder_at = next_reminder_at
     lead.last_followup_date = payload.followup_at
-    if lead.status == "NEW":
-        lead.status = "FOLLOWING"
+    lead.reminder_value = reminder_value
+    if lead.status != "CONVERTED":
+        if grade == "放弃" or reminder_value == "不跟进":
+            lead.status = "LOST"
+        else:
+            lead.status = "FOLLOWING"
     lead.updated_at = datetime.utcnow()
 
     db.add(followup)
@@ -286,7 +333,7 @@ def create_followup(
         action="LEAD_FOLLOWUP_CREATED",
         entity_type="LEAD",
         entity_id=lead.id,
-        detail=f"followup_at={payload.followup_at}",
+        detail=f"followup_at={payload.followup_at},grade={lead.grade},reminder_value={lead.reminder_value}",
     )
     db.commit()
     db.refresh(followup)

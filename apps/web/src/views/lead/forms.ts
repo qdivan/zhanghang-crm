@@ -1,8 +1,11 @@
 import type { LeadTemplateType } from "../../types";
+import { todayInBrowserTimeZone } from "../../utils/time";
+import { buildNextReminderDate, getDefaultReminderValueForGrade } from "./viewMeta";
 
 export type LeadCreateForm = {
   template_type: LeadTemplateType;
   name: string;
+  related_customer_id: number | null;
   grade: string;
   contact_name: string;
   phone: string;
@@ -31,6 +34,8 @@ export type LeadCreateForm = {
 export type LeadFollowupForm = {
   lead_id: number | null;
   followup_at: string;
+  grade: string;
+  reminder_value: string;
   feedback: string;
   notes: string;
   next_reminder_at: string | null;
@@ -66,10 +71,14 @@ export function createLeadFilters(): LeadFilters {
 }
 
 export function createLeadForm(): LeadCreateForm {
+  const today = todayInBrowserTimeZone();
+  const defaultGrade = "意向中";
+  const defaultReminderValue = getDefaultReminderValueForGrade(defaultGrade);
   return {
     template_type: "CONVERSION",
     name: "",
-    grade: "",
+    related_customer_id: null,
+    grade: defaultGrade,
     contact_name: "",
     phone: "",
     region: "",
@@ -78,7 +87,7 @@ export function createLeadForm(): LeadCreateForm {
     contact_wechat: "",
     fax: "",
     other_contact: "",
-    contact_start_date: null,
+    contact_start_date: today,
     service_start_text: "",
     company_nature: "",
     service_mode: "",
@@ -89,8 +98,8 @@ export function createLeadForm(): LeadCreateForm {
     reserve_2: "",
     reserve_3: "",
     reserve_4: "",
-    reminder_value: "",
-    next_reminder_at: null,
+    reminder_value: defaultReminderValue,
+    next_reminder_at: buildNextReminderDate(today, defaultReminderValue),
     notes: "",
   };
 }
@@ -99,6 +108,8 @@ export function createLeadFollowupForm(today: string): LeadFollowupForm {
   return {
     lead_id: null,
     followup_at: today,
+    grade: "",
+    reminder_value: "",
     feedback: "",
     notes: "",
     next_reminder_at: null,

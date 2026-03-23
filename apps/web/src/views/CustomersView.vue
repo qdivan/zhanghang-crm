@@ -173,7 +173,7 @@ onMounted(fetchCustomers);
 
           <div v-if="row.source_main_business || row.source_intro" class="mobile-record-note">
             <div v-if="row.source_main_business">主营：{{ row.source_main_business }}</div>
-            <div v-if="row.source_intro">介绍：{{ row.source_intro }}</div>
+            <div v-if="row.source_intro">介绍人：{{ row.source_intro }}</div>
           </div>
 
           <div class="mobile-actions">
@@ -206,7 +206,8 @@ onMounted(fetchCustomers);
         <el-table-column
           prop="source_grade"
           label="等级"
-          width="70"
+          width="130"
+          show-overflow-tooltip
           class-name="mobile-hide"
           label-class-name="mobile-hide"
         />
@@ -272,7 +273,7 @@ onMounted(fetchCustomers);
         />
         <el-table-column
           prop="source_intro"
-          label="介绍"
+          label="介绍人"
           min-width="140"
           show-overflow-tooltip
           class-name="mobile-hide"

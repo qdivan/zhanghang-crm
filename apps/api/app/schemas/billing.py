@@ -107,6 +107,7 @@ class BillingActivityOut(BaseModel):
     activity_type: str
     occurred_at: date
     actor_id: int
+    actor_username: str
     amount: float
     payment_nature: str
     is_prepay: bool

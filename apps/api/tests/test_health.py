@@ -2436,3 +2436,295 @@ def test_periodic_billing_rejects_due_date_before_service_start_date():
         )
         assert create_resp.status_code == 400
         assert create_resp.json()["detail"] == "到期日期不能早于服务开始日期"
+
+
+def test_customer_detail_timeline_merges_pre_and_post_sale_records():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "时间线测试客户A",
+                "contact_name": "王一",
+                "phone": "13800138180",
+                "source": "老板转介绍",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        followup_resp = client.post(
+            f"/api/v1/leads/{lead_id}/followups",
+            headers=headers,
+            json={
+                "followup_at": "2026-03-01",
+                "feedback": "已首次联络并报价",
+                "next_reminder_at": "2026-03-03",
+                "notes": "等待客户确认是否下单",
+            },
+        )
+        assert followup_resp.status_code == 201
+        assert followup_resp.json()["created_by_username"] == "boss"
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "PERIODIC",
+                "amount_basis": "MONTHLY",
+                "collection_start_date": "2026-03-05",
+                "due_month": "2027-03-04",
+                "total_fee": 3600,
+                "monthly_fee": 300,
+                "payment_method": "后收",
+                "summary": "代账首单",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        activity_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=headers,
+            json={
+                "activity_type": "PAYMENT",
+                "occurred_at": "2026-03-06",
+                "amount": 1000,
+                "payment_nature": "ONE_OFF",
+                "content": "首笔到账",
+                "note": "客户先付一部分",
+            },
+        )
+        assert activity_resp.status_code == 201
+        assert activity_resp.json()["actor_username"] == "boss"
+
+        execution_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/execution-logs",
+            headers=headers,
+            json={
+                "occurred_at": "2026-03-07",
+                "progress_type": "UPDATE",
+                "content": "已收到执照并开始办理",
+                "next_action": "等待补充章程",
+                "note": "先走预审",
+            },
+        )
+        assert execution_resp.status_code == 201
+
+        event_resp = client.post(
+            f"/api/v1/customers/{customer_id}/timeline-events",
+            headers=headers,
+            json={
+                "occurred_at": "2026-03-08",
+                "event_type": "MEETING",
+                "content": "和老板讨论缺发票处理方式",
+                "note": "决定先补票再报税",
+                "amount": None,
+            },
+        )
+        assert event_resp.status_code == 201
+        assert event_resp.json()["actor_username"] == "boss"
+
+        detail_resp = client.get(f"/api/v1/customers/{customer_id}", headers=headers)
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        source_types = {item["source_type"] for item in detail["timeline"]}
+        assert "LEAD_FOLLOWUP" in source_types
+        assert "CONVERTED" in source_types
+        assert "BILLING_RECORD" in source_types
+        assert "BILLING_ACTIVITY" in source_types
+        assert "EXECUTION_LOG" in source_types
+        assert "CUSTOMER_EVENT" in source_types
+
+        manual_event = next(item for item in detail["timeline"] if item["source_type"] == "CUSTOMER_EVENT")
+        assert manual_event["actor_username"] == "boss"
+        assert manual_event["content"] == "和老板讨论缺发票处理方式"
+
+        payment_event = next(item for item in detail["timeline"] if item["source_type"] == "BILLING_ACTIVITY")
+        assert payment_event["amount"] == 1000
+        assert payment_event["actor_username"] == "boss"
+
+
+def test_customer_detail_keeps_development_source_separate_from_customer_records():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = users_resp.json()[0]
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "name": "时间线测试客户B",
+                "contact_name": "李二",
+                "phone": "13800138181",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        source_followup_resp = client.post(
+            f"/api/v1/leads/{lead_id}/followups",
+            headers=headers,
+            json={
+                "followup_at": "2026-03-10",
+                "feedback": "开发来源页的联络记录",
+                "notes": "仅属于成单前",
+            },
+        )
+        assert source_followup_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        customer_event_resp = client.post(
+            f"/api/v1/customers/{customer_id}/timeline-events",
+            headers=headers,
+            json={
+                "occurred_at": "2026-03-11",
+                "event_type": "DOCUMENT",
+                "content": "收到客户执照并安排后续变更",
+                "note": "",
+                "amount": None,
+            },
+        )
+        assert customer_event_resp.status_code == 201
+
+        lead_detail_resp = client.get(f"/api/v1/leads/{lead_id}/followups", headers=headers)
+        assert lead_detail_resp.status_code == 200
+        lead_followups = lead_detail_resp.json()
+        assert len(lead_followups) == 1
+        assert lead_followups[0]["feedback"] == "开发来源页的联络记录"
+
+        customer_detail_resp = client.get(f"/api/v1/customers/{customer_id}", headers=headers)
+        assert customer_detail_resp.status_code == 200
+        customer_detail = customer_detail_resp.json()
+        assert len(customer_detail["followups"]) == 1
+        assert customer_detail["followups"][0]["feedback"] == "开发来源页的联络记录"
+        assert any(
+            item["source_type"] == "CUSTOMER_EVENT" and item["content"] == "收到客户执照并安排后续变更"
+            for item in customer_detail["timeline"]
+        )
+
+
+def test_conversion_lead_defaults_contact_start_date_and_grade_reminder():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        create_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "默认联络日期客户",
+                "contact_name": "张三",
+                "phone": "13800138182",
+                "grade": "意向中",
+            },
+        )
+        assert create_resp.status_code == 201
+        body = create_resp.json()
+        assert body["contact_start_date"] == date.today().isoformat()
+        assert body["reminder_value"] == "7天"
+        assert body["next_reminder_at"] == (date.today() + timedelta(days=7)).isoformat()
+
+
+def test_followup_updates_grade_and_reminder_defaults():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "跟进等级测试客户",
+                "contact_name": "李四",
+                "phone": "13800138183",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        followup_resp = client.post(
+            f"/api/v1/leads/{lead_id}/followups",
+            headers=headers,
+            json={
+                "followup_at": "2026-03-23",
+                "grade": "待下单",
+                "feedback": "客户正在等老板确认",
+                "notes": "三天后再催",
+            },
+        )
+        assert followup_resp.status_code == 201
+
+        lead_detail_resp = client.get(f"/api/v1/leads/{lead_id}", headers=headers)
+        assert lead_detail_resp.status_code == 200
+        lead = lead_detail_resp.json()
+        assert lead["grade"] == "待下单"
+        assert lead["reminder_value"] == "3天"
+        assert lead["next_reminder_at"] == "2026-03-26"
+        assert lead["status"] == "FOLLOWING"
+
+        lost_followup_resp = client.post(
+            f"/api/v1/leads/{lead_id}/followups",
+            headers=headers,
+            json={
+                "followup_at": "2026-03-26",
+                "grade": "放弃",
+                "feedback": "客户明确放弃",
+                "notes": "不再跟进",
+            },
+        )
+        assert lost_followup_resp.status_code == 201
+
+        lost_lead_resp = client.get(f"/api/v1/leads/{lead_id}", headers=headers)
+        assert lost_lead_resp.status_code == 200
+        lost_lead = lost_lead_resp.json()
+        assert lost_lead["grade"] == "放弃"
+        assert lost_lead["reminder_value"] == "不跟进"
+        assert lost_lead["next_reminder_at"] is None
+        assert lost_lead["status"] == "LOST"

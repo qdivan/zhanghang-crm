@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.lead import LeadOut, LeadFollowupOut
 
@@ -46,6 +46,42 @@ class CustomerDetailOut(BaseModel):
     created_at: datetime
     lead: LeadOut
     followups: list[LeadFollowupOut]
+    timeline: list["CustomerTimelineEntryOut"]
+
+
+class CustomerTimelineEventCreate(BaseModel):
+    occurred_at: date
+    event_type: str = Field(default="COMMUNICATION", min_length=1, max_length=32)
+    content: str = ""
+    note: str = ""
+    amount: Optional[float] = None
+
+
+class CustomerTimelineEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    customer_id: int
+    occurred_at: date
+    event_type: str
+    content: str
+    note: str
+    amount: Optional[float]
+    actor_id: int
+    actor_username: str
+    created_at: datetime
+
+
+class CustomerTimelineEntryOut(BaseModel):
+    occurred_at: date
+    source_type: str
+    source_id: Optional[int] = None
+    title: str
+    content: str
+    note: str = ""
+    amount: Optional[float] = None
+    actor_username: str = ""
+    extra: str = ""
 
 
 class CustomerUpdate(BaseModel):
@@ -72,3 +108,6 @@ class CustomerUpdate(BaseModel):
     lead_main_business: Optional[str] = None
     lead_intro: Optional[str] = None
     lead_notes: Optional[str] = None
+
+
+CustomerDetailOut.model_rebuild()

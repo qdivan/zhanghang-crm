@@ -8,18 +8,19 @@ import { apiClient } from "../api/client";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
 import { useAuthStore } from "../stores/auth";
-import type { CustomerDetail } from "../types";
+import type { CustomerDetail, CustomerTimelineEventCreatePayload, CustomerTimelineSourceType } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
+import { leadGradeOptions, leadReminderOptions } from "./lead/viewMeta";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
-const followupLoading = ref(false);
+const timelineSubmitting = ref(false);
 const editLoading = ref(false);
 const detail = ref<CustomerDetail | null>(null);
-const showFollowupDialog = ref(false);
+const showTimelineDialog = ref(false);
 const showEditDialog = ref(false);
 
 const canWriteCustomer = computed(() => {
@@ -50,11 +51,12 @@ const displayContactLine = computed(() => {
   return [detail.value.contact_name, detail.value.phone].filter(Boolean).join(" / ") || "-";
 });
 
-const followupForm = reactive({
-  followup_at: todayInBrowserTimeZone(),
-  feedback: "",
-  notes: "",
-  next_reminder_at: null as string | null,
+const timelineForm = reactive<CustomerTimelineEventCreatePayload>({
+  occurred_at: todayInBrowserTimeZone(),
+  event_type: "COMMUNICATION",
+  content: "",
+  note: "",
+  amount: null,
 });
 
 const editForm = reactive({
@@ -83,6 +85,32 @@ function templateLabel(templateType: string) {
   return "转化模板";
 }
 
+function timelineTypeLabel(sourceType: CustomerTimelineSourceType | string) {
+  const mapping: Record<string, string> = {
+    LEAD_CREATED: "开始开发",
+    LEAD_FOLLOWUP: "开发跟进",
+    CONVERTED: "客户成单",
+    BILLING_RECORD: "收费单",
+    BILLING_ACTIVITY: "催收/收款",
+    EXECUTION_LOG: "执行进度",
+    CUSTOMER_EVENT: "客户记录",
+  };
+  return mapping[sourceType] ?? sourceType;
+}
+
+function timelineTypeTag(sourceType: CustomerTimelineSourceType | string) {
+  const mapping: Record<string, "" | "success" | "warning" | "info" | "danger"> = {
+    LEAD_CREATED: "info",
+    LEAD_FOLLOWUP: "warning",
+    CONVERTED: "success",
+    BILLING_RECORD: "info",
+    BILLING_ACTIVITY: "success",
+    EXECUTION_LOG: "warning",
+    CUSTOMER_EVENT: "danger",
+  };
+  return mapping[sourceType] ?? "info";
+}
+
 async function fetchDetail() {
   const customerId = Number(route.params.id);
   if (!customerId) return;
@@ -102,39 +130,40 @@ function goBack() {
   router.push(backTarget.value.path);
 }
 
-function openFollowupDialog() {
+function openTimelineDialog() {
   if (!detail.value) return;
   if (!canWriteCustomer.value) {
-    ElMessage.warning("该客户处于临时只读授权范围，不能新增跟进");
+    ElMessage.warning("该客户处于临时只读授权范围，不能新增记录");
     return;
   }
-  followupForm.followup_at = todayInBrowserTimeZone();
-  followupForm.feedback = "";
-  followupForm.notes = "";
-  followupForm.next_reminder_at = detail.value.lead.next_reminder_at;
-  showFollowupDialog.value = true;
+  timelineForm.occurred_at = todayInBrowserTimeZone();
+  timelineForm.event_type = "COMMUNICATION";
+  timelineForm.content = "";
+  timelineForm.note = "";
+  timelineForm.amount = null;
+  showTimelineDialog.value = true;
 }
 
-async function submitFollowup() {
-  if (!detail.value || !followupForm.feedback.trim()) {
-    ElMessage.warning("请填写跟进反馈");
+async function submitTimelineEvent() {
+  if (!detail.value || !timelineForm.content.trim()) {
+    ElMessage.warning("请填写记录内容");
     return;
   }
   if (!canWriteCustomer.value) {
-    ElMessage.warning("该客户处于临时只读授权范围，不能新增跟进");
+    ElMessage.warning("该客户处于临时只读授权范围，不能新增记录");
     return;
   }
 
-  followupLoading.value = true;
+  timelineSubmitting.value = true;
   try {
-    await apiClient.post(`/leads/${detail.value.source_lead_id}/followups`, followupForm);
-    ElMessage.success("客户跟进已保存");
-    showFollowupDialog.value = false;
+    await apiClient.post(`/customers/${detail.value.id}/timeline-events`, timelineForm);
+    ElMessage.success("客户记录已保存");
+    showTimelineDialog.value = false;
     await fetchDetail();
   } catch (error) {
     ElMessage.error("保存失败");
   } finally {
-    followupLoading.value = false;
+    timelineSubmitting.value = false;
   }
 }
 
@@ -221,8 +250,8 @@ onMounted(fetchDetail);
       <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="goBack">{{ backTarget.label }}</el-button>
         <el-button :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
-        <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openFollowupDialog">
-          新增跟进
+        <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
+          新增记录
         </el-button>
         <el-button :disabled="!detail" @click="openLeadDetail">查看开发来源</el-button>
       </el-space>
@@ -285,7 +314,7 @@ onMounted(fetchDetail);
                 <div class="detail-long-value">{{ detail.lead.main_business || "-" }}</div>
               </div>
               <div class="detail-long-field">
-                <div class="detail-long-label">介绍</div>
+                <div class="detail-long-label">介绍人</div>
                 <div class="detail-long-value">{{ detail.lead.intro || "-" }}</div>
               </div>
               <div class="detail-long-field">
@@ -311,7 +340,7 @@ onMounted(fetchDetail);
           <el-descriptions-item label="提醒值">{{ detail.lead.reminder_value || '-' }}</el-descriptions-item>
           <el-descriptions-item label="下次提醒">{{ detail.lead.next_reminder_at || '-' }}</el-descriptions-item>
           <el-descriptions-item label="主营产品" :span="2">{{ detail.lead.main_business || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍" :span="2">{{ detail.lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍人" :span="2">{{ detail.lead.intro || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ detail.lead.notes || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
@@ -320,63 +349,115 @@ onMounted(fetchDetail);
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>跟进记录</span>
-          <el-tag type="info" effect="plain">{{ detail?.followups.length ?? 0 }} 条</el-tag>
+          <span>客户时间线</span>
+          <el-tag type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
         </div>
       </template>
       <div v-if="isMobile" class="mobile-record-list">
-        <div v-for="item in detail?.followups ?? []" :key="item.id" class="mobile-record-card">
+        <div v-for="item in detail?.timeline ?? []" :key="`${item.source_type}-${item.source_id ?? item.occurred_at}`" class="mobile-record-card">
           <div class="mobile-record-head">
             <div class="mobile-record-main">
-              <div class="mobile-record-title">{{ item.followup_at }}</div>
-              <div class="mobile-record-subtitle">下次提醒：{{ item.next_reminder_at || "-" }}</div>
+              <div class="mobile-record-title">{{ item.occurred_at }}</div>
+              <div class="mobile-record-subtitle">
+                {{ timelineTypeLabel(item.source_type) }} · {{ item.actor_username || "系统" }}
+              </div>
             </div>
+            <el-tag size="small" :type="timelineTypeTag(item.source_type)" effect="plain">
+              {{ timelineTypeLabel(item.source_type) }}
+            </el-tag>
           </div>
           <div class="detail-long-fields">
             <div class="detail-long-field">
-              <div class="detail-long-label">跟进反馈</div>
-              <div class="detail-long-value">{{ item.feedback || "-" }}</div>
+              <div class="detail-long-label">{{ item.occurred_at }}</div>
+              <div class="detail-long-value">{{ item.title }}：{{ item.content || "-" }}</div>
             </div>
-            <div class="detail-long-field">
-              <div class="detail-long-label">备注</div>
-              <div class="detail-long-value">{{ item.notes || "-" }}</div>
+            <div v-if="item.amount !== null || item.note || item.extra" class="detail-long-field">
+              <div class="detail-long-label">补充说明</div>
+              <div class="detail-long-value">
+                <div v-if="item.amount !== null">金额：{{ item.amount }}</div>
+                <div v-if="item.note">{{ item.note }}</div>
+                <div v-if="item.extra">{{ item.extra }}</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-      <el-table v-else :data="detail?.followups ?? []" stripe border>
-        <el-table-column prop="followup_at" label="跟进日期" width="120" />
-        <el-table-column prop="feedback" label="跟进反馈" min-width="300" />
-        <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
-        <el-table-column prop="notes" label="备注" min-width="220" />
+      <el-table v-else :data="detail?.timeline ?? []" stripe border>
+        <el-table-column prop="occurred_at" label="日期" width="120" />
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="timelineTypeTag(row.source_type)" effect="plain">
+              {{ timelineTypeLabel(row.source_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="事项" width="130" />
+        <el-table-column prop="content" label="内容" min-width="260" />
+        <el-table-column label="金额" width="100">
+          <template #default="{ row }">
+            {{ row.amount ?? "-" }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="actor_username" label="记录人" width="110" />
+        <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="extra" label="补充" min-width="160" show-overflow-tooltip />
       </el-table>
     </el-card>
   </el-space>
 
-  <el-dialog v-model="showFollowupDialog" title="新增客户跟进" width="520px">
+  <el-dialog v-model="showTimelineDialog" title="新增客户记录" width="560px">
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="12">
-          <el-form-item label="跟进日期">
-            <FlexibleDateInput v-model="followupForm.followup_at" :empty-value="''" />
+          <el-form-item label="记录日期">
+            <FlexibleDateInput v-model="timelineForm.occurred_at" :empty-value="''" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
-          <el-form-item label="下次提醒">
-            <FlexibleDateInput v-model="followupForm.next_reminder_at" clearable />
+          <el-form-item label="记录类型">
+            <el-select v-model="timelineForm.event_type">
+              <el-option label="客户沟通" value="COMMUNICATION" />
+              <el-option label="内部讨论" value="MEETING" />
+              <el-option label="办理事项" value="DELIVERY" />
+              <el-option label="资料/证照" value="DOCUMENT" />
+              <el-option label="费用备注" value="FEE_NOTE" />
+              <el-option label="其他记录" value="OTHER" />
+            </el-select>
           </el-form-item>
         </el-col>
       </el-row>
-      <el-form-item label="跟进反馈">
-        <el-input v-model="followupForm.feedback" type="textarea" :rows="3" />
+      <el-form-item label="记录内容">
+        <el-input
+          v-model="timelineForm.content"
+          type="textarea"
+          :rows="3"
+          placeholder="例如：收到执照并完成变更、和老板讨论缺发票处理、客户确认补单等"
+        />
       </el-form-item>
-      <el-form-item label="备注">
-        <el-input v-model="followupForm.notes" type="textarea" :rows="2" />
-      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="相关金额">
+            <el-input-number v-model="timelineForm.amount" :min="0" :precision="2" :controls="false" style="width: 100%" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="16">
+          <el-form-item label="备注">
+            <el-input v-model="timelineForm.note" type="textarea" :rows="2" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-alert
+        type="info"
+        :closable="false"
+        title="这里记录客户成单后的重要事项；开发期的联络和开发跟进，请用“查看开发来源”进入线索页查看。"
+      />
+      <el-text size="small" type="info">
+        收款金额请优先在“收费收款”里登记；这里用于补充会议、证照、内部讨论、临时事项等重要记录。
+      </el-text>
     </el-form>
     <template #footer>
-      <el-button @click="showFollowupDialog = false">取消</el-button>
-      <el-button type="primary" :loading="followupLoading" @click="submitFollowup">保存</el-button>
+      <el-button @click="showTimelineDialog = false">取消</el-button>
+      <el-button type="primary" :loading="timelineSubmitting" @click="submitTimelineEvent">保存</el-button>
     </template>
   </el-dialog>
 
@@ -402,7 +483,14 @@ onMounted(fetchDetail);
       <el-row :gutter="12">
         <el-col :span="8">
           <el-form-item label="等级">
-            <el-input v-model="editForm.lead_grade" />
+            <el-select v-model="editForm.lead_grade">
+              <el-option
+                v-for="item in leadGradeOptions"
+                :key="`customer-grade-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="8">
@@ -453,7 +541,14 @@ onMounted(fetchDetail);
         </el-col>
         <el-col :span="8">
           <el-form-item label="提醒值">
-            <el-input v-model="editForm.lead_reminder_value" />
+            <el-select v-model="editForm.lead_reminder_value">
+              <el-option
+                v-for="item in leadReminderOptions"
+                :key="`customer-reminder-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
           </el-form-item>
         </el-col>
         <el-col :span="8">
@@ -465,7 +560,7 @@ onMounted(fetchDetail);
       <el-form-item label="主营产品">
         <el-input v-model="editForm.lead_main_business" type="textarea" :rows="2" />
       </el-form-item>
-      <el-form-item label="介绍">
+      <el-form-item label="介绍人">
         <el-input v-model="editForm.lead_intro" type="textarea" :rows="2" />
       </el-form-item>
       <el-form-item label="备注">

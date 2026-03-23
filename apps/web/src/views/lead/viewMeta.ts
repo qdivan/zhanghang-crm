@@ -1,10 +1,9 @@
 import type { LeadItem, LeadStatus, LeadTemplateType } from "../../types";
-import { toEpochMillis } from "../../utils/time";
+import { addDaysToDateString, toEpochMillis } from "../../utils/time";
 
 export const statusOptions: Array<{ label: string; value: LeadStatus }> = [
   { label: "新线索", value: "NEW" },
   { label: "跟进中", value: "FOLLOWING" },
-  { label: "已转化", value: "CONVERTED" },
   { label: "已丢失", value: "LOST" },
 ];
 
@@ -13,6 +12,28 @@ export const templateOptions: Array<{ label: string; value: LeadTemplateType }> 
   { label: "转化模板", value: "CONVERSION" },
   { label: "老客二开模板", value: "REDEVELOP" },
 ];
+
+export const leadGradeOptions = [
+  { label: "已签合同/待交费", value: "已签合同/待交费", reminderValue: "1天" },
+  { label: "待下单", value: "待下单", reminderValue: "3天" },
+  { label: "意向中", value: "意向中", reminderValue: "7天" },
+  { label: "放弃", value: "放弃", reminderValue: "不跟进" },
+] as const;
+
+export const leadReminderOptions = [
+  { label: "1天", value: "1天" },
+  { label: "3天", value: "3天" },
+  { label: "7天", value: "7天" },
+  { label: "不跟进", value: "不跟进" },
+] as const;
+
+const gradeReminderMap = Object.fromEntries(leadGradeOptions.map((item) => [item.value, item.reminderValue])) as Record<string, string>;
+const reminderDayMap: Record<string, number | null> = {
+  "1天": 1,
+  "3天": 3,
+  "7天": 7,
+  "不跟进": null,
+};
 
 const statusLabelMap: Record<LeadStatus, string> = {
   NEW: "新线索",
@@ -53,6 +74,18 @@ export function buildLeadDialogSheetHint(templateType: LeadTemplateType): string
   return templateType === "FOLLOWUP"
     ? "当前按《客户跟进表 > 客户总览》录入，字段更偏客户维护。"
     : "当前按《转化2026 > 客户总览》录入，字段更偏客户开发。";
+}
+
+export function getDefaultReminderValueForGrade(grade: string): string {
+  return gradeReminderMap[grade] ?? "";
+}
+
+export function buildNextReminderDate(baseDate: string | null | undefined, reminderValue: string): string | null {
+  const days = reminderDayMap[reminderValue];
+  if (days == null) {
+    return null;
+  }
+  return addDaysToDateString(baseDate || "", days);
 }
 
 export function statusTagType(status: LeadStatus): string {

@@ -97,7 +97,9 @@ const { isMobile } = useResponsive();
         <div class="mobile-record-head">
           <div class="mobile-record-main">
             <div class="mobile-record-title">{{ row.occurred_at }}</div>
-            <div class="mobile-record-subtitle">{{ activityTypeLabel(row.activity_type) }} · 金额 {{ row.amount }}</div>
+            <div class="mobile-record-subtitle">
+              {{ activityTypeLabel(row.activity_type) }} · {{ row.actor_username || "-" }} · 金额 {{ row.amount }}
+            </div>
           </div>
         </div>
         <div class="detail-long-fields">
@@ -122,6 +124,7 @@ const { isMobile } = useResponsive();
         </template>
       </el-table-column>
       <el-table-column prop="amount" label="金额" width="90" />
+      <el-table-column prop="actor_username" label="记录人" width="100" />
       <el-table-column
         prop="payment_nature"
         label="性质"

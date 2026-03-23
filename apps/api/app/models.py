@@ -24,6 +24,7 @@ class User(Base):
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="owner")
     assigned_customers: Mapped[list["Customer"]] = relationship(back_populates="accountant")
+    customer_timeline_events: Mapped[list["CustomerTimelineEvent"]] = relationship(back_populates="actor")
     billing_activities: Mapped[list["BillingActivity"]] = relationship(back_populates="actor")
     billing_execution_logs: Mapped[list["BillingExecutionLog"]] = relationship(back_populates="actor")
     billing_payments: Mapped[list["BillingPayment"]] = relationship(back_populates="creator")
@@ -97,6 +98,13 @@ class LeadFollowup(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     lead: Mapped["Lead"] = relationship(back_populates="followups")
+    creator: Mapped[Optional["User"]] = relationship()
+
+    @property
+    def created_by_username(self) -> str:
+        if self.creator is None:
+            return ""
+        return self.creator.username
 
 
 class Customer(Base):
@@ -114,6 +122,33 @@ class Customer(Base):
     accountant: Mapped["User"] = relationship(back_populates="assigned_customers")
     source_lead: Mapped["Lead"] = relationship(back_populates="customer")
     billing_records: Mapped[list["BillingRecord"]] = relationship(back_populates="customer")
+    timeline_events: Mapped[list["CustomerTimelineEvent"]] = relationship(
+        back_populates="customer",
+        cascade="all, delete-orphan",
+    )
+
+
+class CustomerTimelineEvent(Base):
+    __tablename__ = "customer_timeline_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    occurred_at: Mapped[date] = mapped_column(Date, default=date.today, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), default="COMMUNICATION", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    customer: Mapped["Customer"] = relationship(back_populates="timeline_events")
+    actor: Mapped[Optional["User"]] = relationship(back_populates="customer_timeline_events")
+
+    @property
+    def actor_username(self) -> str:
+        if self.actor is None:
+            return ""
+        return self.actor.username
 
 
 class AddressResource(Base):
@@ -218,6 +253,12 @@ class BillingActivity(Base):
 
     billing_record: Mapped["BillingRecord"] = relationship(back_populates="activities")
     actor: Mapped["User"] = relationship(back_populates="billing_activities")
+
+    @property
+    def actor_username(self) -> str:
+        if self.actor is None:
+            return ""
+        return self.actor.username
 
 
 class BillingExecutionLog(Base):

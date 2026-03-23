@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowLeft } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
@@ -9,6 +9,7 @@ import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
 import type { LeadItem } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
+import { buildNextReminderDate, getDefaultReminderValueForGrade, leadGradeOptions, leadReminderOptions } from "./lead/viewMeta";
 
 type FollowupItem = {
   id: number;
@@ -18,6 +19,7 @@ type FollowupItem = {
   next_reminder_at: string | null;
   notes: string;
   created_by: number;
+  created_by_username: string;
   created_at: string;
 };
 
@@ -54,6 +56,8 @@ const backTarget = computed(() => {
 
 const followupForm = reactive({
   followup_at: todayInBrowserTimeZone(),
+  grade: "",
+  reminder_value: "",
   feedback: "",
   notes: "",
   next_reminder_at: null as string | null,
@@ -93,10 +97,14 @@ async function fetchLeadDetail() {
 }
 
 function openFollowupDialog() {
+  const grade = lead.value?.grade || "意向中";
   followupForm.followup_at = todayInBrowserTimeZone();
+  followupForm.grade = grade;
+  followupForm.reminder_value = lead.value?.reminder_value || getDefaultReminderValueForGrade(grade);
   followupForm.feedback = "";
   followupForm.notes = "";
-  followupForm.next_reminder_at = lead.value?.next_reminder_at ?? null;
+  followupForm.next_reminder_at =
+    lead.value?.next_reminder_at ?? buildNextReminderDate(followupForm.followup_at, followupForm.reminder_value);
   showFollowupDialog.value = true;
 }
 
@@ -110,7 +118,7 @@ async function submitFollowup() {
   followupLoading.value = true;
   try {
     await apiClient.post(`/leads/${leadId}/followups`, followupForm);
-    ElMessage.success("跟进记录已保存");
+    ElMessage.success("开发跟进已保存");
     showFollowupDialog.value = false;
     await fetchLeadDetail();
   } catch (error) {
@@ -124,6 +132,34 @@ function backToLeads() {
   router.push(backTarget.value.to);
 }
 
+function syncReminderFromGrade() {
+  const reminderValue = getDefaultReminderValueForGrade(followupForm.grade);
+  if (reminderValue) {
+    followupForm.reminder_value = reminderValue;
+    followupForm.next_reminder_at = buildNextReminderDate(followupForm.followup_at, reminderValue);
+  }
+}
+
+function syncReminderDate() {
+  followupForm.next_reminder_at = buildNextReminderDate(followupForm.followup_at, followupForm.reminder_value);
+}
+
+watch(
+  () => followupForm.grade,
+  () => {
+    if (!showFollowupDialog.value) return;
+    syncReminderFromGrade();
+  },
+);
+
+watch(
+  [() => followupForm.followup_at, () => followupForm.reminder_value],
+  () => {
+    if (!showFollowupDialog.value) return;
+    syncReminderDate();
+  },
+);
+
 onMounted(fetchLeadDetail);
 </script>
 
@@ -132,7 +168,7 @@ onMounted(fetchLeadDetail);
     <el-card shadow="never">
       <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="backToLeads">{{ backTarget.label }}</el-button>
-        <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增跟进</el-button>
+        <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增开发跟进</el-button>
       </el-space>
     </el-card>
 
@@ -199,7 +235,7 @@ onMounted(fetchLeadDetail);
                 <div class="detail-long-value">{{ lead.main_business || "-" }}</div>
               </div>
               <div class="detail-long-field">
-                <div class="detail-long-label">介绍</div>
+                <div class="detail-long-label">介绍人</div>
                 <div class="detail-long-value">{{ lead.intro || "-" }}</div>
               </div>
               <div class="detail-long-field">
@@ -227,7 +263,7 @@ onMounted(fetchLeadDetail);
           <el-descriptions-item label="提醒值">{{ lead.reminder_value || '-' }}</el-descriptions-item>
           <el-descriptions-item label="下次提醒">{{ lead.next_reminder_at || '-' }}</el-descriptions-item>
           <el-descriptions-item label="主营产品" :span="2">{{ lead.main_business || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍" :span="2">{{ lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍人" :span="2">{{ lead.intro || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ lead.notes || '-' }}</el-descriptions-item>
         </el-descriptions>
         <el-descriptions v-else :column="2" border>
@@ -239,10 +275,9 @@ onMounted(fetchLeadDetail);
             {{ lead.contact_wechat ? `${lead.contact_name} / ${lead.contact_wechat}` : lead.contact_name || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="电话">{{ lead.phone || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="传真">{{ lead.fax || '-' }}</el-descriptions-item>
           <el-descriptions-item label="其他联系方式">{{ lead.other_contact || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备注">{{ lead.notes || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍">{{ lead.intro || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="介绍人">{{ lead.intro || '-' }}</el-descriptions-item>
           <el-descriptions-item label="主营" :span="2">{{ lead.main_business || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备用2">{{ lead.reserve_2 || '-' }}</el-descriptions-item>
           <el-descriptions-item label="备用3">{{ lead.reserve_3 || '-' }}</el-descriptions-item>
@@ -257,7 +292,7 @@ onMounted(fetchLeadDetail);
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>跟进记录</span>
+          <span>开发跟进记录</span>
           <el-tag type="success" effect="plain">{{ followups.length }} 条</el-tag>
         </div>
       </template>
@@ -266,7 +301,9 @@ onMounted(fetchLeadDetail);
           <div class="mobile-record-head">
             <div class="mobile-record-main">
               <div class="mobile-record-title">{{ item.followup_at }}</div>
-              <div class="mobile-record-subtitle">下次提醒：{{ item.next_reminder_at || "-" }}</div>
+              <div class="mobile-record-subtitle">
+                记录人：{{ item.created_by_username || "-" }} · 下次提醒：{{ item.next_reminder_at || "-" }}
+              </div>
             </div>
           </div>
           <div class="detail-long-fields">
@@ -285,20 +322,45 @@ onMounted(fetchLeadDetail);
         <el-table-column prop="followup_at" label="跟进日期" width="120" />
         <el-table-column prop="feedback" label="跟进反馈" min-width="300" />
         <el-table-column prop="next_reminder_at" label="下次提醒" width="120" />
+        <el-table-column prop="created_by_username" label="记录人" width="110" />
         <el-table-column prop="notes" label="备注" min-width="220" />
       </el-table>
     </el-card>
   </el-space>
 
-  <el-dialog v-model="showFollowupDialog" title="新增跟进" width="520px">
+  <el-dialog v-model="showFollowupDialog" title="新增开发跟进" width="720px">
     <el-form label-position="top">
       <el-row :gutter="12">
-        <el-col :span="12">
+        <el-col :span="6">
           <el-form-item label="跟进日期">
             <FlexibleDateInput v-model="followupForm.followup_at" :empty-value="''" />
           </el-form-item>
         </el-col>
-        <el-col :span="12">
+        <el-col :span="6">
+          <el-form-item label="等级">
+            <el-select v-model="followupForm.grade" @change="syncReminderFromGrade">
+              <el-option
+                v-for="item in leadGradeOptions"
+                :key="`lead-detail-grade-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="提醒值">
+            <el-select v-model="followupForm.reminder_value" @change="syncReminderDate">
+              <el-option
+                v-for="item in leadReminderOptions"
+                :key="`lead-detail-reminder-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
           <el-form-item label="下次提醒">
             <FlexibleDateInput v-model="followupForm.next_reminder_at" clearable />
           </el-form-item>

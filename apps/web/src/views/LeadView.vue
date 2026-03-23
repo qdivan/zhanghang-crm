@@ -33,8 +33,11 @@ import {
   type LeadRedevelopForm,
 } from "./lead/forms";
 import {
-  sortLeadRows,
-} from "./lead/viewMeta";
+  findExactLeadCustomer,
+  searchLeadCustomers,
+  type LeadCustomerSearchItem,
+} from "./lead/customerSearch";
+import { getDefaultReminderValueForGrade, sortLeadRows } from "./lead/viewMeta";
 
 type FollowupItem = {
   id: number;
@@ -44,6 +47,7 @@ type FollowupItem = {
   next_reminder_at: string | null;
   notes: string;
   created_by: number;
+  created_by_username: string;
   created_at: string;
 };
 
@@ -51,15 +55,6 @@ type UserLite = {
   id: number;
   username: string;
   role: string;
-};
-
-type CustomerSearchItem = {
-  id: number;
-  name: string;
-  contact_name: string;
-  phone: string;
-  assigned_accountant_id: number;
-  accountant_username: string;
 };
 
 const auth = useAuthStore();
@@ -83,7 +78,7 @@ const converting = ref(false);
 const creatingConvertBilling = ref(false);
 const creatingRedevelopLead = ref(false);
 const redevelopSearchLoading = ref(false);
-const redevelopCustomerOptions = ref<CustomerSearchItem[]>([]);
+const redevelopCustomerOptions = ref<LeadCustomerSearchItem[]>([]);
 const redevelopForm = reactive<LeadRedevelopForm>(createLeadRedevelopForm());
 const convertForm = reactive<LeadConvertForm>(createLeadConvertForm());
 const convertBillingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)]);
@@ -103,9 +98,10 @@ async function fetchLeads() {
         status: filters.status || undefined,
       },
     });
+    const activeLeadRows = resp.data.filter((item) => item.status !== "CONVERTED");
     const filtered = filters.template_type
-      ? resp.data.filter((item) => item.template_type === filters.template_type)
-      : resp.data;
+      ? activeLeadRows.filter((item) => item.template_type === filters.template_type)
+      : activeLeadRows;
     rows.value = sortLeadRows(filtered);
   } catch (error) {
     ElMessage.error("获取线索失败");
@@ -121,8 +117,21 @@ async function createLead() {
   }
 
   try {
+    let autoLinkedCustomerName = "";
+    if (!leadForm.related_customer_id) {
+      const exactCustomer = await findExactLeadCustomer(leadForm.name);
+      if (exactCustomer) {
+        leadForm.related_customer_id = exactCustomer.id;
+        autoLinkedCustomerName = exactCustomer.name;
+      }
+    }
+
     await apiClient.post("/leads", leadForm);
-    ElMessage.success("线索已创建");
+    ElMessage.success(
+      autoLinkedCustomerName
+        ? `线索已创建，已自动关联现有客户：${autoLinkedCustomerName}`
+        : "线索已创建",
+    );
     showLeadDialog.value = false;
     resetLeadForm();
     await fetchLeads();
@@ -164,10 +173,7 @@ async function searchRedevelopCustomers(keyword: string) {
   }
   redevelopSearchLoading.value = true;
   try {
-    const resp = await apiClient.get<CustomerSearchItem[]>("/customers", {
-      params: { keyword: q },
-    });
-    redevelopCustomerOptions.value = resp.data.slice(0, 20);
+    redevelopCustomerOptions.value = await searchLeadCustomers(q);
   } catch (error) {
     ElMessage.error("搜索客户失败");
     redevelopCustomerOptions.value = [];
@@ -209,8 +215,11 @@ async function createRedevelopLead() {
 }
 
 function openFollowupDialog(lead: LeadItem) {
+  const grade = lead.grade || "意向中";
   Object.assign(followupForm, createLeadFollowupForm(todayInBrowserTimeZone()), {
     lead_id: lead.id,
+    grade,
+    reminder_value: lead.reminder_value || getDefaultReminderValueForGrade(grade),
     next_reminder_at: lead.next_reminder_at,
   });
   showFollowupDialog.value = true;
@@ -224,7 +233,7 @@ async function submitFollowup() {
 
   try {
     await apiClient.post(`/leads/${followupForm.lead_id}/followups`, followupForm);
-    ElMessage.success("跟进记录已保存");
+    ElMessage.success("开发跟进已保存");
     showFollowupDialog.value = false;
     await fetchLeads();
   } catch (error) {
