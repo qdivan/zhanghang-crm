@@ -390,19 +390,19 @@ onMounted(fetchDetail);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
-    <el-card shadow="never">
-      <el-space class="action-bar" wrap>
-        <el-button :icon="ArrowLeft" @click="goBack">{{ backTarget.label }}</el-button>
-        <el-button :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
-        <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
+  <el-space direction="vertical" fill :size="10">
+    <section class="customer-topbar">
+      <el-button :icon="ArrowLeft" size="small" @click="goBack">{{ backTarget.label }}</el-button>
+      <div class="customer-topbar-actions">
+        <el-button size="small" :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
+        <el-button size="small" type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
           新增记录
         </el-button>
         <el-dropdown
           :disabled="!detail || !canWriteCustomer || templateApplying"
           @command="applyCustomerTemplate"
         >
-          <el-button :loading="templateApplying">
+          <el-button size="small" :loading="templateApplying">
             套用模板
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
@@ -412,18 +412,21 @@ onMounted(fetchDetail);
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button :disabled="!detail" @click="openLeadDetail">查看开发来源</el-button>
-      </el-space>
-    </el-card>
+        <el-button size="small" :disabled="!detail" @click="openLeadDetail">查看开发来源</el-button>
+      </div>
+    </section>
 
-    <el-card v-loading="loading" shadow="never">
+    <el-card v-loading="loading" shadow="never" class="customer-detail-card">
       <template #header>
         <div class="head">
-          <span>客户档案</span>
-          <el-space v-if="detail" class="meta-tags" wrap>
-            <el-tag type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
-            <el-tag type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
-            <el-tag effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
+          <div class="head-copy-block">
+            <span>客户档案</span>
+            <div class="head-copy">这里只看成单后的客户信息和完整时间线。</div>
+          </div>
+          <el-space v-if="detail" class="meta-tags" wrap size="8">
+            <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+            <el-tag size="small" type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
+            <el-tag size="small" effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
           </el-space>
         </div>
       </template>
@@ -528,11 +531,14 @@ onMounted(fetchDetail);
       </template>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="timeline-card">
       <template #header>
         <div class="head">
-          <span>客户时间线</span>
-          <el-tag type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
+          <div class="head-copy-block">
+            <span>客户时间线</span>
+            <div class="head-copy">按日期查看成单前后记录、收款、执行和客户事项。</div>
+          </div>
+          <el-tag size="small" type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
         </div>
       </template>
       <div v-if="isMobile" class="mobile-record-list">
@@ -581,7 +587,7 @@ onMounted(fetchDetail);
           </div>
         </div>
       </div>
-      <el-table v-else :data="detail?.timeline ?? []" stripe border>
+      <el-table v-else :data="detail?.timeline ?? []" stripe border size="small" class="timeline-table">
         <el-table-column prop="occurred_at" label="日期" width="120" />
         <el-table-column label="类型" width="110">
           <template #default="{ row }">
@@ -590,26 +596,41 @@ onMounted(fetchDetail);
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="title" label="事项" width="130" />
-        <el-table-column prop="content" label="内容" min-width="260" />
-        <el-table-column label="状态" width="120">
+        <el-table-column label="记录" min-width="320" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag size="small" :type="timelineStatusTag(row.status)" effect="plain">
-              {{ timelineStatusLabel(row.status) }}
-            </el-tag>
+            <div class="timeline-summary-cell">
+              <div class="timeline-summary-title">{{ row.title }}</div>
+              <div class="timeline-summary-content">{{ row.content || "-" }}</div>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column prop="reminder_at" label="提醒" width="120" />
-        <el-table-column prop="completed_at" label="办结" width="120" />
+        <el-table-column label="状态 / 节点" width="170">
+          <template #default="{ row }">
+            <div class="timeline-state-cell">
+              <el-tag size="small" :type="timelineStatusTag(row.status)" effect="plain">
+                {{ timelineStatusLabel(row.status) }}
+              </el-tag>
+              <div v-if="row.reminder_at" class="timeline-subtext">提醒 {{ row.reminder_at }}</div>
+              <div v-if="row.completed_at" class="timeline-subtext">办结 {{ row.completed_at }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="金额" width="100">
           <template #default="{ row }">
             {{ row.amount ?? "-" }}
           </template>
         </el-table-column>
-        <el-table-column prop="actor_username" label="记录人" width="110" />
-        <el-table-column prop="result" label="结果" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="extra" label="补充" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="actor_username" label="记录人" width="100" />
+        <el-table-column label="结果 / 备注" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="timeline-summary-cell">
+              <div class="timeline-summary-content">{{ row.result || row.note || row.extra || "-" }}</div>
+              <div v-if="row.result && (row.note || row.extra)" class="timeline-subtext">
+                {{ row.note || row.extra }}
+              </div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
             <el-button v-if="canCompleteTimeline(row)" link type="primary" @click="openCompleteDialog(row)">
@@ -844,6 +865,22 @@ onMounted(fetchDetail);
 </template>
 
 <style scoped>
+.customer-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.customer-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .head {
   display: flex;
   justify-content: space-between;
@@ -851,27 +888,44 @@ onMounted(fetchDetail);
   gap: 12px;
 }
 
+.head-copy-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.head-copy {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6b7280;
+}
+
 .meta-tags {
   justify-content: flex-end;
+}
+
+.customer-detail-card,
+.timeline-card {
+  border-color: #dfe6e8;
 }
 
 .detail-compact-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .detail-compact-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .detail-compact-item {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fafbfc;
 }
 
@@ -884,15 +938,15 @@ onMounted(fetchDetail);
 }
 
 .detail-compact-label {
-  margin-bottom: 4px;
-  font-size: 12px;
+  margin-bottom: 3px;
+  font-size: 11px;
   line-height: 1.2;
   color: #6b7280;
 }
 
 .detail-compact-value {
-  font-size: 15px;
-  line-height: 1.35;
+  font-size: 14px;
+  line-height: 1.3;
   color: #111827;
   word-break: break-word;
 }
@@ -924,28 +978,62 @@ onMounted(fetchDetail);
 .detail-long-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .detail-long-row {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #ffffff;
 }
 
 .detail-long-row-label {
-  margin-bottom: 4px;
-  font-size: 12px;
+  margin-bottom: 3px;
+  font-size: 11px;
   line-height: 1.2;
   color: #6b7280;
 }
 
 .detail-long-row-value {
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.4;
   color: #111827;
   word-break: break-word;
+}
+
+.timeline-table :deep(.el-table__cell) {
+  padding: 8px 0;
+}
+
+.timeline-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.timeline-summary-content {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4b5563;
+}
+
+.timeline-state-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-subtext {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #6b7280;
 }
 
 @media (max-width: 900px) {
@@ -954,8 +1042,14 @@ onMounted(fetchDetail);
     align-items: flex-start;
   }
 
-  .action-bar {
+  .customer-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .customer-topbar-actions {
     width: 100%;
+    justify-content: flex-start;
   }
 
   .detail-mobile-stack {

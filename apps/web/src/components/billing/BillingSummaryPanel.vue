@@ -57,146 +57,191 @@ const overdueCount = computed(() =>
     return days !== null && days < 0;
   }).length,
 );
+
+const summaryCards = computed(() => [
+  { label: "收费单数", value: props.summary.total_records },
+  { label: "应收合计", value: visibleReceivableTotal.value },
+  { label: "未收合计", value: visibleOutstandingTotal.value, accent: true },
+  { label: "7天内到期", value: dueSoonCount.value },
+  { label: "已逾期", value: overdueCount.value, danger: true },
+]);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
-    <div v-if="isMobile" class="summary-grid-mobile">
-      <el-card shadow="never" class="summary-mobile-card">
-        <div class="summary-mobile-label">收费单数</div>
-        <div class="summary-mobile-value">{{ props.summary.total_records }}</div>
-      </el-card>
-      <el-card shadow="never" class="summary-mobile-card">
-        <div class="summary-mobile-label">应收合计</div>
-        <div class="summary-mobile-value">{{ visibleReceivableTotal }}</div>
-      </el-card>
-      <el-card shadow="never" class="summary-mobile-card">
-        <div class="summary-mobile-label">未收合计</div>
-        <div class="summary-mobile-value">{{ visibleOutstandingTotal }}</div>
-      </el-card>
-      <el-card shadow="never" class="summary-mobile-card">
-        <div class="summary-mobile-label">7天内到期</div>
-        <div class="summary-mobile-value">{{ dueSoonCount }}</div>
-      </el-card>
-      <el-card shadow="never" class="summary-mobile-card">
-        <div class="summary-mobile-label">已逾期</div>
-        <div class="summary-mobile-value">{{ overdueCount }}</div>
-      </el-card>
+  <section class="summary-panel">
+    <div class="summary-strip" :class="{ mobile: isMobile }">
+      <article
+        v-for="item in summaryCards"
+        :key="item.label"
+        class="summary-stat"
+        :class="{ accent: item.accent, danger: item.danger }"
+      >
+        <span class="summary-stat-label">{{ item.label }}</span>
+        <strong class="summary-stat-value">{{ item.value }}</strong>
+      </article>
     </div>
-    <el-row v-else :gutter="12">
-      <el-col :xs="24" :md="6">
-        <el-card shadow="never">
-          <el-statistic title="收费单数" :value="props.summary.total_records" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="6">
-        <el-card shadow="never">
-          <el-statistic title="应收合计" :value="visibleReceivableTotal" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="6">
-        <el-card shadow="never">
-          <el-statistic title="未收合计" :value="visibleOutstandingTotal" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="3">
-        <el-card shadow="never">
-          <el-statistic title="7天内到期" :value="dueSoonCount" />
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="3">
-        <el-card shadow="never">
-          <el-statistic title="已逾期" :value="overdueCount" />
-        </el-card>
-      </el-col>
-    </el-row>
 
-    <el-row :gutter="12">
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header>付款方式分布</template>
-          <el-space wrap>
-            <el-tag
-              v-for="item in props.paymentMethodDistribution"
-              :key="item.payment_method"
-              type="info"
-              effect="plain"
-            >
-              {{ item.payment_method }}：{{ item.count }}
-            </el-tag>
-          </el-space>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :md="12">
-        <el-card shadow="never">
-          <template #header>状态分布</template>
-          <el-space wrap>
-            <el-tag
-              v-for="item in props.summary.status_distribution"
-              :key="item.status"
-              :type="statusTagType(item.status)"
-              effect="plain"
-            >
-              {{ statusLabel(item.status) }}：{{ item.count }}
-            </el-tag>
-          </el-space>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-card v-if="props.canViewReceiptLedger" shadow="never">
-      <template #header>
-        <div class="summary-header-row">
-          <span>到账账户汇总</span>
-          <el-button text type="primary" @click="emit('open-receipt-ledger')">到账核对</el-button>
+    <div class="summary-grid" :class="{ mobile: isMobile }">
+      <section class="summary-block">
+        <div class="summary-block-head">
+          <span>付款方式</span>
+          <small>{{ props.paymentMethodDistribution.length }}项</small>
         </div>
-      </template>
-      <el-space wrap>
-        <el-tag
-          v-for="item in props.receiptAccountDistribution"
-          :key="item.receipt_account"
-          type="success"
-          effect="plain"
-        >
-          {{ item.receipt_account }}：{{ item.payment_count }}笔 / {{ item.total_amount }}
-        </el-tag>
-      </el-space>
-    </el-card>
-  </el-space>
+        <div class="summary-tag-list">
+          <el-tag
+            v-for="item in props.paymentMethodDistribution"
+            :key="item.payment_method"
+            size="small"
+            type="info"
+            effect="plain"
+          >
+            {{ item.payment_method }} · {{ item.count }}
+          </el-tag>
+        </div>
+      </section>
+
+      <section class="summary-block">
+        <div class="summary-block-head">
+          <span>台账状态</span>
+          <small>{{ props.summary.status_distribution.length }}项</small>
+        </div>
+        <div class="summary-tag-list">
+          <el-tag
+            v-for="item in props.summary.status_distribution"
+            :key="item.status"
+            size="small"
+            :type="statusTagType(item.status)"
+            effect="plain"
+          >
+            {{ statusLabel(item.status) }} · {{ item.count }}
+          </el-tag>
+        </div>
+      </section>
+
+      <section v-if="props.canViewReceiptLedger" class="summary-block receipt-block">
+        <div class="summary-block-head with-action">
+          <div>
+            <span>到账账户</span>
+            <small>{{ props.receiptAccountDistribution.length }}项</small>
+          </div>
+          <el-button text size="small" type="primary" @click="emit('open-receipt-ledger')">到账核对</el-button>
+        </div>
+        <div class="summary-tag-list">
+          <el-tag
+            v-for="item in props.receiptAccountDistribution"
+            :key="item.receipt_account"
+            size="small"
+            type="success"
+            effect="plain"
+          >
+            {{ item.receipt_account }} · {{ item.payment_count }}笔 / {{ item.total_amount }}
+          </el-tag>
+        </div>
+      </section>
+    </div>
+  </section>
 </template>
 
 <style scoped>
-.summary-grid-mobile {
+.summary-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.summary-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.summary-mobile-card {
-  border-radius: 14px;
+.summary-strip.mobile {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.summary-mobile-label {
-  font-size: 11px;
+.summary-stat {
+  padding: 12px 14px;
+  border: 1px solid #dfe6e8;
+  background: #ffffff;
+}
+
+.summary-stat.accent {
+  background: #f8fbfb;
+}
+
+.summary-stat.danger {
+  background: #fff8f8;
+}
+
+.summary-stat-label {
+  display: block;
+  font-size: 12px;
   color: #6b7280;
 }
 
-.summary-mobile-value {
+.summary-stat-value {
+  display: block;
   margin-top: 8px;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.1;
-  color: #111827;
+  font-size: 24px;
+  line-height: 1;
+  color: #172330;
 }
 
-.summary-header-row {
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-grid.mobile {
+  grid-template-columns: 1fr;
+}
+
+.summary-block {
+  border: 1px solid #dfe6e8;
+  background: #ffffff;
+  padding: 12px 14px;
+}
+
+.summary-block-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
 }
 
-@media (max-width: 420px) {
-  .summary-grid-mobile {
+.summary-block-head small {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.summary-block-head.with-action {
+  align-items: flex-start;
+}
+
+.summary-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .summary-stat {
+    padding: 10px 12px;
+  }
+
+  .summary-stat-value {
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .summary-strip.mobile {
     grid-template-columns: 1fr 1fr;
   }
 }

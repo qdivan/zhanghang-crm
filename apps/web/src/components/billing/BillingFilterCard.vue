@@ -32,12 +32,24 @@ const hasAdvancedValue = computed(() =>
 </script>
 
 <template>
-  <el-card shadow="never">
-    <el-form inline @submit.prevent="emit('query')" class="billing-filter-form">
+  <el-card shadow="never" class="billing-filter-card">
+    <template #header>
+      <div class="filter-head">
+        <div>
+          <div class="filter-title">筛选条件</div>
+          <div class="filter-copy">先按客户、账务月份、入账账户定位，再处理收费单和提醒。</div>
+        </div>
+        <el-button text size="small" @click="showAdvancedFilters = !showAdvancedFilters">
+          {{ showAdvancedFilters ? "收起高级筛选" : hasAdvancedValue ? "高级筛选（已选）" : "高级筛选" }}
+        </el-button>
+      </div>
+    </template>
+
+    <el-form inline class="billing-filter-form" @submit.prevent="emit('query')">
       <el-form-item label="关键词">
         <el-input
           v-model="props.filters.keyword"
-          placeholder="公司/项目/备注"
+          placeholder="公司 / 项目 / 备注"
           clearable
           @keyup.enter="emit('query')"
         />
@@ -99,6 +111,7 @@ const hasAdvancedValue = computed(() =>
           />
         </el-select>
       </el-form-item>
+
       <el-form-item v-show="showAdvancedFilters" label="联系人">
         <el-input
           v-model="props.filters.contact_name"
@@ -149,22 +162,13 @@ const hasAdvancedValue = computed(() =>
           />
         </el-select>
       </el-form-item>
-      <el-form-item>
-        <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
-          {{
-            showAdvancedFilters
-              ? "收起高级筛选"
-              : hasAdvancedValue
-                ? "高级筛选（已选）"
-                : "高级筛选"
-          }}
-        </el-button>
-      </el-form-item>
-      <el-form-item>
+      <el-form-item class="billing-filter-actions">
         <div class="action-group">
-          <el-button @click="emit('query')">查询</el-button>
-          <el-button type="primary" @click="emit('create')">新增收费单</el-button>
-          <el-button v-if="props.canManageGrant" type="primary" plain @click="emit('grant')">数据授权配置</el-button>
+          <el-button size="small" @click="emit('query')">查询</el-button>
+          <el-button size="small" type="primary" @click="emit('create')">新增收费单</el-button>
+          <el-button v-if="props.canManageGrant" size="small" type="primary" plain @click="emit('grant')">
+            数据授权配置
+          </el-button>
         </div>
       </el-form-item>
     </el-form>
@@ -172,6 +176,53 @@ const hasAdvancedValue = computed(() =>
 </template>
 
 <style scoped>
+.billing-filter-card {
+  border-color: #dfe6e8;
+}
+
+.filter-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filter-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.filter-copy {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.billing-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 8px;
+}
+
+.billing-filter-form :deep(.el-form-item) {
+  margin-right: 8px;
+  margin-bottom: 10px;
+}
+
+.billing-filter-form :deep(.el-form-item__label) {
+  padding-bottom: 3px;
+  font-size: 12px;
+  color: #5f6f7a;
+}
+
+.billing-filter-form :deep(.el-input__wrapper),
+.billing-filter-form :deep(.el-select__wrapper),
+.billing-filter-form :deep(.el-date-editor.el-input__wrapper) {
+  min-height: 34px;
+}
+
 .label-with-help {
   display: inline-flex;
   align-items: center;
@@ -180,8 +231,12 @@ const hasAdvancedValue = computed(() =>
 
 .help-icon {
   color: #909399;
-  font-size: 14px;
+  font-size: 13px;
   cursor: help;
+}
+
+.billing-filter-actions {
+  margin-left: auto;
 }
 
 .action-group {
@@ -191,13 +246,18 @@ const hasAdvancedValue = computed(() =>
 }
 
 @media (max-width: 900px) {
-  .billing-filter-form {
-    display: flex;
-    flex-wrap: wrap;
+  .filter-head {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .billing-filter-form :deep(.el-form-item) {
-    margin-right: 12px;
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .billing-filter-actions {
+    margin-left: 0;
   }
 
   .action-group {

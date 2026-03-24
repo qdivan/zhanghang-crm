@@ -71,24 +71,32 @@ onMounted(fetchPublicItems);
 
 <template>
   <div class="public-library-page">
-    <section class="public-library-hero">
-      <div class="public-library-back">
+    <section class="public-library-shell">
+      <header class="public-library-topbar">
         <RouterLink to="/login" class="public-link">
           <el-icon><ArrowLeft /></el-icon>
           <span>返回登录</span>
         </RouterLink>
-      </div>
+        <div class="public-library-brandmark">账航·一帆财税</div>
+      </header>
 
-      <div class="public-library-hero-inner">
-        <div class="public-library-brand">账航·一帆财税</div>
-        <h1 class="public-library-title">公开资料库</h1>
-        <p class="public-library-copy">
-          这里放可以直接给客户看的模板、资料清单和办事说明。内部方法仍留在系统内维护。
-        </p>
-      </div>
-    </section>
+      <section class="public-library-intro">
+        <div class="public-library-intro-copy">
+          <div class="public-library-eyebrow">公开资料</div>
+          <h1 class="public-library-title">公开资料库</h1>
+          <p class="public-library-copy">
+            放可以直接发给客户的模板、资料清单和基础说明。内部方法继续留在系统内维护。
+          </p>
+        </div>
+        <div class="public-library-intro-meta">
+          <div class="public-library-stat">
+            <span class="public-library-stat-label">当前公开条目</span>
+            <strong class="public-library-stat-value">{{ rows.length }}</strong>
+          </div>
+          <div class="public-library-stat-note">只展示已标记为“可公开到官网”的内容。</div>
+        </div>
+      </section>
 
-    <main class="public-library-main">
       <section class="public-library-toolbar">
         <div class="public-library-search">
           <el-input
@@ -160,7 +168,7 @@ onMounted(fetchPublicItems);
           <div v-if="row.notes" class="public-article-note">补充：{{ row.notes }}</div>
         </article>
       </section>
-    </main>
+    </section>
   </div>
 </template>
 
@@ -168,71 +176,132 @@ onMounted(fetchPublicItems);
 .public-library-page {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 12% 18%, rgba(230, 175, 72, 0.14), transparent 34%),
-    radial-gradient(circle at 82% 22%, rgba(113, 173, 198, 0.18), transparent 28%),
-    linear-gradient(180deg, #081a26 0%, #0d2230 38%, #f4efe6 38%, #f4efe6 100%);
-  color: #10202f;
+    radial-gradient(circle at top left, rgba(93, 138, 160, 0.09), transparent 24%),
+    linear-gradient(180deg, #f7fafb 0%, #f4f6f8 100%);
+  color: #1f2937;
 }
 
-.public-library-hero {
-  padding: 28px 32px 40px;
-  color: #f4efe6;
+.public-library-shell {
+  width: min(1180px, calc(100vw - 48px));
+  margin: 0 auto;
+  padding: 24px 0 48px;
 }
 
-.public-library-back {
-  margin-bottom: 48px;
+.public-library-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
 }
 
 .public-link {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: rgba(244, 239, 230, 0.82);
+  color: #53707f;
   text-decoration: none;
+  font-size: 14px;
 }
 
 .public-link:hover {
-  color: #ffffff;
+  color: #264653;
 }
 
-.public-library-hero-inner {
-  max-width: 720px;
+.public-library-brandmark {
+  border-radius: 999px;
+  background: #eef3f5;
+  border: 1px solid #dde7eb;
+  color: #365868;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.public-library-brand {
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
-  font-size: 16px;
-  letter-spacing: 0.16em;
+.public-library-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.8fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 16px;
+}
+
+.public-library-intro-copy,
+.public-library-intro-meta,
+.public-library-toolbar,
+.public-library-list {
+  border: 1px solid #e5eaee;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 18px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.04);
+}
+
+.public-library-intro-copy {
+  padding: 22px 24px;
+}
+
+.public-library-eyebrow {
+  color: #5c7b88;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(244, 239, 230, 0.66);
 }
 
 .public-library-title {
-  margin: 14px 0 10px;
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
-  font-size: clamp(40px, 8vw, 76px);
-  line-height: 0.98;
+  margin: 10px 0 8px;
+  font-size: clamp(34px, 4vw, 52px);
+  line-height: 1.04;
   letter-spacing: -0.03em;
+  color: #132634;
 }
 
 .public-library-copy {
-  max-width: 500px;
+  max-width: 620px;
   margin: 0;
-  color: rgba(244, 239, 230, 0.8);
-  font-size: 15px;
-  line-height: 1.8;
+  color: #60717e;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
-.public-library-main {
-  padding: 28px 32px 56px;
+.public-library-intro-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 22px 24px;
+  background: linear-gradient(180deg, rgba(247, 250, 251, 0.98), rgba(241, 246, 248, 0.98));
+}
+
+.public-library-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.public-library-stat-label {
+  color: #6d808d;
+  font-size: 12px;
+}
+
+.public-library-stat-value {
+  font-size: 34px;
+  line-height: 1;
+  color: #183546;
+}
+
+.public-library-stat-note {
+  color: #718391;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .public-library-toolbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
 }
 
 .public-library-search {
@@ -246,28 +315,28 @@ onMounted(fetchPublicItems);
 }
 
 .public-tab {
-  border: 1px solid rgba(16, 32, 47, 0.12);
-  background: rgba(255, 255, 255, 0.62);
-  color: #254053;
+  border: 1px solid #d9e3e8;
+  background: #f7fafb;
+  color: #476473;
   border-radius: 999px;
-  padding: 9px 14px;
+  padding: 8px 13px;
   cursor: pointer;
-  transition: transform 160ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
 }
 
 .public-tab:hover {
-  transform: translateY(-1px);
-  border-color: rgba(16, 32, 47, 0.24);
+  border-color: #9cb4bf;
+  color: #2e4d5d;
 }
 
 .public-tab.active {
-  background: #10202f;
-  color: #f4efe6;
-  border-color: #10202f;
+  background: #2e5563;
+  color: #f8fbfc;
+  border-color: #2e5563;
 }
 
 .public-library-list {
-  padding-top: 12px;
+  padding: 18px 20px 8px;
 }
 
 .public-library-list-head {
@@ -276,35 +345,36 @@ onMounted(fetchPublicItems);
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(16, 32, 47, 0.12);
+  border-bottom: 1px solid #e8edf0;
 }
 
 .public-library-section-title {
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
-  font-size: 28px;
-  line-height: 1.1;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: #1c3140;
 }
 
 .public-library-section-copy {
-  margin-top: 8px;
-  color: #596b79;
+  margin-top: 6px;
+  color: #677884;
   font-size: 13px;
 }
 
 .public-library-count {
-  color: #596b79;
+  color: #6a7e8b;
   font-size: 13px;
 }
 
 .public-empty {
-  padding: 28px 0;
-  color: #596b79;
+  padding: 28px 2px;
+  color: #6b7c88;
   font-size: 14px;
 }
 
 .public-article {
-  padding: 22px 0;
-  border-bottom: 1px solid rgba(16, 32, 47, 0.1);
+  padding: 18px 2px;
+  border-bottom: 1px solid #edf1f3;
 }
 
 .public-article-meta {
@@ -318,28 +388,28 @@ onMounted(fetchPublicItems);
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  background: rgba(16, 32, 47, 0.08);
-  color: #163042;
+  background: #edf4f6;
+  color: #305261;
   padding: 4px 10px;
   font-size: 12px;
 }
 
 .public-category {
-  color: #6a7885;
+  color: #738490;
   font-size: 12px;
 }
 
 .public-article-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.25;
-  color: #10202f;
+  color: #183243;
 }
 
 .public-article-content {
   max-width: 860px;
-  margin: 12px 0 0;
-  color: #314552;
+  margin: 10px 0 0;
+  color: #364955;
   line-height: 1.8;
 }
 
@@ -349,25 +419,43 @@ onMounted(fetchPublicItems);
   flex-wrap: wrap;
   gap: 16px;
   margin-top: 12px;
-  color: #596b79;
+  color: #61737f;
   font-size: 13px;
 }
 
 @media (max-width: 900px) {
-  .public-library-hero,
-  .public-library-main {
-    padding-left: 18px;
-    padding-right: 18px;
+  .public-library-shell {
+    width: calc(100vw - 24px);
+    padding: 16px 0 28px;
   }
 
-  .public-library-back {
-    margin-bottom: 28px;
-  }
-
+  .public-library-topbar,
   .public-library-toolbar,
   .public-library-list-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .public-library-intro {
+    grid-template-columns: 1fr;
+  }
+
+  .public-library-intro-copy,
+  .public-library-intro-meta,
+  .public-library-toolbar,
+  .public-library-list {
+    border-radius: 16px;
+  }
+
+  .public-library-intro-copy,
+  .public-library-intro-meta,
+  .public-library-toolbar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .public-library-title {
+    font-size: 34px;
   }
 
   .public-library-search {
@@ -384,12 +472,16 @@ onMounted(fetchPublicItems);
     white-space: nowrap;
   }
 
+  .public-library-list {
+    padding: 16px;
+  }
+
   .public-library-section-title {
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .public-article-title {
-    font-size: 20px;
+    font-size: 18px;
   }
 }
 </style>

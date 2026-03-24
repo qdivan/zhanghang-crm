@@ -107,9 +107,7 @@ watch(
       <div>
         <div class="receipt-eyebrow">到账核对</div>
         <h1 class="receipt-title">按入账账户核对收款流水</h1>
-        <p class="receipt-copy">
-          {{ scopeLabel }}。这里专门看各账户收了几笔、合计多少、分别收了哪些公司的款。
-        </p>
+        <p class="receipt-copy">{{ scopeLabel }}。左侧按账户切换，右侧核对收款明细。</p>
       </div>
       <div class="receipt-header-stats">
         <div class="receipt-stat-block">
@@ -151,8 +149,8 @@ watch(
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="fetchReceiptLedger">查询</el-button>
-          <el-button @click="resetFilters">重置</el-button>
+          <el-button size="small" type="primary" :loading="loading" @click="fetchReceiptLedger">查询</el-button>
+          <el-button size="small" @click="resetFilters">重置</el-button>
         </el-form-item>
       </el-form>
     </section>
@@ -161,17 +159,13 @@ watch(
       <aside class="receipt-sidebar">
         <div class="receipt-sidebar-head">
           <div class="receipt-sidebar-title">账户汇总</div>
-          <div class="receipt-sidebar-copy">点账户名可直接切换到该账户的到账流水。</div>
+          <div class="receipt-sidebar-copy">点账户名直接切换到账流水。</div>
         </div>
 
-        <button
-          class="receipt-account-item"
-          :class="{ active: receiptAccount === '' }"
-          @click="applyAccount('')"
-        >
+        <button class="receipt-account-item" :class="{ active: receiptAccount === '' }" @click="applyAccount('')">
           <div>
             <div class="receipt-account-title">全部账户</div>
-            <div class="receipt-account-note">查看当前筛选范围内的全部到账</div>
+            <div class="receipt-account-note">当前筛选范围内的全部到账</div>
           </div>
           <strong class="receipt-account-total">{{ data?.total_received ?? 0 }}</strong>
         </button>
@@ -185,9 +179,7 @@ watch(
         >
           <div>
             <div class="receipt-account-title">{{ item.receipt_account }}</div>
-            <div class="receipt-account-note">
-              {{ item.payment_count }} 笔 · 最近 {{ item.last_received_at || '-' }}
-            </div>
+            <div class="receipt-account-note">{{ item.payment_count }} 笔 · 最近 {{ item.last_received_at || '-' }}</div>
           </div>
           <strong class="receipt-account-total">{{ item.total_received }}</strong>
         </button>
@@ -197,9 +189,9 @@ watch(
         <div class="receipt-main-head">
           <div>
             <div class="receipt-main-title">{{ selectedAccountLabel }}</div>
-            <div class="receipt-main-copy">贷方表示实收金额；累计入账用于核对该筛选范围下的到账累积。</div>
+            <div class="receipt-main-copy">贷方表示实收，累计入账用于当前筛选范围的核对。</div>
           </div>
-          <el-tag type="success" effect="plain">{{ visibleEntries.length }} 条流水</el-tag>
+          <el-tag size="small" type="success" effect="plain">{{ visibleEntries.length }} 条流水</el-tag>
         </div>
 
         <div v-if="isMobile" v-loading="loading" class="receipt-mobile-list">
@@ -221,19 +213,19 @@ watch(
           </article>
         </div>
 
-        <el-table v-else v-loading="loading" :data="visibleEntries" stripe border class="receipt-table">
-          <el-table-column prop="occurred_at" label="日期" width="120" />
-          <el-table-column label="凭证号" width="120">
+        <el-table v-else v-loading="loading" :data="visibleEntries" stripe border size="small" class="receipt-table">
+          <el-table-column prop="occurred_at" label="日期" width="108" />
+          <el-table-column label="凭证号" width="100">
             <template #default="{ row }">
               {{ buildVoucherNo(row) }}
             </template>
           </el-table-column>
-          <el-table-column prop="customer_name" label="公司名称" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="summary" label="摘要" min-width="280" show-overflow-tooltip />
-          <el-table-column prop="received_amount" label="贷方(收款)" width="120" />
-          <el-table-column prop="receipt_account" label="入账账户" width="120" />
-          <el-table-column prop="cumulative_received" label="累计入账" width="130" />
-          <el-table-column prop="actor_username" label="记录人" width="100" />
+          <el-table-column prop="customer_name" label="公司名称" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="received_amount" label="贷方(收款)" width="112" />
+          <el-table-column prop="receipt_account" label="入账账户" width="112" />
+          <el-table-column prop="cumulative_received" label="累计入账" width="118" />
+          <el-table-column prop="actor_username" label="记录人" width="92" />
         </el-table>
       </div>
     </section>
@@ -244,7 +236,7 @@ watch(
 .receipt-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .receipt-header,
@@ -258,9 +250,9 @@ watch(
 .receipt-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px;
-  padding: 22px 24px;
-  border-top: 3px solid #4d8096;
+  gap: 16px;
+  padding: 18px 20px;
+  border-top: 2px solid #4d8096;
 }
 
 .receipt-eyebrow {
@@ -271,48 +263,49 @@ watch(
 }
 
 .receipt-title {
-  margin: 6px 0 8px;
-  font-size: 30px;
-  line-height: 1.1;
+  margin: 4px 0 6px;
+  font-size: 24px;
+  line-height: 1.08;
   color: #172330;
 }
 
 .receipt-copy {
   margin: 0;
-  max-width: 760px;
+  max-width: 680px;
+  font-size: 13px;
+  line-height: 1.55;
   color: #61727e;
-  line-height: 1.7;
 }
 
 .receipt-header-stats {
   display: flex;
   align-items: stretch;
-  gap: 12px;
+  gap: 8px;
 }
 
 .receipt-stat-block {
-  min-width: 126px;
-  padding: 12px 14px;
+  min-width: 112px;
+  padding: 10px 12px;
   background: #f5f8f8;
   border: 1px solid #dde5e7;
 }
 
 .receipt-stat-label {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   color: #6c7b87;
 }
 
 .receipt-stat-value {
   display: block;
-  margin-top: 10px;
-  font-size: 24px;
+  margin-top: 8px;
+  font-size: 20px;
   line-height: 1;
   color: #132231;
 }
 
 .receipt-toolbar {
-  padding: 14px 16px 0;
+  padding: 12px 14px 2px;
 }
 
 .receipt-toolbar-form {
@@ -321,10 +314,26 @@ watch(
   align-items: center;
 }
 
+.receipt-toolbar-form :deep(.el-form-item) {
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+.receipt-toolbar-form :deep(.el-form-item__label) {
+  font-size: 12px;
+  color: #5f6f7a;
+}
+
+.receipt-toolbar-form :deep(.el-input__wrapper),
+.receipt-toolbar-form :deep(.el-select__wrapper),
+.receipt-toolbar-form :deep(.el-date-editor.el-input__wrapper) {
+  min-height: 34px;
+}
+
 .receipt-workspace {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 12px;
 }
 
 .receipt-workspace.mobile {
@@ -332,25 +341,25 @@ watch(
 }
 
 .receipt-sidebar {
-  padding: 16px;
+  padding: 12px 14px;
 }
 
 .receipt-sidebar-head {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .receipt-sidebar-title,
 .receipt-main-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #182635;
 }
 
 .receipt-sidebar-copy,
 .receipt-main-copy {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: #6c7b87;
 }
 
@@ -359,8 +368,8 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 10px;
+  padding: 10px 0;
   text-align: left;
   border: none;
   border-top: 1px solid #edf1f2;
@@ -373,24 +382,24 @@ watch(
 }
 
 .receipt-account-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .receipt-account-note {
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 11px;
   color: #71808b;
 }
 
 .receipt-account-total {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #1e4e64;
 }
 
 .receipt-main {
-  padding: 16px;
+  padding: 12px 14px;
 }
 
 .receipt-main-head {
@@ -398,17 +407,21 @@ watch(
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.receipt-table :deep(.el-table__cell) {
+  padding: 8px 0;
 }
 
 .receipt-mobile-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .receipt-mobile-item {
-  padding: 12px;
+  padding: 10px 12px;
   background: #f7f9f9;
   border: 1px solid #e4eaec;
 }
@@ -428,7 +441,7 @@ watch(
 .receipt-mobile-summary {
   margin-top: 4px;
   color: #647783;
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .receipt-mobile-amount {
@@ -440,8 +453,8 @@ watch(
 .receipt-mobile-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 10px;
+  gap: 6px 10px;
+  margin-top: 8px;
   font-size: 12px;
   color: #72818d;
 }
@@ -458,7 +471,7 @@ watch(
 
 @media (max-width: 640px) {
   .receipt-title {
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .receipt-header,
@@ -472,7 +485,7 @@ watch(
   }
 
   .receipt-stat-block {
-    flex: 1 1 calc(50% - 6px);
+    flex: 1 1 calc(50% - 4px);
     min-width: 0;
   }
 }

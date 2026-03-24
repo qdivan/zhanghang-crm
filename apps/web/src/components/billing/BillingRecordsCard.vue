@@ -62,28 +62,27 @@ function dueReminderTagType(row: BillingRecord): "success" | "warning" | "danger
 function mobileMetrics(row: BillingRecord) {
   return [
     { label: "应收期间", value: row.receivable_period_text || "-" },
-    { label: "应收", value: String(row.total_fee) },
-    { label: "实收", value: String(row.received_amount) },
-    { label: "未收", value: String(row.outstanding_amount) },
+    { label: "借方", value: String(row.total_fee) },
+    { label: "贷方", value: String(row.received_amount) },
+    { label: "余额", value: String(row.outstanding_amount) },
     { label: "到期提醒", value: dueReminderText(row) },
-    { label: "最近收款", value: row.latest_payment_at || "-" },
     { label: "入账账户", value: row.latest_receipt_account || "-" },
   ].filter((item) => item.value !== "-");
 }
 
-function handleMobileCommand(command: string, row: BillingRecord) {
-  if (command === "customer") emit("customer", row);
-  if (command === "ledger") emit("ledger", row);
-  if (command === "split") emit("split", row);
-  if (command === "execution") emit("execution", row);
-  if (command === "activity") emit("activity", row);
-  if (command === "assignment") emit("assignment", row);
-  if (command === "renew") emit("renew", row);
-  if (command === "terminate") emit("terminate", row);
+function desktopSummary(row: BillingRecord): string {
+  return [row.summary, row.charge_category, row.note].filter(Boolean).join(" · ") || "-";
 }
 
-function onMobileMenuCommand(command: { action: string; row: BillingRecord }) {
-  handleMobileCommand(command.action, command.row);
+function handleMenuCommand(command: { action: string; row: BillingRecord }) {
+  const { action, row } = command;
+  if (action === "ledger") emit("ledger", row);
+  if (action === "split") emit("split", row);
+  if (action === "execution") emit("execution", row);
+  if (action === "activity") emit("activity", row);
+  if (action === "assignment") emit("assignment", row);
+  if (action === "renew") emit("renew", row);
+  if (action === "terminate") emit("terminate", row);
 }
 
 function billingRowClassName({ row }: { row: BillingRecord }) {
@@ -92,14 +91,14 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
 </script>
 
 <template>
-  <el-card shadow="never">
+  <el-card shadow="never" class="billing-records-card">
     <template #header>
       <div class="table-head">
         <div>
           <div class="table-title">收费明细</div>
-          <div class="table-subtitle">这里显示当前账号可查看的收费单和到期提醒，点公司名称可展开往来账。</div>
+          <div class="table-subtitle">当前只看收费单、到期提醒、实收与余额；点公司名称可直接展开往来账。</div>
         </div>
-        <el-tag type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
+        <el-tag size="small" type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
     </template>
     <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
@@ -133,9 +132,8 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </div>
         </div>
 
-        <div v-if="row.summary || row.note" class="mobile-record-note">
-          <div v-if="row.summary">摘要：{{ row.summary }}</div>
-          <div v-if="row.note">备注：{{ row.note }}</div>
+        <div v-if="desktopSummary(row) !== '-'" class="mobile-record-note">
+          {{ desktopSummary(row) }}
         </div>
 
         <div class="mobile-actions">
@@ -144,14 +142,13 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
             催收/收款
           </el-button>
           <el-button size="small" type="warning" @click="emit('execution', row)">执行进度</el-button>
-          <el-dropdown trigger="click" @command="onMobileMenuCommand">
+          <el-dropdown trigger="click" @command="handleMenuCommand">
             <el-button size="small" plain>
               更多
               <el-icon><MoreFilled /></el-icon>
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item :command="{ action: 'customer', row }">往来账</el-dropdown-item>
                 <el-dropdown-item :command="{ action: 'split', row }" :disabled="!props.canWriteRecord(row)">分摊收款</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
@@ -169,90 +166,70 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
       :row-class-name="billingRowClassName"
       stripe
       border
+      size="small"
+      class="billing-table"
     >
-      <el-table-column prop="serial_no" label="序号" width="70" />
-      <el-table-column label="公司名称" min-width="140" show-overflow-tooltip>
+      <el-table-column prop="serial_no" label="序号" width="64" />
+      <el-table-column label="公司名称" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
           <el-button link type="primary" @click="emit('customer', row)">
             <span :class="{ 'active-customer-name': props.activeCustomerId && row.customer_id === props.activeCustomerId }">
-            {{ row.customer_name }}
+              {{ row.customer_name }}
             </span>
           </el-button>
         </template>
       </el-table-column>
-      <el-table-column
-        prop="receivable_period_text"
-        label="应收期间"
-        width="190"
-        show-overflow-tooltip
-      />
-      <el-table-column
-        label="应收项目"
-        min-width="220"
-        show-overflow-tooltip
-      >
+      <el-table-column prop="receivable_period_text" label="应收期间" width="146" show-overflow-tooltip />
+      <el-table-column label="摘要" min-width="250" show-overflow-tooltip>
         <template #default="{ row }">
-          {{ row.summary || row.charge_category || row.note || "-" }}
+          <div class="summary-cell">
+            <div class="summary-main">{{ row.summary || row.charge_category || '-' }}</div>
+            <div v-if="row.note" class="summary-note">{{ row.note }}</div>
+          </div>
         </template>
       </el-table-column>
-      <el-table-column prop="total_fee" label="借方(应收)" width="110" />
-      <el-table-column prop="received_amount" label="贷方(实收)" width="110" />
-      <el-table-column label="到期提醒" width="130">
+      <el-table-column prop="total_fee" label="借方" width="94" />
+      <el-table-column prop="received_amount" label="贷方" width="94" />
+      <el-table-column label="到期提醒" width="118">
         <template #default="{ row }">
           <el-tag size="small" :type="dueReminderTagType(row)" effect="plain">
             {{ dueReminderText(row) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column
-        prop="latest_payment_at"
-        label="最近收款日"
-        width="120"
-      />
-      <el-table-column
-        prop="latest_receipt_account"
-        label="入账账户"
-        width="120"
-        show-overflow-tooltip
-      />
-      <el-table-column prop="outstanding_amount" label="未收" width="80" />
-      <el-table-column
-        label="状态"
-        width="90"
-      >
+      <el-table-column prop="latest_payment_at" label="最近收款" width="112" />
+      <el-table-column prop="latest_receipt_account" label="入账账户" width="116" show-overflow-tooltip />
+      <el-table-column prop="outstanding_amount" label="余额" width="88" />
+      <el-table-column label="状态" width="88">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">
             {{ statusLabel(row.status) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column
-        prop="note"
-        label="备注"
-        min-width="160"
-        show-overflow-tooltip
-      />
-      <el-table-column label="操作" width="560">
+      <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <el-space>
+          <div class="table-actions">
             <el-button link type="info" @click="emit('ledger', row)">往来账</el-button>
-            <el-button link type="success" :disabled="!props.canWriteRecord(row)" @click="emit('split', row)">
-              分摊收款
-            </el-button>
-            <el-button link type="warning" @click="emit('execution', row)">执行进度</el-button>
             <el-button link type="primary" :disabled="!props.canWriteRecord(row)" @click="emit('activity', row)">
               催收/收款
             </el-button>
-            <el-button v-if="props.canManageAssignment" link type="success" @click="emit('assignment', row)">
-              分派执行
-            </el-button>
-            <el-button v-if="props.canManageLifecycle" link type="primary" @click="emit('renew', row)">
-              续费+1年
-            </el-button>
-            <el-button v-if="props.canManageLifecycle" link type="danger" @click="emit('terminate', row)">
-              提前终止
-            </el-button>
-          </el-space>
+            <el-button link type="warning" @click="emit('execution', row)">执行进度</el-button>
+            <el-dropdown trigger="click" @command="handleMenuCommand">
+              <el-button link type="success">
+                更多
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :command="{ action: 'split', row }" :disabled="!props.canWriteRecord(row)">分摊收款</el-dropdown-item>
+                  <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
+                  <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
+                  <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -260,6 +237,10 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
 </template>
 
 <style scoped>
+.billing-records-card {
+  border-color: #dfe6e8;
+}
+
 .table-head {
   display: flex;
   align-items: center;
@@ -268,15 +249,37 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
 }
 
 .table-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #111827;
 }
 
 .table-subtitle {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
   color: #6b7280;
+  line-height: 1.5;
+}
+
+.summary-cell {
+  line-height: 1.35;
+}
+
+.summary-main {
+  color: #111827;
+}
+
+.summary-note {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.table-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 10px;
 }
 
 .mobile-billing-title {
@@ -292,6 +295,14 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
 
 .active-customer-name {
   font-weight: 700;
+}
+
+.billing-table :deep(.el-table__cell) {
+  padding: 8px 0;
+}
+
+.billing-table :deep(.el-button.is-link) {
+  min-height: auto;
 }
 
 :deep(.billing-row-active td) {
