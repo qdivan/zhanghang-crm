@@ -12,6 +12,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+infra/env/*.env
 
 # IDE / OS
 .DS_Store
@@ -34,6 +35,7 @@ old_example_table/
 apps/api/*.db
 apps/api/*.sqlite
 apps/api/*.sqlite3
+infra/data/dev/
 
 # Accidental duplicate files (local editor/iCloud artifacts)
 apps/api/.dockerignore 2

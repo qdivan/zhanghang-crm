@@ -54,7 +54,8 @@ API_IMAGE=<实际镜像> WEB_IMAGE=<实际镜像> docker compose -f infra/docker
 4. 试运行期间无 `P0 / P1`
 
 ## 当前状态
-- Dev 部署执行计划：`BLOCKED`
-- 阻塞项 1：`缺少 infra/env/api.dev.env`
-- 阻塞项 2：`docker-compose.dev.yml 仍未绑定实际镜像地址`
-- 下一步：`准备环境变量与镜像后执行部署`
+- Dev 部署执行计划：`DONE`
+- 阻塞项 1：`无`
+- 阻塞项 2：`无`
+- 部署结果：`本机 dev 已启动并通过健康检查`
+- 下一步：`开始真实试运行，收集反馈`

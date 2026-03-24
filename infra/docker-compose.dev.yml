@@ -2,7 +2,13 @@ name: daizhang-dev
 
 services:
   api:
-    image: ${API_IMAGE:-ghcr.io/your-org/daizhang-api:dev-latest}
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile.prod
+      args:
+        PYTHON_IMAGE: ${API_PYTHON_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/python:3.11-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+    image: ${API_IMAGE:-daizhang-api:dev-local}
     container_name: daizhang-dev-api
     restart: unless-stopped
     env_file:
@@ -15,7 +21,13 @@ services:
       - daizhang-dev
 
   web:
-    image: ${WEB_IMAGE:-ghcr.io/your-org/daizhang-web:dev-latest}
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile.test
+      args:
+        NODE_IMAGE: ${WEB_NODE_IMAGE:-swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:20-alpine}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    image: ${WEB_IMAGE:-daizhang-web:dev-local}
     container_name: daizhang-dev-web
     restart: unless-stopped
     depends_on:

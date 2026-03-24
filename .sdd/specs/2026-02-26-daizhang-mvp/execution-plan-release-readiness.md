@@ -25,4 +25,4 @@
 - Release Readiness 计划：`DONE`
 - 远端同步：`DONE`
 - 上线/交接清单：`DONE`
-- 最新阻塞项：`dev 部署前仍缺少 api.dev.env 与实际镜像地址`
+- 最新阻塞项：`无（本机 dev 已启动，可进入试运行）`
