@@ -20,7 +20,7 @@
 ## 每日汇总
 | 日期 | 新增问题数 | P0 | P1 | P2 | P3 | 是否继续试运行 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-03-25 | 0 | 0 | 0 | 0 | 0 | 是 | Day 0 基线 smoke：boss 登录/客户列表/客户档案/收费明细/到账核对通过；accountant 登录/客户列表/客户档案/收费明细/常用资料通过。 |
+| 2026-03-25 | 0 | 0 | 0 | 0 | 0 | 是 | Day 0 基线 smoke + Day 1 托管巡检完成：boss/accountant/manager/admin 核心页面可用，未发现问题；真实人工试运行待持续记录。 |
 
 ## Day 0 基线记录
 - 角色 `boss`：已验证登录、客户列表、客户档案、收费明细、到账核对。
@@ -35,6 +35,19 @@
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-18-05-870Z.yml`
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-18-29-636Z.yml`
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-18-58-085Z.yml`
+
+## Day 1 托管巡检补充
+- 角色 `manager`：已验证登录、客户列表、收费明细、到账核对。
+- 角色 `admin`：已验证登录、管理员面板。
+- 结果：未发现 `P0/P1/P2/P3`。
+- 说明：以上为托管巡检，不替代后续真实人工试运行。
+- 证据：
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-16-434Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-16-888Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-17-505Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-18-368Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-38-050Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-38-762Z.yml`
 
 ## 修复出队规则
 1. `P0`：立即修
