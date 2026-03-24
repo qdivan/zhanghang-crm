@@ -66,6 +66,11 @@
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-19-107Z.yml`
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-20-284Z.yml`
 
+## 人工试运行基线快照
+- 快照文件：`/Users/shangyifan/Documents/New project/output/test-reports/dev-trial-baseline-2026-03-25.md`
+- 作用：作为真实人工试运行的事实对照基线，用于判断后续数据变化是否异常。
+- 记录口径：线索/客户/收费单/待办/常用资料/账户收款分布。
+
 ## 修复出队规则
 1. `P0`：立即修
 2. `P1`：按影响面排序后集中修
