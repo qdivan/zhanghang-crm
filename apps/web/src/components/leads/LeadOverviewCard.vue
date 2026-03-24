@@ -57,8 +57,8 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
 <template>
   <el-card shadow="never">
     <template #header>
-        <div class="table-head">
-        <span>{{ isMobile ? "客户开发总览" : "客户开发总览（对齐 `转化2026 > 客户总览`）" }}</span>
+      <div class="table-head">
+        <span>客户开发</span>
         <el-tag type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
     </template>

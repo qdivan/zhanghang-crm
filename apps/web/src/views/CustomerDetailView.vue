@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ArrowLeft } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ArrowDown, ArrowLeft } from "@element-plus/icons-vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -8,7 +8,13 @@ import { apiClient } from "../api/client";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
 import { useAuthStore } from "../stores/auth";
-import type { CustomerDetail, CustomerTimelineEventCreatePayload, CustomerTimelineSourceType } from "../types";
+import type {
+  CustomerDetail,
+  CustomerTimelineEntry,
+  CustomerTimelineEventCreatePayload,
+  CustomerTimelineEventUpdatePayload,
+  CustomerTimelineSourceType,
+} from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
 import { leadGradeOptions, leadReminderOptions } from "./lead/viewMeta";
 
@@ -18,10 +24,15 @@ const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
 const timelineSubmitting = ref(false);
+const templateApplying = ref(false);
+const completeSubmitting = ref(false);
 const editLoading = ref(false);
 const detail = ref<CustomerDetail | null>(null);
 const showTimelineDialog = ref(false);
 const showEditDialog = ref(false);
+const showCompleteDialog = ref(false);
+const detailCollapse = ref<string[]>([]);
+const completingTimelineId = ref<number | null>(null);
 
 const canWriteCustomer = computed(() => {
   if (!detail.value || auth.user?.role !== "ACCOUNTANT") return true;
@@ -51,12 +62,63 @@ const displayContactLine = computed(() => {
   return [detail.value.contact_name, detail.value.phone].filter(Boolean).join(" / ") || "-";
 });
 
+function displayText(value: string | null | undefined) {
+  const raw = (value || "").trim();
+  return raw || "-";
+}
+
+const primaryDesktopFields = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "公司名", value: displayText(detail.value.name), wide: true },
+    { label: "等级", value: displayText(detail.value.lead.grade) },
+    { label: "国家", value: displayCountry.value },
+    { label: "服务开始", value: displayServiceStart.value },
+    { label: "对接人及电话", value: displayContactLine.value, wide: true },
+    { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
+    { label: "最后跟进", value: displayText(detail.value.lead.last_followup_date) },
+    { label: "下次提醒", value: displayText(detail.value.lead.next_reminder_at) },
+  ];
+});
+
+const secondaryDesktopFields = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "企业性质", value: displayText(detail.value.lead.company_nature) },
+    { label: "服务方式", value: displayText(detail.value.lead.service_mode) },
+    { label: "其他联系人", value: displayText(detail.value.lead.other_contact) },
+    { label: "收费标准", value: displayText(detail.value.lead.fee_standard) },
+    { label: "首期账单期间", value: displayText(detail.value.lead.first_billing_period) },
+    { label: "提醒值", value: displayText(detail.value.lead.reminder_value) },
+  ].filter((item) => item.value !== "-");
+});
+
+const longDesktopFields = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "主营产品", value: displayText(detail.value.lead.main_business) },
+    { label: "介绍人", value: displayText(detail.value.lead.intro) },
+    { label: "备注", value: displayText(detail.value.lead.notes) },
+  ].filter((item) => item.value !== "-");
+});
+
 const timelineForm = reactive<CustomerTimelineEventCreatePayload>({
   occurred_at: todayInBrowserTimeZone(),
   event_type: "COMMUNICATION",
+  status: "NOTE",
+  reminder_at: null,
+  completed_at: null,
   content: "",
   note: "",
+  result: "",
   amount: null,
+});
+
+const completeForm = reactive<CustomerTimelineEventUpdatePayload>({
+  status: "DONE",
+  completed_at: todayInBrowserTimeZone(),
+  result: "",
+  note: "",
 });
 
 const editForm = reactive({
@@ -111,6 +173,28 @@ function timelineTypeTag(sourceType: CustomerTimelineSourceType | string) {
   return mapping[sourceType] ?? "info";
 }
 
+function timelineStatusLabel(statusValue: string) {
+  const mapping: Record<string, string> = {
+    NOTE: "仅记录",
+    OPEN: "待跟进",
+    DONE: "已办结",
+  };
+  return mapping[statusValue] ?? (statusValue || "-");
+}
+
+function timelineStatusTag(statusValue: string) {
+  const mapping: Record<string, "" | "success" | "warning" | "info"> = {
+    NOTE: "info",
+    OPEN: "warning",
+    DONE: "success",
+  };
+  return mapping[statusValue] ?? "info";
+}
+
+function canCompleteTimeline(item: CustomerTimelineEntry) {
+  return canWriteCustomer.value && item.source_type === "CUSTOMER_EVENT" && item.status === "OPEN";
+}
+
 async function fetchDetail() {
   const customerId = Number(route.params.id);
   if (!customerId) return;
@@ -138,8 +222,12 @@ function openTimelineDialog() {
   }
   timelineForm.occurred_at = todayInBrowserTimeZone();
   timelineForm.event_type = "COMMUNICATION";
+  timelineForm.status = "NOTE";
+  timelineForm.reminder_at = null;
+  timelineForm.completed_at = null;
   timelineForm.content = "";
   timelineForm.note = "";
+  timelineForm.result = "";
   timelineForm.amount = null;
   showTimelineDialog.value = true;
 }
@@ -164,6 +252,63 @@ async function submitTimelineEvent() {
     ElMessage.error("保存失败");
   } finally {
     timelineSubmitting.value = false;
+  }
+}
+
+async function applyCustomerTemplate(command: string) {
+  if (!detail.value || !canWriteCustomer.value) return;
+  const templateLabel = command === "hk-company" ? "香港公司模板" : command;
+  try {
+    await ElMessageBox.confirm(`将为当前客户生成“${templateLabel}”的提醒事项。`, "套用客户模板", {
+      type: "warning",
+    });
+  } catch {
+    return;
+  }
+
+  templateApplying.value = true;
+  try {
+    await apiClient.post(`/customers/${detail.value.id}/timeline-templates/${command}`);
+    ElMessage.success(`${templateLabel}已套用`);
+    await fetchDetail();
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || "模板套用失败");
+  } finally {
+    templateApplying.value = false;
+  }
+}
+
+function openCompleteDialog(item: CustomerTimelineEntry) {
+  if (!detail.value || !canCompleteTimeline(item)) return;
+  completingTimelineId.value = item.source_id ?? null;
+  completeForm.status = "DONE";
+  completeForm.completed_at = todayInBrowserTimeZone();
+  completeForm.result = item.result || "";
+  completeForm.note = item.note || "";
+  showCompleteDialog.value = true;
+}
+
+async function submitCompleteTimeline() {
+  if (!detail.value || !completingTimelineId.value) return;
+  if (!(completeForm.result || "").trim()) {
+    ElMessage.warning("请填写办结结果");
+    return;
+  }
+
+  completeSubmitting.value = true;
+  try {
+    await apiClient.patch(
+      `/customers/${detail.value.id}/timeline-events/${completingTimelineId.value}`,
+      completeForm,
+    );
+    ElMessage.success("客户事项已办结");
+    showCompleteDialog.value = false;
+    completingTimelineId.value = null;
+    await fetchDetail();
+  } catch (error) {
+    ElMessage.error("办结保存失败");
+  } finally {
+    completeSubmitting.value = false;
   }
 }
 
@@ -253,6 +398,20 @@ onMounted(fetchDetail);
         <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
           新增记录
         </el-button>
+        <el-dropdown
+          :disabled="!detail || !canWriteCustomer || templateApplying"
+          @command="applyCustomerTemplate"
+        >
+          <el-button :loading="templateApplying">
+            套用模板
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="hk-company">香港公司模板</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button :disabled="!detail" @click="openLeadDetail">查看开发来源</el-button>
       </el-space>
     </el-card>
@@ -260,7 +419,7 @@ onMounted(fetchDetail);
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>{{ isMobile ? "客户档案" : "客户档案（对齐 `客户跟进表` 明细页）" }}</span>
+          <span>客户档案</span>
           <el-space v-if="detail" class="meta-tags" wrap>
             <el-tag type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
             <el-tag type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
@@ -324,25 +483,48 @@ onMounted(fetchDetail);
             </div>
           </div>
         </div>
-        <el-descriptions v-else :column="2" border>
-          <el-descriptions-item label="公司名">{{ detail.name }}</el-descriptions-item>
-          <el-descriptions-item label="等级">{{ detail.lead.grade || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="国家">{{ displayCountry }}</el-descriptions-item>
-          <el-descriptions-item label="服务开始时间">{{ displayServiceStart }}</el-descriptions-item>
-          <el-descriptions-item label="企业性质">{{ detail.lead.company_nature || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="服务方式">{{ detail.lead.service_mode || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="对接人及电话">{{ displayContactLine }}</el-descriptions-item>
-          <el-descriptions-item label="微信">{{ detail.lead.contact_wechat || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="其他联系人">{{ detail.lead.other_contact || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="收费标准">{{ detail.lead.fee_standard || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="首期账单期间">{{ detail.lead.first_billing_period || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="最后跟进日期">{{ detail.lead.last_followup_date || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="提醒值">{{ detail.lead.reminder_value || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="下次提醒">{{ detail.lead.next_reminder_at || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="主营产品" :span="2">{{ detail.lead.main_business || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="介绍人" :span="2">{{ detail.lead.intro || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="备注" :span="2">{{ detail.lead.notes || '-' }}</el-descriptions-item>
-        </el-descriptions>
+        <div v-else class="detail-compact-panel">
+          <div class="detail-compact-grid">
+            <div
+              v-for="item in primaryDesktopFields"
+              :key="`customer-primary-${item.label}`"
+              class="detail-compact-item"
+              :class="{ wide: item.wide }"
+            >
+              <div class="detail-compact-label">{{ item.label }}</div>
+              <div class="detail-compact-value">{{ item.value }}</div>
+            </div>
+          </div>
+
+          <el-collapse v-if="secondaryDesktopFields.length" v-model="detailCollapse" class="detail-secondary-collapse">
+            <el-collapse-item name="extra">
+              <template #title>
+                <span class="detail-collapse-title">补充信息（{{ secondaryDesktopFields.length }}项）</span>
+              </template>
+              <div class="detail-compact-grid secondary">
+                <div
+                  v-for="item in secondaryDesktopFields"
+                  :key="`customer-secondary-${item.label}`"
+                  class="detail-compact-item secondary"
+                >
+                  <div class="detail-compact-label">{{ item.label }}</div>
+                  <div class="detail-compact-value">{{ item.value }}</div>
+                </div>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+
+          <div v-if="longDesktopFields.length" class="detail-long-stack">
+            <div
+              v-for="item in longDesktopFields"
+              :key="`customer-long-${item.label}`"
+              class="detail-long-row"
+            >
+              <div class="detail-long-row-label">{{ item.label }}</div>
+              <div class="detail-long-row-value">{{ item.value }}</div>
+            </div>
+          </div>
+        </div>
       </template>
     </el-card>
 
@@ -367,9 +549,23 @@ onMounted(fetchDetail);
             </el-tag>
           </div>
           <div class="detail-long-fields">
+            <div class="detail-long-field" v-if="item.status">
+              <div class="detail-long-label">状态</div>
+              <div class="detail-long-value">
+                <el-tag size="small" :type="timelineStatusTag(item.status)" effect="plain">
+                  {{ timelineStatusLabel(item.status) }}
+                </el-tag>
+                <span v-if="item.reminder_at"> · 提醒 {{ item.reminder_at }}</span>
+                <span v-if="item.completed_at"> · 办结 {{ item.completed_at }}</span>
+              </div>
+            </div>
             <div class="detail-long-field">
               <div class="detail-long-label">{{ item.occurred_at }}</div>
               <div class="detail-long-value">{{ item.title }}：{{ item.content || "-" }}</div>
+            </div>
+            <div v-if="item.result" class="detail-long-field">
+              <div class="detail-long-label">跟进结果</div>
+              <div class="detail-long-value">{{ item.result }}</div>
             </div>
             <div v-if="item.amount !== null || item.note || item.extra" class="detail-long-field">
               <div class="detail-long-label">补充说明</div>
@@ -379,6 +575,9 @@ onMounted(fetchDetail);
                 <div v-if="item.extra">{{ item.extra }}</div>
               </div>
             </div>
+            <el-button v-if="canCompleteTimeline(item)" size="small" type="primary" plain @click="openCompleteDialog(item)">
+              办结
+            </el-button>
           </div>
         </div>
       </div>
@@ -393,14 +592,32 @@ onMounted(fetchDetail);
         </el-table-column>
         <el-table-column prop="title" label="事项" width="130" />
         <el-table-column prop="content" label="内容" min-width="260" />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="timelineStatusTag(row.status)" effect="plain">
+              {{ timelineStatusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reminder_at" label="提醒" width="120" />
+        <el-table-column prop="completed_at" label="办结" width="120" />
         <el-table-column label="金额" width="100">
           <template #default="{ row }">
             {{ row.amount ?? "-" }}
           </template>
         </el-table-column>
         <el-table-column prop="actor_username" label="记录人" width="110" />
+        <el-table-column prop="result" label="结果" min-width="160" show-overflow-tooltip />
         <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
         <el-table-column prop="extra" label="补充" min-width="160" show-overflow-tooltip />
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ row }">
+            <el-button v-if="canCompleteTimeline(row)" link type="primary" @click="openCompleteDialog(row)">
+              办结
+            </el-button>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </el-space>
@@ -426,6 +643,27 @@ onMounted(fetchDetail);
           </el-form-item>
         </el-col>
       </el-row>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="记录状态">
+            <el-select v-model="timelineForm.status">
+              <el-option label="仅记录" value="NOTE" />
+              <el-option label="待跟进" value="OPEN" />
+              <el-option label="已办结" value="DONE" />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="12" v-if="timelineForm.status === 'OPEN'">
+          <el-form-item label="提醒日期">
+            <FlexibleDateInput v-model="timelineForm.reminder_at" clearable />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12" v-else-if="timelineForm.status === 'DONE'">
+          <el-form-item label="办结日期">
+            <FlexibleDateInput v-model="timelineForm.completed_at" clearable />
+          </el-form-item>
+        </el-col>
+      </el-row>
       <el-form-item label="记录内容">
         <el-input
           v-model="timelineForm.content"
@@ -446,18 +684,49 @@ onMounted(fetchDetail);
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item v-if="timelineForm.status !== 'NOTE'" label="跟进结果">
+        <el-input
+          v-model="timelineForm.result"
+          type="textarea"
+          :rows="2"
+          placeholder="已办结时可记录结果；待跟进时可先写计划或注意事项"
+        />
+      </el-form-item>
       <el-alert
         type="info"
         :closable="false"
-        title="这里记录客户成单后的重要事项；开发期的联络和开发跟进，请用“查看开发来源”进入线索页查看。"
+        title="这里记录客户成单后的重要事项；待跟进事项可设置提醒日期，办结后可补结果。开发期的联络和开发跟进，请用“查看开发来源”进入线索页查看。"
       />
       <el-text size="small" type="info">
-        收款金额请优先在“收费收款”里登记；这里用于补充会议、证照、内部讨论、临时事项等重要记录。
+        收款金额请优先在“收费明细”里登记；这里用于补充会议、证照、内部讨论、临时事项等重要记录。
       </el-text>
     </el-form>
     <template #footer>
       <el-button @click="showTimelineDialog = false">取消</el-button>
       <el-button type="primary" :loading="timelineSubmitting" @click="submitTimelineEvent">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="showCompleteDialog" title="办结客户事项" width="520px">
+    <el-form label-position="top">
+      <el-form-item label="办结日期">
+        <FlexibleDateInput v-model="completeForm.completed_at" clearable />
+      </el-form-item>
+      <el-form-item label="办结结果">
+        <el-input
+          v-model="completeForm.result"
+          type="textarea"
+          :rows="3"
+          placeholder="例如：已完成香港公司年审，客户已确认资料和费用"
+        />
+      </el-form-item>
+      <el-form-item label="补充备注">
+        <el-input v-model="completeForm.note" type="textarea" :rows="2" />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="showCompleteDialog = false">取消</el-button>
+      <el-button type="primary" :loading="completeSubmitting" @click="submitCompleteTimeline">确认办结</el-button>
     </template>
   </el-dialog>
 
@@ -584,6 +853,99 @@ onMounted(fetchDetail);
 
 .meta-tags {
   justify-content: flex-end;
+}
+
+.detail-compact-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-compact-item {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.detail-compact-item.wide {
+  grid-column: span 2;
+}
+
+.detail-compact-item.secondary {
+  background: #ffffff;
+}
+
+.detail-compact-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #6b7280;
+}
+
+.detail-compact-value {
+  font-size: 15px;
+  line-height: 1.35;
+  color: #111827;
+  word-break: break-word;
+}
+
+.detail-secondary-collapse {
+  border-top: none;
+  border-bottom: none;
+}
+
+.detail-collapse-title {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.detail-secondary-collapse :deep(.el-collapse-item__header) {
+  height: 34px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.detail-secondary-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+
+.detail-secondary-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 4px;
+}
+
+.detail-long-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detail-long-row {
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.detail-long-row-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #6b7280;
+}
+
+.detail-long-row-value {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #111827;
+  word-break: break-word;
 }
 
 @media (max-width: 900px) {

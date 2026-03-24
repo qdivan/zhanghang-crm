@@ -22,7 +22,9 @@ const loading = ref(false);
 const keyword = ref("");
 const rows = ref<CustomerListItem[]>([]);
 const canManageGrant = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
-const canCreateBilling = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canCreateBilling = computed(
+  () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
+);
 const showCreateBillingDialog = ref(false);
 const creatingBilling = ref(false);
 const selectedCustomerForBilling = ref<CustomerListItem | null>(null);
@@ -30,11 +32,11 @@ const billingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)])
 
 function mobileMetrics(row: CustomerListItem) {
   return [
-    { label: "国家/类型", value: row.source_area_display || "-" },
-    { label: "服务开始", value: row.source_service_start_display || "-" },
     { label: "收费标准", value: row.source_fee_standard || "-" },
+    { label: "服务项目", value: row.source_main_business || "-" },
+    { label: "服务开始", value: row.source_service_start_display || "-" },
+    { label: "会计", value: row.accountant_username || "-" },
     { label: "最后跟进", value: row.source_last_followup_date || "-" },
-    { label: "微信", value: row.source_contact_wechat || "-" },
   ].filter((item) => item.value !== "-");
 }
 
@@ -146,7 +148,10 @@ onMounted(fetchCustomers);
     <el-card shadow="never">
       <template #header>
         <div class="head">
-          <span>{{ isMobile ? "客户列表" : "客户列表（对齐 `客户跟进表 > 客户总览`）" }}</span>
+          <div>
+            <div class="card-title">客户列表</div>
+            <div class="card-subtitle">这里只显示已成交客户，转给会计或经办人后在这里继续维护。</div>
+          </div>
           <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
       </template>
@@ -204,17 +209,22 @@ onMounted(fetchCustomers);
           </template>
         </el-table-column>
         <el-table-column
-          prop="source_grade"
-          label="等级"
-          width="130"
+          prop="source_fee_standard"
+          label="收费标准"
+          min-width="130"
           show-overflow-tooltip
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         />
         <el-table-column
-          prop="source_area_display"
-          label="国家/类型"
+          prop="source_main_business"
+          label="服务项目/主营"
+          min-width="180"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="source_grade"
+          label="等级"
           width="110"
+          show-overflow-tooltip
           class-name="mobile-hide"
           label-class-name="mobile-hide"
         />
@@ -222,104 +232,27 @@ onMounted(fetchCustomers);
           prop="source_service_start_display"
           label="服务开始"
           width="110"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_company_nature"
-          label="企业性质"
-          width="100"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_service_mode"
-          label="服务方式"
-          width="100"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         />
         <el-table-column
           prop="contact_name"
           label="对接人及电话"
           min-width="160"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         >
           <template #default="{ row }">{{ `${row.contact_name || "-"} / ${row.phone || "-"}` }}</template>
         </el-table-column>
         <el-table-column
-          prop="source_contact_wechat"
-          label="微信"
-          width="120"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_other_contact"
-          label="其他联系人"
-          min-width="140"
-          show-overflow-tooltip
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_main_business"
-          label="主营产品"
-          min-width="160"
-          show-overflow-tooltip
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_intro"
-          label="介绍人"
-          min-width="140"
-          show-overflow-tooltip
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_fee_standard"
-          label="收费标准"
-          min-width="120"
-          show-overflow-tooltip
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_first_billing_period"
-          label="首期账单期间"
-          width="120"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
           prop="source_last_followup_date"
           label="最后跟进"
           width="110"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
-        />
-        <el-table-column
-          prop="source_reminder_value"
-          label="提醒值"
-          width="90"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         />
         <el-table-column
           prop="accountant_username"
           label="会计"
           width="110"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         />
         <el-table-column
           label="操作"
           width="200"
-          class-name="mobile-hide"
-          label-class-name="mobile-hide"
         >
           <template #default="{ row }">
             <el-space class="table-action-wrap">
@@ -367,7 +300,19 @@ onMounted(fetchCustomers);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.card-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 @media (max-width: 900px) {

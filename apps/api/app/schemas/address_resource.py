@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class AddressResourceCreate(BaseModel):
     category: str = Field(default="", max_length=120)
     contact_info: str = Field(default="", max_length=255)
+    served_companies: str = ""
     description: str = ""
     next_action: str = Field(default="", max_length=255)
     notes: str = ""
@@ -17,16 +18,18 @@ class AddressResourceCreate(BaseModel):
             [
                 self.category.strip(),
                 self.contact_info.strip(),
+                self.served_companies.strip(),
                 self.description.strip(),
             ]
         ):
-            raise ValueError("分类、联系方式、资源说明不能同时为空")
+            raise ValueError("分类、地址/联系人、已服务公司、资源说明不能同时为空")
         return self
 
 
 class AddressResourceUpdate(BaseModel):
     category: Optional[str] = None
     contact_info: Optional[str] = None
+    served_companies: Optional[str] = None
     description: Optional[str] = None
     next_action: Optional[str] = None
     notes: Optional[str] = None
@@ -38,6 +41,7 @@ class AddressResourceOut(BaseModel):
     id: int
     category: str
     contact_info: str
+    served_companies: str
     description: str
     next_action: str
     notes: str

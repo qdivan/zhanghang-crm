@@ -5,7 +5,6 @@ import type { BillingLedgerData, BillingRecord } from "../../types";
 import { ledgerSourceLabel } from "../../views/billing/viewMeta";
 
 const props = defineProps<{
-  visible: boolean;
   targetRecord: BillingRecord | null;
   loading: boolean;
   dateRange: [string, string] | null;
@@ -14,29 +13,34 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  "update:visible": [value: boolean];
   "update:dateRange": [value: [string, string] | null];
   query: [];
   reset: [];
+  clear: [];
   "drill-month": [monthText: string];
 }>();
-
-const dialogVisible = computed({
-  get: () => props.visible,
-  set: (value: boolean) => emit("update:visible", value),
-});
 
 const dateRangeModel = computed({
   get: () => props.dateRange,
   set: (value: [string, string] | null) => emit("update:dateRange", value),
 });
 
-const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_name ?? ""}`);
+const panelTitle = computed(() => `往来账 - ${props.targetRecord?.customer_name ?? ""}`);
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" :title="dialogTitle" width="960px">
-    <el-form inline>
+  <el-card shadow="never" class="ledger-panel-card">
+    <template #header>
+      <div class="ledger-panel-header">
+        <div>
+          <div class="ledger-panel-title">{{ panelTitle }}</div>
+          <div class="ledger-panel-subtitle">这里展示该客户的应收、实收和余额变化。</div>
+        </div>
+        <el-button text @click="emit('clear')">收起</el-button>
+      </div>
+    </template>
+
+    <el-form inline class="ledger-panel-form">
       <el-form-item label="时间范围">
         <el-date-picker
           v-model="dateRangeModel"
@@ -90,7 +94,7 @@ const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_n
 
     <el-divider content-position="left">客户往来流水</el-divider>
     <el-table v-loading="props.loading" :data="props.data?.entries || []" stripe border>
-      <el-table-column prop="occurred_at" label="时间" width="110" />
+      <el-table-column prop="occurred_at" label="日期" width="110" />
       <el-table-column prop="summary" label="摘要" min-width="220" show-overflow-tooltip />
       <el-table-column prop="receipt_account" label="入账账户" width="120" />
       <el-table-column label="类型" width="90">
@@ -109,10 +113,37 @@ const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_n
       </el-table-column>
       <el-table-column prop="balance" label="余额" width="110" />
     </el-table>
-  </el-dialog>
+  </el-card>
 </template>
 
 <style scoped>
+.ledger-panel-card {
+  margin-top: 12px;
+}
+
+.ledger-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger-panel-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.ledger-panel-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.ledger-panel-form {
+  margin-bottom: 8px;
+}
+
 .ledger-stats {
   margin-bottom: 12px;
 }

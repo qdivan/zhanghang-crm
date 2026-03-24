@@ -17,7 +17,7 @@ class DashboardSummaryOut(BaseModel):
 
 class SystemTodoOut(BaseModel):
     id: str
-    module: Literal["LEAD", "BILLING"]
+    module: Literal["LEAD", "BILLING", "CUSTOMER"]
     priority: Literal["HIGH", "MEDIUM", "LOW"]
     title: str
     description: str

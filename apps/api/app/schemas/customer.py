@@ -52,8 +52,24 @@ class CustomerDetailOut(BaseModel):
 class CustomerTimelineEventCreate(BaseModel):
     occurred_at: date
     event_type: str = Field(default="COMMUNICATION", min_length=1, max_length=32)
+    status: str = Field(default="NOTE", min_length=1, max_length=16)
+    reminder_at: Optional[date] = None
+    completed_at: Optional[date] = None
     content: str = ""
     note: str = ""
+    result: str = ""
+    amount: Optional[float] = None
+
+
+class CustomerTimelineEventUpdate(BaseModel):
+    occurred_at: Optional[date] = None
+    event_type: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    status: Optional[str] = Field(default=None, min_length=1, max_length=16)
+    reminder_at: Optional[date] = None
+    completed_at: Optional[date] = None
+    content: Optional[str] = None
+    note: Optional[str] = None
+    result: Optional[str] = None
     amount: Optional[float] = None
 
 
@@ -64,9 +80,14 @@ class CustomerTimelineEventOut(BaseModel):
     customer_id: int
     occurred_at: date
     event_type: str
+    status: str
+    reminder_at: Optional[date]
+    completed_at: Optional[date]
     content: str
     note: str
+    result: str
     amount: Optional[float]
+    template_key: str
     actor_id: int
     actor_username: str
     created_at: datetime
@@ -80,6 +101,10 @@ class CustomerTimelineEntryOut(BaseModel):
     content: str
     note: str = ""
     amount: Optional[float] = None
+    status: str = ""
+    reminder_at: Optional[date] = None
+    completed_at: Optional[date] = None
+    result: str = ""
     actor_username: str = ""
     extra: str = ""
 

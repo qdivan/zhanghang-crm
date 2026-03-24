@@ -80,6 +80,10 @@ class BillingRecordOut(BaseModel):
     status: str
     received_amount: float
     outstanding_amount: float
+    receivable_period_text: str
+    latest_payment_at: Optional[date]
+    latest_payment_amount: float
+    latest_receipt_account: str
     note: str
     extra_note: str
     color_tag: str
@@ -92,6 +96,7 @@ class BillingActivityCreate(BaseModel):
     occurred_at: date
     amount: float = 0
     payment_nature: Literal["", "MONTHLY", "YEARLY", "ONE_OFF"] = ""
+    receipt_account: str = ""
     is_prepay: bool = False
     is_settlement: bool = False
     content: str = ""
@@ -108,8 +113,10 @@ class BillingActivityOut(BaseModel):
     occurred_at: date
     actor_id: int
     actor_username: str
+    payment_id: Optional[int]
     amount: float
     payment_nature: str
+    receipt_account: str
     is_prepay: bool
     is_settlement: bool
     content: str
@@ -206,6 +213,7 @@ class BillingPaymentCreate(BaseModel):
     occurred_at: date
     amount: float = Field(gt=0)
     strategy: Literal["DUE_DATE_ASC", "SERIAL_ASC", "AMOUNT_DESC"] = "DUE_DATE_ASC"
+    receipt_account: str = ""
     note: str = ""
     allocations: list[BillingPaymentAllocationInput] = Field(min_length=1)
 
@@ -222,6 +230,7 @@ class BillingPaymentOut(BaseModel):
     occurred_at: date
     amount: float
     strategy: str
+    receipt_account: str
     note: str
     created_by_user_id: int
     created_at: datetime
@@ -262,6 +271,7 @@ class BillingLedgerEntryOut(BaseModel):
     balance: float
     source_type: Literal["RECEIVABLE", "PAYMENT"]
     billing_record_id: Optional[int] = None
+    receipt_account: str = ""
 
 
 class BillingLedgerMonthlySummaryOut(BaseModel):
@@ -282,3 +292,32 @@ class BillingLedgerOut(BaseModel):
     balance: float
     monthly_summaries: list[BillingLedgerMonthlySummaryOut]
     entries: list[BillingLedgerEntryOut]
+
+
+class BillingReceiptAccountSummaryOut(BaseModel):
+    receipt_account: str
+    payment_count: int
+    total_received: float
+    last_received_at: Optional[date]
+
+
+class BillingReceiptAccountEntryOut(BaseModel):
+    occurred_at: date
+    receipt_account: str
+    customer_name: str
+    summary: str
+    received_amount: float
+    cumulative_received: float
+    actor_username: str
+    payment_id: Optional[int] = None
+    billing_record_id: Optional[int] = None
+
+
+class BillingReceiptAccountLedgerOut(BaseModel):
+    receipt_account: Optional[str]
+    date_from: Optional[date]
+    date_to: Optional[date]
+    total_received: float
+    payment_count: int
+    account_summaries: list[BillingReceiptAccountSummaryOut]
+    entries: list[BillingReceiptAccountEntryOut]

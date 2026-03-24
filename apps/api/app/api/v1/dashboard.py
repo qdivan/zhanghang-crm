@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.models import BillingRecord, Customer, Lead, TodoItem, User
+from app.models import BillingRecord, Customer, CustomerTimelineEvent, Lead, TodoItem, User
 from app.schemas.dashboard import DashboardSummaryOut, SystemTodoOut
 from app.services.data_access import has_module_read_grant
+from app.services.org_scope import get_manager_subordinate_ids
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -45,7 +46,15 @@ def _parse_due_month(value: str) -> Optional[date]:
         return None
 
 
-def _apply_lead_scope(stmt, current_user: User):
+def _apply_lead_scope(stmt, db: Session, current_user: User):
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        return stmt.where(
+            or_(
+                Lead.owner_id.in_(managed_ids),
+                Lead.customer.has(Customer.assigned_accountant_id.in_(managed_ids)),
+            )
+        )
     if current_user.role != "ACCOUNTANT":
         return stmt
     return stmt.where(
@@ -57,6 +66,9 @@ def _apply_lead_scope(stmt, current_user: User):
 
 
 def _apply_customer_scope(stmt, db: Session, current_user: User):
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
     if current_user.role != "ACCOUNTANT":
         return stmt
     if has_module_read_grant(db, current_user.id, "CUSTOMER"):
@@ -65,6 +77,9 @@ def _apply_customer_scope(stmt, db: Session, current_user: User):
 
 
 def _apply_billing_scope(stmt, db: Session, current_user: User):
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        return stmt.where(BillingRecord.customer.has(Customer.assigned_accountant_id.in_(managed_ids)))
     if current_user.role != "ACCOUNTANT":
         return stmt
     if has_module_read_grant(db, current_user.id, "BILLING"):
@@ -72,7 +87,10 @@ def _apply_billing_scope(stmt, db: Session, current_user: User):
     return stmt.where(BillingRecord.customer.has(Customer.assigned_accountant_id == current_user.id))
 
 
-def _apply_billing_system_todo_scope(stmt, current_user: User):
+def _apply_billing_system_todo_scope(stmt, db: Session, current_user: User):
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
     if current_user.role != "ACCOUNTANT":
         return stmt
     # 系统催收待办仅面向“自己负责客户”，不跟随临时只读授权放大范围。
@@ -102,7 +120,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         )
         .order_by(Lead.next_reminder_at.asc(), Lead.id.asc())
     )
-    lead_rows = db.execute(_apply_lead_scope(lead_stmt, current_user)).all()
+    lead_rows = db.execute(_apply_lead_scope(lead_stmt, db, current_user)).all()
     for lead, owner_username, assigned_accountant_id, accountant_username in lead_rows:
         due_date = lead.next_reminder_at
         assignee_user_id = assigned_accountant_id or lead.owner_id
@@ -137,7 +155,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         .where(BillingRecord.status != "CLEARED", BillingRecord.outstanding_amount > 0)
         .order_by(BillingRecord.id.asc())
     )
-    billing_rows = db.execute(_apply_billing_system_todo_scope(billing_stmt, current_user)).all()
+    billing_rows = db.execute(_apply_billing_system_todo_scope(billing_stmt, db, current_user)).all()
     for record_id, customer_name, due_month, outstanding_amount, assignee_user_id, assignee_username in billing_rows:
         due_date = _parse_due_month(due_month)
         if due_date is None or due_date > due_window_end:
@@ -171,7 +189,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         .where(BillingRecord.charge_mode == "PERIODIC")
         .order_by(BillingRecord.id.asc())
     )
-    renew_rows = db.execute(_apply_billing_system_todo_scope(renew_stmt, current_user)).all()
+    renew_rows = db.execute(_apply_billing_system_todo_scope(renew_stmt, db, current_user)).all()
     for record_id, customer_name, due_month, assignee_user_id, assignee_username in renew_rows:
         due_date = _parse_due_month(due_month)
         if due_date is None or due_date < renew_window_start or due_date > renew_window_end:
@@ -186,6 +204,46 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 due_date=due_date,
                 action_path=f"/billing?action=renew&record_id={record_id}",
                 action_label="确认续费",
+                assignee_user_id=assignee_user_id,
+                assignee_username=assignee_username or "-",
+            )
+        )
+
+    customer_event_actor = aliased(User)
+    customer_event_stmt = (
+        select(
+            CustomerTimelineEvent.id,
+            CustomerTimelineEvent.customer_id,
+            CustomerTimelineEvent.content,
+            CustomerTimelineEvent.reminder_at,
+            CustomerTimelineEvent.event_type,
+            Customer.name,
+            Customer.assigned_accountant_id,
+            customer_event_actor.username,
+        )
+        .join(Customer, CustomerTimelineEvent.customer_id == Customer.id)
+        .outerjoin(customer_event_actor, Customer.assigned_accountant_id == customer_event_actor.id)
+        .where(
+            CustomerTimelineEvent.status == "OPEN",
+            CustomerTimelineEvent.reminder_at.is_not(None),
+            CustomerTimelineEvent.reminder_at <= month_end,
+        )
+        .order_by(CustomerTimelineEvent.reminder_at.asc(), CustomerTimelineEvent.id.asc())
+    )
+    customer_event_rows = db.execute(
+        _apply_customer_scope(customer_event_stmt, db, current_user)
+    ).all()
+    for event_id, customer_id, content, reminder_at, event_type, customer_name, assignee_user_id, assignee_username in customer_event_rows:
+        items.append(
+            SystemTodoOut(
+                id=f"customer-event:{event_id}",
+                module="CUSTOMER",
+                priority=_priority_from_due(reminder_at, today),
+                title=f"客户事项提醒：{customer_name}",
+                description=f"{event_type}：{content or '待跟进事项'}",
+                due_date=reminder_at,
+                action_path=f"/customers/{customer_id}",
+                action_label="查看客户",
                 assignee_user_id=assignee_user_id,
                 assignee_username=assignee_username or "-",
             )
@@ -212,12 +270,14 @@ def get_dashboard_summary(
     lead_new_count = db.execute(
         _apply_lead_scope(
             select(func.count(Lead.id)).where(Lead.status == "NEW"),
+            db,
             current_user,
         )
     ).scalar_one()
     lead_following_count = db.execute(
         _apply_lead_scope(
             select(func.count(Lead.id)).where(Lead.status == "FOLLOWING"),
+            db,
             current_user,
         )
     ).scalar_one()

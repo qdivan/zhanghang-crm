@@ -22,6 +22,7 @@ from app.models import (
 from app.schemas.auth import UserOut
 from app.schemas.user_admin import UserCreate, UserUpdate
 from app.services.audit import write_operation_log
+from app.services.org_scope import get_manager_subordinate_ids
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -39,6 +40,30 @@ def _ensure_owner_scope(current_user: User, target_user_role: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="老板不能管理管理员账号",
         )
+
+
+def _resolve_manager_user_id(
+    db: Session,
+    manager_user_id: Optional[int],
+    *,
+    target_role: str,
+) -> Optional[int]:
+    if target_role != "ACCOUNTANT":
+        return None
+    if manager_user_id is None:
+        return None
+    manager = db.execute(select(User).where(User.id == manager_user_id)).scalar_one_or_none()
+    if manager is None or not manager.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="直属经理不存在或已停用")
+    if manager.role != "MANAGER":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="直属经理必须是部门经理")
+    return manager.id
+
+
+def _count_direct_reports(db: Session, user_id: int) -> int:
+    return int(
+        db.execute(select(func.count(User.id)).where(User.manager_user_id == user_id)).scalar_one() or 0
+    )
 
 
 def _get_user_or_404(db: Session, user_id: int) -> User:
@@ -81,6 +106,7 @@ def _count_user_dependencies(db: Session, user_id: int) -> dict[str, int]:
             )
         ),
     ).scalar_one()
+    direct_report_count = _count_direct_reports(db, user_id)
     return {
         "线索": int(lead_count or 0),
         "客户": int(customer_count or 0),
@@ -91,10 +117,11 @@ def _count_user_dependencies(db: Session, user_id: int) -> dict[str, int]:
         "操作日志": int(operation_log_count or 0),
         "数据授权": int(data_grant_count or 0),
         "待办": int(todo_count or 0),
+        "下属": int(direct_report_count or 0),
     }
 
 
-@router.get("", response_model=list[UserOut], dependencies=[Depends(require_roles("OWNER", "ADMIN"))])
+@router.get("", response_model=list[UserOut], dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))])
 def list_users(
     role: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None),
@@ -110,7 +137,9 @@ def list_users(
     if keyword:
         key = f"%{keyword.strip()}%"
         stmt = stmt.where(or_(User.username.ilike(key), User.role.ilike(key)))
-    if current_user.role == "OWNER":
+    if current_user.role == "MANAGER":
+        stmt = stmt.where(User.id.in_(get_manager_subordinate_ids(db, current_user.id)))
+    elif current_user.role == "OWNER":
         stmt = stmt.where(User.role != "ADMIN")
     return db.execute(stmt).scalars().all()
 
@@ -138,6 +167,11 @@ def create_user(
         password_hash=hash_password(payload.password),
         auth_source="LOCAL",
         role=payload.role,
+        manager_user_id=_resolve_manager_user_id(
+            db,
+            payload.manager_user_id,
+            target_role=payload.role,
+        ),
         is_active=payload.is_active,
     )
     write_operation_log(
@@ -167,11 +201,17 @@ def update_user(
 ):
     target_user = _get_user_or_404(db, user_id)
     _ensure_owner_scope(current_user, target_user.role)
+    provided_fields = set(payload.model_fields_set)
 
     if payload.role is not None:
         _ensure_owner_scope(current_user, payload.role)
         if current_user.id == target_user.id and payload.role != target_user.role:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能修改自己的角色")
+        if target_user.role == "MANAGER" and payload.role != "MANAGER" and _count_direct_reports(db, target_user.id) > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该部门经理仍有关联下属，不能直接改成其他角色",
+            )
         old_role = target_user.role
         target_user.role = payload.role
     else:
@@ -197,10 +237,26 @@ def update_user(
     if payload.is_active is not None:
         if current_user.id == target_user.id and payload.is_active is False:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能停用当前登录账号")
+        if target_user.role == "MANAGER" and payload.is_active is False and _count_direct_reports(db, target_user.id) > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该部门经理仍有关联下属，不能直接停用",
+            )
         old_active = target_user.is_active
         target_user.is_active = payload.is_active
     else:
         old_active = target_user.is_active
+
+    next_role = target_user.role
+    old_manager_user_id = target_user.manager_user_id
+    if "role" in provided_fields or "manager_user_id" in provided_fields:
+        target_user.manager_user_id = _resolve_manager_user_id(
+            db,
+            payload.manager_user_id,
+            target_role=next_role,
+        )
+    if target_user.id == target_user.manager_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="直属经理不能设置为自己")
 
     change_items: list[str] = []
     if old_username != target_user.username:
@@ -210,6 +266,10 @@ def update_user(
     if old_active != target_user.is_active:
         change_items.append(
             f"is_active:{'启用' if old_active else '停用'}->{'启用' if target_user.is_active else '停用'}"
+        )
+    if old_manager_user_id != target_user.manager_user_id:
+        change_items.append(
+            f"manager_user_id:{old_manager_user_id or '-'}->{target_user.manager_user_id or '-'}"
         )
     if password_changed:
         change_items.append("password:已修改")

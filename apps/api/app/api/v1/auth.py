@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models import User
 from app.schemas.auth import LoginRequest, TokenResponse, UserOut
 from app.services.audit import write_operation_log
+from app.services.data_access import has_module_read_grant
 from app.services.login_security import (
     clear_local_login_failures,
     ensure_local_login_ip_allowed,
@@ -70,5 +71,15 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
 
 @router.get("/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user)):
-    return current_user
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    granted_modules: list[str] = []
+    if current_user.role == "ACCOUNTANT":
+        for module in ["CUSTOMER", "BILLING"]:
+            if has_module_read_grant(db, current_user.id, module):
+                granted_modules.append(module)
+    return UserOut.model_validate(
+        {
+            **current_user.__dict__,
+            "granted_read_modules": granted_modules,
+        }
+    )

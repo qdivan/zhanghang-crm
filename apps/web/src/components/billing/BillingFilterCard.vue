@@ -2,14 +2,21 @@
 import { QuestionFilled } from "@element-plus/icons-vue";
 import { computed, ref } from "vue";
 
-import { useResponsive } from "../../composables/useResponsive";
+import type { CustomerListItem } from "../../types";
 import { billingStatusOptions, paymentMethodOptions } from "../../utils/billingDraft";
 import type { BillingFilters } from "../../views/billing/forms";
-import { billingStatusHelpLines, paymentMethodHelpLines } from "../../views/billing/viewMeta";
+import {
+  billingMonthHelpLines,
+  billingStatusHelpLines,
+  paymentMethodHelpLines,
+  receiptAccountHelpLines,
+} from "../../views/billing/viewMeta";
 
 const props = defineProps<{
   filters: BillingFilters;
   canManageGrant: boolean;
+  customers: CustomerListItem[];
+  receiptAccountOptions: Array<{ value: string; label: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -18,9 +25,10 @@ const emit = defineEmits<{
   grant: [];
 }>();
 
-const { isMobile } = useResponsive();
 const showAdvancedFilters = ref(false);
-const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || props.filters.payment_method || props.filters.status));
+const hasAdvancedValue = computed(() =>
+  Boolean(props.filters.contact_name || props.filters.payment_method || props.filters.status),
+);
 </script>
 
 <template>
@@ -29,12 +37,69 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || pr
       <el-form-item label="关键词">
         <el-input
           v-model="props.filters.keyword"
-          placeholder="序号/客户/联系人/备注"
+          placeholder="公司/项目/备注"
           clearable
           @keyup.enter="emit('query')"
         />
       </el-form-item>
-      <el-form-item v-show="!isMobile || showAdvancedFilters" label="联系人">
+      <el-form-item label="客户">
+        <el-select
+          v-model="props.filters.customer_id"
+          filterable
+          clearable
+          placeholder="全部客户"
+        >
+          <el-option
+            v-for="item in props.customers"
+            :key="`billing-filter-customer-${item.id}`"
+            :label="item.name"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item>
+        <template #label>
+          <span class="label-with-help">
+            账务月份
+            <el-tooltip placement="top" :show-after="150">
+              <template #content>
+                <div v-for="line in billingMonthHelpLines" :key="line">{{ line }}</div>
+              </template>
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <el-date-picker
+          v-model="props.filters.billing_month"
+          type="month"
+          value-format="YYYY-MM"
+          format="YYYY-MM"
+          placeholder="全部月份"
+          clearable
+        />
+      </el-form-item>
+      <el-form-item>
+        <template #label>
+          <span class="label-with-help">
+            入账账户
+            <el-tooltip placement="top" :show-after="150">
+              <template #content>
+                <div v-for="line in receiptAccountHelpLines" :key="line">{{ line }}</div>
+              </template>
+              <el-icon class="help-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </span>
+        </template>
+        <el-select v-model="props.filters.receipt_account" clearable filterable placeholder="全部账户">
+          <el-option
+            v-for="item in props.receiptAccountOptions"
+            :key="`billing-filter-account-${item.value}`"
+            :label="item.label"
+            :value="item.value"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item v-show="showAdvancedFilters" label="联系人">
         <el-input
           v-model="props.filters.contact_name"
           placeholder="客户联系人"
@@ -42,7 +107,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || pr
           @keyup.enter="emit('query')"
         />
       </el-form-item>
-      <el-form-item v-show="!isMobile || showAdvancedFilters">
+      <el-form-item v-show="showAdvancedFilters">
         <template #label>
           <span class="label-with-help">
             付款方式
@@ -63,7 +128,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || pr
           />
         </el-select>
       </el-form-item>
-      <el-form-item v-show="!isMobile || showAdvancedFilters">
+      <el-form-item v-show="showAdvancedFilters">
         <template #label>
           <span class="label-with-help">
             台账状态
@@ -84,15 +149,21 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || pr
           />
         </el-select>
       </el-form-item>
-      <el-form-item v-if="isMobile">
+      <el-form-item>
         <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
-          {{ showAdvancedFilters ? "收起筛选" : hasAdvancedValue ? "更多筛选（已选）" : "更多筛选" }}
+          {{
+            showAdvancedFilters
+              ? "收起高级筛选"
+              : hasAdvancedValue
+                ? "高级筛选（已选）"
+                : "高级筛选"
+          }}
         </el-button>
       </el-form-item>
       <el-form-item>
         <div class="action-group">
           <el-button @click="emit('query')">查询</el-button>
-          <el-button type="primary" @click="emit('create')">新增收费记录</el-button>
+          <el-button type="primary" @click="emit('create')">新增收费单</el-button>
           <el-button v-if="props.canManageGrant" type="primary" plain @click="emit('grant')">数据授权配置</el-button>
         </div>
       </el-form-item>
@@ -123,6 +194,10 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.contact_name || pr
   .billing-filter-form {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .billing-filter-form :deep(.el-form-item) {
+    margin-right: 12px;
   }
 
   .action-group {

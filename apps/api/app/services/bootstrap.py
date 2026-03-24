@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password, verify_password
-from app.models import AddressResource, BillingActivity, BillingRecord, Customer, Lead, User
+from app.models import AddressResource, BillingActivity, BillingRecord, CommonLibraryItem, Customer, Lead, User
 
 DEMO_USER_SPECS = (
     ("boss", "OWNER"),
     ("admin", "ADMIN"),
+    ("manager", "MANAGER"),
     ("accountant", "ACCOUNTANT"),
     ("accountant2", "ACCOUNTANT"),
     ("accountant3", "ACCOUNTANT"),
@@ -45,6 +46,21 @@ def bootstrap_data(db: Session) -> None:
         db.commit()
         users = db.execute(select(User)).scalars().all()
     elif not users:
+        users = db.execute(select(User)).scalars().all()
+
+    user_map = {user.username: user for user in users}
+    manager_user = user_map.get("manager")
+    subordinate_changed = False
+    if manager_user is not None:
+        for username in ("accountant2", "accountant3", "accountant4"):
+            subordinate = user_map.get(username)
+            if subordinate is None:
+                continue
+            if subordinate.manager_user_id != manager_user.id:
+                subordinate.manager_user_id = manager_user.id
+                subordinate_changed = True
+    if subordinate_changed:
+        db.commit()
         users = db.execute(select(User)).scalars().all()
 
     lead_exists = db.execute(select(Lead.id)).first()
@@ -171,6 +187,7 @@ def bootstrap_data(db: Session) -> None:
                 AddressResource(
                     category="自贸区",
                     contact_info="186 5320 7940 孙建云",
+                    served_companies="深圳示例科技有限公司",
                     description="阎总介绍，地址 3000/年",
                     next_action="2/25 再次电话沟通",
                     notes="可作为转化线索来源",
@@ -178,12 +195,89 @@ def bootstrap_data(db: Session) -> None:
                 AddressResource(
                     category="注册地址",
                     contact_info="微信：qdzc001",
+                    served_companies="东莞样例贸易公司、海德和信",
                     description="支持一般纳税人地址挂靠",
                     next_action="补充合同模板后推进",
                     notes="报价按年",
                 ),
             ]
         )
+
+    common_library_exists = db.execute(select(CommonLibraryItem.id)).first()
+    if common_library_exists is None:
+        db.add_all(
+            [
+                CommonLibraryItem(
+                    module_type="TEMPLATE",
+                    visibility="INTERNAL",
+                    category="培训资料",
+                    title="新企业培训用语",
+                    content="欢迎建联后先发送基础办税、开票、报税时间要求，再提醒保存会计收件地址。",
+                    notes="适合首单客户",
+                ),
+                CommonLibraryItem(
+                    module_type="TEMPLATE",
+                    visibility="INTERNAL",
+                    category="催单",
+                    title="每月催单用语",
+                    content="请在每月 5 日前把票据和银行流水发齐，避免影响报税时效。",
+                ),
+                CommonLibraryItem(
+                    module_type="TEMPLATE",
+                    visibility="INTERNAL",
+                    category="社保",
+                    title="交社保催存款",
+                    content="本月社保即将扣款，请提前把对应金额存入公户，避免扣款失败。",
+                ),
+                CommonLibraryItem(
+                    module_type="DIRECTORY",
+                    visibility="INTERNAL",
+                    category="税局",
+                    title="市南税局",
+                    phone="0532-12366",
+                    address="青岛市市南区示例路 18 号",
+                    notes="工作日联系",
+                ),
+                CommonLibraryItem(
+                    module_type="DIRECTORY",
+                    visibility="INTERNAL",
+                    category="银行",
+                    title="招商银行香港中路支行",
+                    phone="0532-88886666",
+                    address="青岛市市南区香港中路 66 号",
+                ),
+                CommonLibraryItem(
+                    module_type="EXTENSION_A",
+                    visibility="PUBLIC",
+                    category="常用语",
+                    title="首单退税要求条件",
+                    content="先确认备案、报关单、进项票、收汇资料齐全，再统一给客户发送清单。",
+                ),
+                CommonLibraryItem(
+                    module_type="EXTENSION_B",
+                    visibility="PUBLIC",
+                    category="收件",
+                    title="会计收件地址",
+                    content="青岛市市南区示例大厦 12 层财税部，收件人：会计组，电话：0532-66668888。",
+                ),
+                CommonLibraryItem(
+                    module_type="EXTENSION_C",
+                    visibility="INTERNAL",
+                    category="预留",
+                    title="预留模块示例",
+                    content="这里可后续改成新的常用资料分类。",
+                ),
+            ]
+        )
+    else:
+        public_seed_titles = {
+            "首单退税要求条件",
+            "会计收件地址",
+        }
+        existing_items = db.execute(select(CommonLibraryItem)).scalars().all()
+        for item in existing_items:
+            if item.title in public_seed_titles:
+                item.visibility = "PUBLIC"
 
     billing_exists = db.execute(select(BillingRecord.id)).first()
     if billing_exists is None:
@@ -286,6 +380,7 @@ def bootstrap_data(db: Session) -> None:
                     actor_id=owner.id,
                     amount=4800,
                     payment_nature="YEARLY",
+                    receipt_account="一帆光大",
                     is_prepay=True,
                     is_settlement=True,
                     content="年费一次性预收到账",

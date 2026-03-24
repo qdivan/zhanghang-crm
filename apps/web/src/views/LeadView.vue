@@ -87,7 +87,9 @@ const filters = reactive(createLeadFilters());
 const leadForm = reactive<LeadCreateForm>(createLeadForm());
 const followupForm = reactive<LeadFollowupForm>(createLeadFollowupForm(todayInBrowserTimeZone()));
 
-const canConvert = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canConvert = computed(
+  () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
+);
 
 async function fetchLeads() {
   loading.value = true;

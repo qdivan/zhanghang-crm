@@ -7,6 +7,7 @@ const proxyTarget = process.env.VITE_DEV_PROXY_TARGET ?? 'http://127.0.0.1:8000'
 export default defineConfig({
   plugins: [vue()],
   server: {
+    allowedHosts: ['ivanshang.com'],
     proxy: {
       '/api': {
         target: proxyTarget,

@@ -5,7 +5,11 @@ import { useResponsive } from "../../composables/useResponsive";
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { BillingActivity, BillingRecord } from "../../types";
 import type { BillingActivityForm } from "../../views/billing/forms";
-import { activityTypeLabel, isPaymentActivityType } from "../../views/billing/viewMeta";
+import {
+  activityTypeLabel,
+  isPaymentActivityType,
+  receiptAccountOptions,
+} from "../../views/billing/viewMeta";
 
 const props = defineProps<{
   visible: boolean;
@@ -58,7 +62,7 @@ const { isMobile } = useResponsive();
         </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :span="8">
+        <el-col :span="6">
           <el-form-item label="收款类型">
             <el-select v-model="props.form.payment_nature" clearable :disabled="!isPaymentActivity">
               <el-option label="月付" value="MONTHLY" />
@@ -67,12 +71,30 @@ const { isMobile } = useResponsive();
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="6">
           <el-form-item label="下次跟进">
             <FlexibleDateInput v-model="props.form.next_followup_at" clearable />
           </el-form-item>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="6">
+          <el-form-item label="入账账户">
+            <el-select
+              v-model="props.form.receipt_account"
+              filterable
+              allow-create
+              default-first-option
+              :disabled="!isPaymentActivity"
+            >
+              <el-option
+                v-for="item in receiptAccountOptions"
+                :key="`receipt-account-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
           <el-form-item label="结算标记">
             <el-space>
               <el-checkbox v-model="props.form.is_prepay" :disabled="!isPaymentActivity">预付</el-checkbox>
@@ -103,6 +125,10 @@ const { isMobile } = useResponsive();
           </div>
         </div>
         <div class="detail-long-fields">
+          <div v-if="row.receipt_account" class="detail-long-field">
+            <div class="detail-long-label">入账账户</div>
+            <div class="detail-long-value">{{ row.receipt_account }}</div>
+          </div>
           <div class="detail-long-field">
             <div class="detail-long-label">内容</div>
             <div class="detail-long-value">{{ row.content || "-" }}</div>
@@ -124,6 +150,7 @@ const { isMobile } = useResponsive();
         </template>
       </el-table-column>
       <el-table-column prop="amount" label="金额" width="90" />
+      <el-table-column prop="receipt_account" label="入账账户" width="120" />
       <el-table-column prop="actor_username" label="记录人" width="100" />
       <el-table-column
         prop="payment_nature"

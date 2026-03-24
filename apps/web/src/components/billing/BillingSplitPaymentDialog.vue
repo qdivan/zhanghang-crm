@@ -4,7 +4,7 @@ import { computed } from "vue";
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { BillingRecord } from "../../types";
 import type { BillingSplitAllocationRow, BillingSplitPaymentForm } from "../../views/billing/forms";
-import { paymentStrategyOptions } from "../../views/billing/viewMeta";
+import { paymentStrategyOptions, receiptAccountOptions } from "../../views/billing/viewMeta";
 
 const props = defineProps<{
   visible: boolean;
@@ -53,6 +53,25 @@ const dialogTitle = computed(() => `分摊收款 - ${props.targetRecord?.custome
               <el-option
                 v-for="item in paymentStrategyOptions"
                 :key="`split-strategy-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="8">
+          <el-form-item label="入账账户">
+            <el-select
+              v-model="props.form.receipt_account"
+              filterable
+              allow-create
+              default-first-option
+            >
+              <el-option
+                v-for="item in receiptAccountOptions"
+                :key="`split-account-${item.value}`"
                 :label="item.label"
                 :value="item.value"
               />

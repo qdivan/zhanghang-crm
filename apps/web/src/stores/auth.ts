@@ -24,6 +24,9 @@ function isUserInfo(value: unknown): value is UserInfo {
     typeof value.role === "string" &&
     typeof value.auth_source === "string" &&
     typeof value.ldap_dn === "string" &&
+    Array.isArray(value.granted_read_modules) &&
+    (typeof value.manager_user_id === "number" || value.manager_user_id === null) &&
+    typeof value.manager_username === "string" &&
     typeof value.is_active === "boolean" &&
     typeof value.created_at === "string" &&
     (typeof value.last_login_at === "string" || value.last_login_at === null)

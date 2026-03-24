@@ -1,4 +1,4 @@
-export type UserRole = "OWNER" | "ADMIN" | "ACCOUNTANT";
+export type UserRole = "OWNER" | "ADMIN" | "MANAGER" | "ACCOUNTANT";
 
 export interface UserInfo {
   id: number;
@@ -6,6 +6,9 @@ export interface UserInfo {
   auth_source: "LOCAL" | "LDAP" | string;
   ldap_dn: string;
   role: UserRole;
+  granted_read_modules: DataAccessModule[];
+  manager_user_id: number | null;
+  manager_username: string;
   is_active: boolean;
   created_at: string;
   last_login_at: string | null;
@@ -17,6 +20,7 @@ export interface UserCreatePayload {
   username: string;
   password: string;
   role: UserRole;
+  manager_user_id?: number | null;
   is_active: boolean;
 }
 
@@ -24,6 +28,7 @@ export interface UserUpdatePayload {
   username?: string;
   password?: string;
   role?: UserRole;
+  manager_user_id?: number | null;
   is_active?: boolean;
 }
 
@@ -234,6 +239,10 @@ export interface CustomerTimelineEntry {
   content: string;
   note: string;
   amount: number | null;
+  status: string;
+  reminder_at: string | null;
+  completed_at: string | null;
+  result: string;
   actor_username: string;
   extra: string;
 }
@@ -241,17 +250,57 @@ export interface CustomerTimelineEntry {
 export interface CustomerTimelineEventCreatePayload {
   occurred_at: string;
   event_type: string;
+  status: string;
+  reminder_at: string | null;
+  completed_at: string | null;
   content: string;
   note: string;
+  result: string;
   amount: number | null;
+}
+
+export interface CustomerTimelineEventUpdatePayload {
+  occurred_at?: string;
+  event_type?: string;
+  status?: string;
+  reminder_at?: string | null;
+  completed_at: string | null;
+  content?: string;
+  note?: string;
+  result?: string;
+  amount?: number | null;
 }
 
 export interface AddressResource {
   id: number;
   category: string;
   contact_info: string;
+  served_companies: string;
   description: string;
   next_action: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CommonLibraryModuleType =
+  | "TEMPLATE"
+  | "DIRECTORY"
+  | "EXTENSION_A"
+  | "EXTENSION_B"
+  | "EXTENSION_C";
+
+export type CommonLibraryVisibility = "INTERNAL" | "PUBLIC";
+
+export interface CommonLibraryItem {
+  id: number;
+  module_type: CommonLibraryModuleType;
+  visibility: CommonLibraryVisibility;
+  category: string;
+  title: string;
+  content: string;
+  phone: string;
+  address: string;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -284,6 +333,10 @@ export interface BillingRecord {
   status: "CLEARED" | "FULL_ARREARS" | "PARTIAL";
   received_amount: number;
   outstanding_amount: number;
+  receivable_period_text: string;
+  latest_payment_at: string | null;
+  latest_payment_amount: number;
+  latest_receipt_account: string;
   note: string;
   extra_note: string;
   color_tag: string;
@@ -316,12 +369,14 @@ export interface BillingCreatePayload {
 export interface BillingActivity {
   id: number;
   billing_record_id: number;
+  payment_id: number | null;
   activity_type: "REMINDER" | "PAYMENT";
   occurred_at: string;
   actor_id: number;
   actor_username: string;
   amount: number;
   payment_nature: "" | "MONTHLY" | "YEARLY" | "ONE_OFF";
+  receipt_account: string;
   is_prepay: boolean;
   is_settlement: boolean;
   content: string;
@@ -391,6 +446,7 @@ export interface BillingLedgerEntryItem {
   balance: number;
   source_type: "RECEIVABLE" | "PAYMENT" | string;
   billing_record_id: number | null;
+  receipt_account: string;
 }
 
 export interface BillingLedgerMonthlySummaryItem {
@@ -411,6 +467,35 @@ export interface BillingLedgerData {
   balance: number;
   monthly_summaries: BillingLedgerMonthlySummaryItem[];
   entries: BillingLedgerEntryItem[];
+}
+
+export interface BillingReceiptAccountSummaryItem {
+  receipt_account: string;
+  payment_count: number;
+  total_received: number;
+  last_received_at: string | null;
+}
+
+export interface BillingReceiptAccountEntryItem {
+  occurred_at: string;
+  receipt_account: string;
+  customer_name: string;
+  summary: string;
+  received_amount: number;
+  cumulative_received: number;
+  actor_username: string;
+  payment_id: number | null;
+  billing_record_id: number | null;
+}
+
+export interface BillingReceiptAccountLedgerData {
+  receipt_account: string | null;
+  date_from: string | null;
+  date_to: string | null;
+  total_received: number;
+  payment_count: number;
+  account_summaries: BillingReceiptAccountSummaryItem[];
+  entries: BillingReceiptAccountEntryItem[];
 }
 
 export type TodoPriority = "HIGH" | "MEDIUM" | "LOW";
@@ -445,7 +530,7 @@ export interface TodoCreatePayload {
 
 export interface SystemTodoItem {
   id: string;
-  module: "LEAD" | "BILLING";
+  module: "LEAD" | "BILLING" | "CUSTOMER";
   priority: TodoPriority;
   title: string;
   description: string;

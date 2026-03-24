@@ -1,5 +1,8 @@
 export type BillingFilters = {
   keyword: string;
+  customer_id: number | null;
+  billing_month: string;
+  receipt_account: string;
   contact_name: string;
   payment_method: string;
   status: string;
@@ -10,6 +13,7 @@ export type BillingActivityForm = {
   occurred_at: string;
   amount: number;
   payment_nature: "" | "MONTHLY" | "YEARLY" | "ONE_OFF";
+  receipt_account: string;
   is_prepay: boolean;
   is_settlement: boolean;
   content: string;
@@ -36,6 +40,7 @@ export type BillingSplitPaymentForm = {
   occurred_at: string;
   amount: number;
   strategy: "DUE_DATE_ASC" | "SERIAL_ASC" | "AMOUNT_DESC";
+  receipt_account: string;
   note: string;
 };
 
@@ -57,6 +62,9 @@ export type BillingTerminateForm = {
 export function createBillingFilters(): BillingFilters {
   return {
     keyword: "",
+    customer_id: null,
+    billing_month: "",
+    receipt_account: "",
     contact_name: "",
     payment_method: "",
     status: "",
@@ -88,6 +96,7 @@ export function createBillingActivityForm(today: string): BillingActivityForm {
     occurred_at: today,
     amount: 0,
     payment_nature: "",
+    receipt_account: "未指定",
     is_prepay: false,
     is_settlement: false,
     content: "",
@@ -101,6 +110,7 @@ export function createBillingSplitPaymentForm(today: string): BillingSplitPaymen
     occurred_at: today,
     amount: 0,
     strategy: "DUE_DATE_ASC",
+    receipt_account: "未指定",
     note: "",
   };
 }

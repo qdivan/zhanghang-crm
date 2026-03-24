@@ -31,6 +31,7 @@ def list_address_resources(
             or_(
                 AddressResource.category.ilike(key),
                 AddressResource.contact_info.ilike(key),
+                AddressResource.served_companies.ilike(key),
                 AddressResource.description.ilike(key),
                 AddressResource.next_action.ilike(key),
             )
@@ -47,6 +48,7 @@ def create_address_resource(
     data = payload.model_dump()
     data["category"] = data["category"].strip()
     data["contact_info"] = data["contact_info"].strip()
+    data["served_companies"] = data["served_companies"].strip()
     data["description"] = data["description"].strip()
     data["next_action"] = data["next_action"].strip()
     data["notes"] = data["notes"].strip()
@@ -59,7 +61,7 @@ def create_address_resource(
         action="ADDRESS_RESOURCE_CREATED",
         entity_type="ADDRESS_RESOURCE",
         entity_id=payload.category,
-        detail=payload.contact_info,
+        detail=payload.contact_info or payload.served_companies,
     )
     db.commit()
     db.refresh(resource)
@@ -77,17 +79,17 @@ def update_address_resource(
         select(AddressResource).where(AddressResource.id == resource_id)
     ).scalar_one_or_none()
     if resource is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address resource not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="挂靠地址不存在")
 
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="没有可更新的字段")
 
     for key, value in update_data.items():
         if value is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Field `{key}` cannot be null",
+                detail=f"字段 {key} 不能为空",
             )
         if isinstance(value, str):
             value = value.strip()

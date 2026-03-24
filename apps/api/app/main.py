@@ -87,11 +87,97 @@ def _ensure_schema_compatibility() -> None:
                     )
                 )
 
+    if "billing_activities" in table_names:
+        activity_columns = {item["name"] for item in inspector.get_columns("billing_activities")}
+        with engine.begin() as conn:
+            if "receipt_account" not in activity_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE billing_activities "
+                        "ADD COLUMN receipt_account VARCHAR(64) DEFAULT ''"
+                    )
+                )
+            if "payment_id" not in activity_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE billing_activities "
+                        "ADD COLUMN payment_id INTEGER"
+                    )
+                )
+
+    if "billing_payments" in table_names:
+        payment_columns = {item["name"] for item in inspector.get_columns("billing_payments")}
+        if "receipt_account" not in payment_columns:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE billing_payments "
+                        "ADD COLUMN receipt_account VARCHAR(64) DEFAULT ''"
+                    )
+                )
+
     if "leads" in table_names:
         lead_columns = {item["name"] for item in inspector.get_columns("leads")}
         if "related_customer_id" not in lead_columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE leads ADD COLUMN related_customer_id INTEGER"))
+
+    if "address_resources" in table_names:
+        address_columns = {item["name"] for item in inspector.get_columns("address_resources")}
+        if "served_companies" not in address_columns:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE address_resources "
+                        "ADD COLUMN served_companies TEXT DEFAULT ''"
+                    )
+                )
+
+    if "users" in table_names:
+        user_columns = {item["name"] for item in inspector.get_columns("users")}
+        if "manager_user_id" not in user_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN manager_user_id INTEGER"))
+
+    if "customer_timeline_events" in table_names:
+        timeline_columns = {item["name"] for item in inspector.get_columns("customer_timeline_events")}
+        with engine.begin() as conn:
+            if "status" not in timeline_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE customer_timeline_events "
+                        "ADD COLUMN status VARCHAR(16) DEFAULT 'NOTE'"
+                    )
+                )
+            if "reminder_at" not in timeline_columns:
+                conn.execute(text("ALTER TABLE customer_timeline_events ADD COLUMN reminder_at DATE"))
+            if "completed_at" not in timeline_columns:
+                conn.execute(text("ALTER TABLE customer_timeline_events ADD COLUMN completed_at DATE"))
+            if "result" not in timeline_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE customer_timeline_events "
+                        "ADD COLUMN result TEXT DEFAULT ''"
+                    )
+                )
+            if "template_key" not in timeline_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE customer_timeline_events "
+                        "ADD COLUMN template_key VARCHAR(32) DEFAULT ''"
+                    )
+                )
+
+    if "common_library_items" in table_names:
+        library_columns = {item["name"] for item in inspector.get_columns("common_library_items")}
+        if "visibility" not in library_columns:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE common_library_items "
+                        "ADD COLUMN visibility VARCHAR(16) DEFAULT 'INTERNAL'"
+                    )
+                )
 
 
 @app.on_event("startup")

@@ -28,6 +28,25 @@ export const paymentMethodHelpLines = [
   "后收：到期日/账期结束后再收费",
 ];
 
+export const receiptAccountOptions = [
+  { value: "一帆光大", label: "一帆光大" },
+  { value: "一帆青岛", label: "一帆青岛" },
+  { value: "微信", label: "微信" },
+  { value: "支付宝", label: "支付宝" },
+  { value: "聚能", label: "聚能" },
+  { value: "未指定", label: "未指定" },
+];
+
+export const receiptAccountHelpLines = [
+  "收款时请登记实际入账账户，方便老板、部门经理和管理员按账户核对流水。",
+  "同一客户整笔收款分摊到多个收费项时，仍只记一个入账账户。",
+];
+
+export const billingMonthHelpLines = [
+  "按应收期间筛选，例如选择 2025-03 会筛出该月应收范围内的收费项。",
+  "按次项目会按服务日期/到期日期落到对应月份。",
+];
+
 export const billingStatusHelpLines = [
   "清账：已收齐，未收金额为 0",
   "部分收费：已收部分，仍有未收",

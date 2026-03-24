@@ -50,6 +50,7 @@ const createForm = reactive({
   password: "",
   confirm_password: "",
   role: "ACCOUNTANT" as UserRole,
+  manager_user_id: null as number | null,
   is_active: true,
 });
 
@@ -57,6 +58,7 @@ const editForm = reactive({
   id: null as number | null,
   username: "",
   role: "ACCOUNTANT" as UserRole,
+  manager_user_id: null as number | null,
   is_active: true,
   password: "",
 });
@@ -117,16 +119,23 @@ const grantForm = reactive({
 
 const canManageAdminUsers = computed(() => auth.user?.role === "ADMIN");
 const editingSelf = computed(() => editForm.id === auth.user?.id);
+const managerOptions = computed(() =>
+  rows.value.filter((item) => item.role === "MANAGER" && item.is_active),
+);
+const createNeedsManager = computed(() => createForm.role === "ACCOUNTANT");
+const editNeedsManager = computed(() => editForm.role === "ACCOUNTANT");
 
 const roleOptions = computed(() =>
   canManageAdminUsers.value
     ? [
         { label: "老板", value: "OWNER" as UserRole },
         { label: "管理员", value: "ADMIN" as UserRole },
+        { label: "部门经理", value: "MANAGER" as UserRole },
         { label: "会计", value: "ACCOUNTANT" as UserRole },
       ]
     : [
         { label: "老板", value: "OWNER" as UserRole },
+        { label: "部门经理", value: "MANAGER" as UserRole },
         { label: "会计", value: "ACCOUNTANT" as UserRole },
       ],
 );
@@ -139,7 +148,7 @@ const visibleRows = computed(() => {
 
 const grantModuleOptions: Array<{ label: string; value: DataAccessModule }> = [
   { label: "客户列表", value: "CUSTOMER" },
-  { label: "收费收款", value: "BILLING" },
+  { label: "收费明细", value: "BILLING" },
 ];
 
 const filteredGrantRows = computed(() => {
@@ -151,8 +160,8 @@ const filteredGrantRows = computed(() => {
 
 const panelScopeText = computed(() =>
   canManageAdminUsers.value
-    ? "管理员可管理全部本地用户（含管理员）"
-    : "老板可管理除管理员以外的用户",
+    ? "管理员可管理全部本地用户（含管理员），并给会计指定部门经理"
+    : "老板可管理除管理员以外的用户，并给会计指定部门经理",
 );
 
 function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" {
@@ -166,12 +175,14 @@ function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "l
 function roleLabel(role: UserRole): string {
   if (role === "OWNER") return "老板";
   if (role === "ADMIN") return "管理员";
+  if (role === "MANAGER") return "部门经理";
   return "会计";
 }
 
-function roleTagType(role: UserRole): "danger" | "warning" | "success" {
+function roleTagType(role: UserRole): "danger" | "warning" | "primary" | "success" {
   if (role === "OWNER") return "danger";
   if (role === "ADMIN") return "warning";
+  if (role === "MANAGER") return "primary";
   return "success";
 }
 
@@ -197,10 +208,19 @@ function actionLabel(action: string): string {
     LEAD_UNCONVERTED: "撤销转化",
     BILLING_RECORD_CREATED: "收费记录创建",
     BILLING_RECORD_UPDATED: "收费记录更新",
-    BILLING_ACTIVITY_CREATED: "催收/收款日志创建",
+    BILLING_RECORD_RENEWED: "收费记录续费",
+    BILLING_RECORD_TERMINATED: "收费记录终止",
+    BILLING_ACTIVITY_CREATED: "收费明细日志创建",
+    BILLING_PAYMENT_CREATED: "统一收款分摊",
     CUSTOMER_UPDATED: "客户档案更新",
+    CUSTOMER_TIMELINE_EVENT_CREATED: "客户事项创建",
+    CUSTOMER_TIMELINE_EVENT_UPDATED: "客户事项更新",
+    CUSTOMER_TIMELINE_TEMPLATE_APPLIED: "客户模板套用",
     ADDRESS_RESOURCE_CREATED: "地址资源创建",
     ADDRESS_RESOURCE_UPDATED: "地址资源更新",
+    COMMON_LIBRARY_ITEM_CREATED: "常用资料创建",
+    COMMON_LIBRARY_ITEM_UPDATED: "常用资料更新",
+    COMMON_LIBRARY_ITEM_DELETED: "常用资料删除",
     DATA_ACCESS_GRANT_CREATED: "数据授权创建",
     DATA_ACCESS_GRANT_UPDATED: "数据授权更新",
     DATA_ACCESS_GRANT_REVOKED: "数据授权停用",
@@ -217,7 +237,7 @@ function actionLabel(action: string): string {
 
 function moduleLabel(module: DataAccessModule): string {
   if (module === "CUSTOMER") return "客户列表";
-  return "收费收款";
+  return "收费明细";
 }
 
 function resolveErrorMessage(error: any, fallback: string): string {
@@ -236,6 +256,11 @@ function resolveErrorMessage(error: any, fallback: string): string {
     "Cannot delete yourself": "不能删除当前登录账号",
     "老板不能管理管理员账号": "老板不能管理管理员账号",
     "Owner cannot manage admin users": "老板不能管理管理员账号",
+    "直属经理不存在或已停用": "直属经理不存在或已停用",
+    "直属经理必须是部门经理": "直属经理必须是部门经理",
+    "该部门经理仍有关联下属，不能直接改成其他角色": "该部门经理仍有关联下属，不能直接改成其他角色",
+    "该部门经理仍有关联下属，不能直接停用": "该部门经理仍有关联下属，不能直接停用",
+    "直属经理不能设置为自己": "直属经理不能设置为自己",
     "用户不存在": "用户不存在",
     "User not found": "用户不存在",
     "LDAP账号请在LDAP中停用或删除": "LDAP账号请在LDAP中停用或删除",
@@ -248,6 +273,7 @@ function resetCreateForm() {
   createForm.password = "";
   createForm.confirm_password = "";
   createForm.role = "ACCOUNTANT";
+  createForm.manager_user_id = null;
   createForm.is_active = true;
 }
 
@@ -293,6 +319,7 @@ async function submitCreate() {
     username,
     password: createForm.password,
     role: createForm.role,
+    manager_user_id: createNeedsManager.value ? createForm.manager_user_id : null,
     is_active: createForm.is_active,
   };
 
@@ -314,6 +341,7 @@ function openEditDialog(row: ManagedUser) {
   editForm.id = row.id;
   editForm.username = row.username;
   editForm.role = row.role;
+  editForm.manager_user_id = row.manager_user_id;
   editForm.is_active = row.is_active;
   editForm.password = "";
   showEditDialog.value = true;
@@ -337,6 +365,14 @@ async function submitEdit() {
   }
   if (!editingSelf.value && editForm.role !== editingOrigin.value.role) {
     payload.role = editForm.role;
+  }
+  if (
+    !editingSelf.value &&
+    editForm.manager_user_id !== editingOrigin.value.manager_user_id
+  ) {
+    payload.manager_user_id = editNeedsManager.value ? editForm.manager_user_id : null;
+  } else if (!editingSelf.value && !editNeedsManager.value && editingOrigin.value.manager_user_id !== null) {
+    payload.manager_user_id = null;
   }
   if (!editingSelf.value && editForm.is_active !== editingOrigin.value.is_active) {
     payload.is_active = editForm.is_active;
@@ -695,6 +731,14 @@ watch(
                 <template #default="{ row }">
                   <el-tag :type="roleTagType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
                 </template>
+              </el-table-column>
+              <el-table-column
+                label="直属经理"
+                min-width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
+                <template #default="{ row }">{{ row.manager_username || "-" }}</template>
               </el-table-column>
               <el-table-column
                 label="状态"
@@ -1100,6 +1144,16 @@ watch(
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item v-if="createNeedsManager" label="直属经理">
+        <el-select v-model="createForm.manager_user_id" clearable placeholder="可选，选择部门经理">
+          <el-option
+            v-for="item in managerOptions"
+            :key="item.id"
+            :label="item.username"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="showCreateDialog = false">取消</el-button>
@@ -1131,6 +1185,16 @@ watch(
           </el-form-item>
         </el-col>
       </el-row>
+      <el-form-item v-if="editNeedsManager" label="直属经理">
+        <el-select v-model="editForm.manager_user_id" clearable placeholder="可选，选择部门经理" :disabled="editingSelf">
+          <el-option
+            v-for="item in managerOptions"
+            :key="item.id"
+            :label="item.username"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item label="新密码（留空表示不修改）">
         <el-input v-model="editForm.password" type="password" show-password />
       </el-form-item>

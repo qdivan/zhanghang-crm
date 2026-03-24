@@ -19,6 +19,7 @@ from app.schemas.lead import (
 )
 from app.services.audit import write_operation_log
 from app.services.data_access import has_module_read_grant
+from app.services.org_scope import get_manager_subordinate_ids
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -58,8 +59,22 @@ def _next_reminder_date(base_date: Optional[date], reminder_value: str) -> Optio
 
 
 def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_write: bool = False) -> None:
-    if current_user.role != "ACCOUNTANT":
+    if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
+    if current_user.role == "MANAGER":
+        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+        if lead.owner_id in managed_ids:
+            return
+        if lead.customer is not None and lead.customer.assigned_accountant_id in managed_ids:
+            return
+        if lead.related_customer_id is not None:
+            related_customer_assignee = db.execute(
+                select(Customer.assigned_accountant_id).where(Customer.id == lead.related_customer_id)
+            ).scalar_one_or_none()
+            if related_customer_assignee in managed_ids:
+                return
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this lead")
+
     if lead.owner_id == current_user.id:
         return
     # 转化后的客户，允许被分配的会计继续写跟进
@@ -102,7 +117,15 @@ def list_leads(
         stmt = stmt.where(Lead.status == status_filter)
     if owner_id:
         stmt = stmt.where(Lead.owner_id == owner_id)
-    if current_user.role == "ACCOUNTANT":
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        stmt = stmt.where(
+            or_(
+                Lead.owner_id.in_(managed_ids),
+                Lead.customer.has(Customer.assigned_accountant_id.in_(managed_ids)),
+            )
+        )
+    elif current_user.role == "ACCOUNTANT":
         stmt = stmt.where(
             or_(
                 Lead.owner_id == current_user.id,
@@ -137,12 +160,18 @@ def create_lead(
 ):
     if current_user.role == "ACCOUNTANT":
         target_owner_id = current_user.id
+    elif current_user.role == "MANAGER":
+        target_owner_id = payload.owner_id or current_user.id
     else:
         target_owner_id = payload.owner_id or current_user.id
 
     owner = db.execute(select(User).where(User.id == target_owner_id)).scalar_one_or_none()
     if owner is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner not found")
+    if current_user.role == "MANAGER":
+        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+        if target_owner_id != current_user.id and target_owner_id not in managed_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能把线索分配给自己或直属下属")
 
     related_customer_id = payload.related_customer_id
     if related_customer_id is not None:
@@ -155,6 +184,13 @@ def create_lead(
                 or has_module_read_grant(db, current_user.id, "CUSTOMER")
             )
             if not can_link_related_customer:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No access to related customer",
+                )
+        if current_user.role == "MANAGER":
+            managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+            if related_customer.assigned_accountant_id not in managed_ids:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="No access to related customer",
@@ -360,7 +396,7 @@ def list_followups(
 @router.post(
     "/{lead_id}/convert",
     response_model=ConvertLeadResponse,
-    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+    dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))],
 )
 def convert_lead(
     lead_id: int,
@@ -369,6 +405,7 @@ def convert_lead(
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
+    _ensure_lead_access(lead, current_user, db, for_write=True)
     if lead.status == "CONVERTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lead already converted")
 
@@ -400,6 +437,10 @@ def convert_lead(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned accountant not found")
     if accountant.role != "ACCOUNTANT":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be ACCOUNTANT")
+    if current_user.role == "MANAGER":
+        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+        if accountant.id not in managed_ids:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能转给直属下属会计")
 
     if lead.related_customer_id is not None:
         old_customer_name = customer.name
@@ -446,7 +487,7 @@ def convert_lead(
 @router.post(
     "/{lead_id}/unconvert",
     response_model=LeadOut,
-    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+    dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))],
 )
 def unconvert_lead(
     lead_id: int,
@@ -454,6 +495,7 @@ def unconvert_lead(
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
+    _ensure_lead_access(lead, current_user, db, for_write=True)
     if lead.status != "CONVERTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lead is not converted")
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   CollectionTag,
+  Files,
   House,
   Location,
   Management,
@@ -25,21 +26,32 @@ const mobileMenuVisible = ref(false);
 
 const canOpenAdminPanel = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canOpenCostView = computed(() => auth.user?.role === "OWNER");
+const canOpenReceiptReconciliation = computed(
+  () =>
+    auth.user?.role === "OWNER" ||
+    auth.user?.role === "ADMIN" ||
+    auth.user?.role === "MANAGER" ||
+    Boolean(auth.user?.granted_read_modules.includes("BILLING")),
+);
 
 const menuItems = computed(() => {
   const items = [
     { path: "/dashboard", label: "工作台", icon: House },
     { path: "/leads", label: "客户开发", icon: Management },
     { path: "/customers", label: "客户列表", icon: User },
-    { path: "/address-resources", label: "地址资源", icon: Location },
-    { path: "/billing", label: "收费收款", icon: Money },
+    { path: "/billing", label: "收费明细", icon: Money },
   ];
+  if (canOpenReceiptReconciliation.value) {
+    items.push({ path: "/receipt-reconciliation", label: "到账核对", icon: Money });
+  }
+  items.push({ path: "/common-library", label: "常用资料", icon: Files });
   if (canOpenCostView.value) {
     items.push({ path: "/costs", label: "成本与老板视图", icon: CollectionTag });
   }
   if (canOpenAdminPanel.value) {
     items.push({ path: "/admin/users", label: "管理员面板", icon: Setting });
   }
+  items.push({ path: "/address-resources", label: "挂靠地址", icon: Location });
   return items;
 });
 
@@ -52,10 +64,12 @@ const activeMenu = computed(() => {
   if (route.path.startsWith("/dashboard")) return "/dashboard";
   if (route.path.startsWith("/leads")) return "/leads";
   if (route.path.startsWith("/customers")) return "/customers";
-  if (route.path.startsWith("/address-resources")) return "/address-resources";
   if (route.path.startsWith("/billing")) return "/billing";
+  if (route.path.startsWith("/receipt-reconciliation")) return "/receipt-reconciliation";
+  if (route.path.startsWith("/common-library")) return "/common-library";
   if (route.path.startsWith("/costs")) return "/costs";
   if (route.path.startsWith("/admin")) return "/admin/users";
+  if (route.path.startsWith("/address-resources")) return "/address-resources";
   return route.path;
 });
 
@@ -63,6 +77,7 @@ const roleLabel = computed(() => {
   if (!auth.user) return "-";
   if (auth.user.role === "OWNER") return "老板";
   if (auth.user.role === "ADMIN") return "管理员";
+  if (auth.user.role === "MANAGER") return "部门经理";
   return "会计";
 });
 
@@ -142,7 +157,7 @@ const userTagText = computed(() => {
           </el-button>
           <div class="brand-block">
             <div class="title">账航·一帆财税</div>
-            <div class="subtitle">客户开发、管理、收款</div>
+            <div class="subtitle">客户开发、管理、收费、核对</div>
           </div>
         </div>
         <div class="top-right">

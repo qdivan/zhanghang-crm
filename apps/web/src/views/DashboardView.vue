@@ -29,6 +29,12 @@ function priorityLabel(priority: string): string {
   return "中";
 }
 
+function moduleLabel(module: SystemTodoItem["module"]): string {
+  if (module === "LEAD") return "开发";
+  if (module === "BILLING") return "收费";
+  return "客户";
+}
+
 function hasSystemTodoAction(todo: SystemTodoItem): boolean {
   return Boolean((todo.action_path || "").trim() && (todo.action_label || "").trim());
 }
@@ -102,7 +108,7 @@ onMounted(fetchDashboardData);
               <div class="mobile-record-head">
                 <div class="mobile-record-main">
                   <div class="mobile-record-title">{{ row.title }}</div>
-                  <div class="mobile-record-subtitle">{{ row.module }} · 截止 {{ row.due_date || "-" }}</div>
+                  <div class="mobile-record-subtitle">{{ moduleLabel(row.module) }} · 截止 {{ row.due_date || "-" }}</div>
                 </div>
                 <el-tag size="small" :type="row.priority === 'HIGH' ? 'danger' : row.priority === 'LOW' ? 'info' : 'warning'">
                   {{ priorityLabel(row.priority) }}
@@ -115,7 +121,9 @@ onMounted(fetchDashboardData);
             </div>
           </div>
           <el-table v-else :data="systemTodos" stripe border>
-            <el-table-column prop="module" label="模块" width="80" />
+            <el-table-column label="模块" width="80">
+              <template #default="{ row }">{{ moduleLabel(row.module) }}</template>
+            </el-table-column>
             <el-table-column prop="title" label="任务" min-width="180" show-overflow-tooltip />
             <el-table-column label="优先级" width="90">
               <template #default="{ row }">

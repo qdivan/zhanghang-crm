@@ -30,7 +30,7 @@ class LdapSettingsUpdate(BaseModel):
     user_filter: Optional[str] = None
     username_attr: Optional[str] = None
     display_name_attr: Optional[str] = None
-    default_role: Optional[Literal["OWNER", "ADMIN", "ACCOUNTANT"]] = None
+    default_role: Optional[Literal["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"]] = None
 
 
 class LdapSyncResponse(BaseModel):

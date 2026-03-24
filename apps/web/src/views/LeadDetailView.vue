@@ -175,7 +175,7 @@ onMounted(fetchLeadDetail);
     <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="head">
-          <span>{{ isMobile ? "线索详情" : "线索详情（对齐 Excel 明细页）" }}</span>
+          <span>开发来源</span>
           <el-space v-if="lead">
             <el-tag type="info" effect="plain">{{ templateLabel(lead.template_type) }}</el-tag>
             <el-tag effect="plain">{{ statusLabel(lead.status) }}</el-tag>

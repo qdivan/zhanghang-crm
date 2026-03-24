@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,10 +24,12 @@ from app.schemas.customer import (
     CustomerTimelineEntryOut,
     CustomerTimelineEventCreate,
     CustomerTimelineEventOut,
+    CustomerTimelineEventUpdate,
     CustomerUpdate,
 )
 from app.services.audit import write_operation_log
 from app.services.data_access import has_module_read_grant
+from app.services.org_scope import get_manager_subordinate_ids
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -38,12 +41,16 @@ def _ensure_customer_access(
     *,
     for_write: bool = False,
 ) -> None:
-    if current_user.role != "ACCOUNTANT":
+    if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
-    if customer.assigned_accountant_id == current_user.id:
-        return
-    if not for_write and has_module_read_grant(db, current_user.id, "CUSTOMER"):
-        return
+    if current_user.role == "MANAGER":
+        if customer.assigned_accountant_id in set(get_manager_subordinate_ids(db, current_user.id)):
+            return
+    else:
+        if customer.assigned_accountant_id == current_user.id:
+            return
+        if not for_write and has_module_read_grant(db, current_user.id, "CUSTOMER"):
+            return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this customer")
 
 
@@ -57,6 +64,104 @@ def _timeline_event_label(event_type: str) -> str:
         "OTHER": "其他记录",
     }
     return mapping.get(event_type, event_type or "客户记录")
+
+
+def _timeline_event_status_label(status_value: str) -> str:
+    mapping = {
+        "NOTE": "仅记录",
+        "OPEN": "待跟进",
+        "DONE": "已办结",
+    }
+    return mapping.get((status_value or "").strip().upper(), "仅记录")
+
+
+def _normalize_customer_event_status(status_value: str) -> str:
+    normalized = (status_value or "NOTE").strip().upper()
+    if normalized not in {"NOTE", "OPEN", "DONE"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户记录状态不合法")
+    return normalized
+
+
+def _build_customer_event_extra(item: CustomerTimelineEvent) -> str:
+    return _join_note_parts(
+        f"状态：{_timeline_event_status_label(item.status)}",
+        f"提醒：{item.reminder_at}" if item.reminder_at else "",
+        f"办结：{item.completed_at}" if item.completed_at else "",
+        f"结果：{(item.result or '').strip()}" if (item.result or "").strip() else "",
+    )
+
+
+def _parse_customer_base_date(customer: Customer, lead: Lead) -> date:
+    candidates = [
+        (lead.service_start_text or "").strip(),
+        (lead.contact_start_date.isoformat() if lead.contact_start_date else ""),
+    ]
+    for item in candidates:
+        if not item:
+            continue
+        try:
+            return date.fromisoformat(item)
+        except ValueError:
+            continue
+    return customer.created_at.date()
+
+
+def _safe_anniversary(year: int, month: int, day: int) -> date:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        if month == 2 and day == 29:
+            return date(year, 2, 28)
+        raise
+
+
+def _next_anniversary(base_date: date, today: Optional[date] = None) -> date:
+    current = today or date.today()
+    anniversary = _safe_anniversary(current.year, base_date.month, base_date.day)
+    if anniversary < current:
+        anniversary = _safe_anniversary(current.year + 1, base_date.month, base_date.day)
+    return anniversary
+
+
+def _build_hk_company_template_events(customer: Customer, lead: Lead, actor_id: int) -> list[CustomerTimelineEvent]:
+    base_date = _parse_customer_base_date(customer, lead)
+    anniversary = _next_anniversary(base_date)
+    created_on = date.today()
+    return [
+        CustomerTimelineEvent(
+            customer_id=customer.id,
+            occurred_at=created_on,
+            event_type="DOCUMENT",
+            status="OPEN",
+            reminder_at=anniversary - timedelta(days=45),
+            template_key="HK_COMPANY",
+            content="香港公司年审资料准备",
+            note="提前确认董事、股东、注册地址、秘书服务是否有变化，并提醒客户准备资料。",
+            actor_id=actor_id,
+        ),
+        CustomerTimelineEvent(
+            customer_id=customer.id,
+            occurred_at=created_on,
+            event_type="DELIVERY",
+            status="OPEN",
+            reminder_at=anniversary - timedelta(days=30),
+            template_key="HK_COMPANY",
+            content="香港公司商业登记证续期检查",
+            note="确认商业登记证续期时间、应缴费用和付款安排。",
+            actor_id=actor_id,
+        ),
+        CustomerTimelineEvent(
+            customer_id=customer.id,
+            occurred_at=created_on,
+            event_type="DELIVERY",
+            status="OPEN",
+            reminder_at=anniversary - timedelta(days=15),
+            template_key="HK_COMPANY",
+            content="香港公司年审办理与结果回填",
+            note="办理完成后请补充结果、费用和异常情况，便于会计与老板后续查询。",
+            actor_id=actor_id,
+        ),
+    ]
 
 
 def _execution_label(progress_type: str) -> str:
@@ -247,6 +352,7 @@ def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> lis
                     or (f"收款 {amount_text} 元" if item.activity_type == "PAYMENT" and amount_text else "催收记录"),
                     note=_join_note_parts(
                         f"类型 {item.payment_nature}" if item.payment_nature else "",
+                        f"入账账户 {item.receipt_account}" if item.receipt_account else "",
                         "预付" if item.is_prepay else "",
                         "已结清" if item.is_settlement else "",
                         (item.note or "").strip(),
@@ -295,8 +401,12 @@ def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> lis
                     content=(item.content or "").strip() or "客户记录",
                     note=(item.note or "").strip(),
                     amount=float(item.amount) if item.amount is not None else None,
+                    status=(item.status or "").strip(),
+                    reminder_at=item.reminder_at,
+                    completed_at=item.completed_at,
+                    result=(item.result or "").strip(),
                     actor_username=(item.actor_username or "").strip(),
-                    extra="",
+                    extra=_build_customer_event_extra(item),
                 ),
             )
         )
@@ -350,7 +460,10 @@ def list_customers(
                 User.username.ilike(key),
             )
         )
-    if current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+    elif current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
         stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
 
     rows = db.execute(stmt).all()
@@ -479,12 +592,30 @@ def create_customer_timeline_event(
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Content is required")
 
+    event_status = _normalize_customer_event_status(payload.status)
+    reminder_at = payload.reminder_at
+    completed_at = payload.completed_at
+    result = (payload.result or "").strip()
+
+    if event_status == "OPEN" and reminder_at is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="待跟进记录必须设置提醒日期")
+    if event_status == "DONE" and completed_at is None:
+        completed_at = payload.occurred_at
+    if event_status == "NOTE":
+        reminder_at = None
+        completed_at = None
+        result = ""
+
     event = CustomerTimelineEvent(
         customer_id=customer.id,
         occurred_at=payload.occurred_at,
         event_type=(payload.event_type or "COMMUNICATION").strip().upper(),
+        status=event_status,
+        reminder_at=reminder_at,
+        completed_at=completed_at,
         content=content,
         note=(payload.note or "").strip(),
+        result=result,
         amount=payload.amount,
         actor_id=current_user.id,
     )
@@ -500,6 +631,141 @@ def create_customer_timeline_event(
     db.commit()
     db.refresh(event)
     return event
+
+
+@router.patch(
+    "/{customer_id}/timeline-events/{event_id}",
+    response_model=CustomerTimelineEventOut,
+)
+def update_customer_timeline_event(
+    customer_id: int,
+    event_id: int,
+    payload: CustomerTimelineEventUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    _ensure_customer_access(customer, current_user, db, for_write=True)
+
+    event = db.execute(
+        select(CustomerTimelineEvent).where(
+            CustomerTimelineEvent.id == event_id,
+            CustomerTimelineEvent.customer_id == customer_id,
+        )
+    ).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户记录不存在")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "event_type" in update_data:
+        event.event_type = (payload.event_type or event.event_type).strip().upper()
+    if "occurred_at" in update_data:
+        event.occurred_at = payload.occurred_at
+    if "content" in update_data:
+        content = (payload.content or "").strip()
+        if not content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Content is required")
+        event.content = content
+    if "note" in update_data:
+        event.note = (payload.note or "").strip()
+    if "result" in update_data:
+        event.result = (payload.result or "").strip()
+    if "amount" in update_data:
+        event.amount = payload.amount
+    if "reminder_at" in update_data:
+        event.reminder_at = payload.reminder_at
+    if "completed_at" in update_data:
+        event.completed_at = payload.completed_at
+    if "status" in update_data:
+        event.status = _normalize_customer_event_status(payload.status or event.status)
+
+    if event.status == "OPEN" and event.reminder_at is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="待跟进记录必须设置提醒日期")
+    if event.status == "DONE" and event.completed_at is None:
+        event.completed_at = date.today()
+    if event.status == "NOTE":
+        event.reminder_at = None
+        event.completed_at = None
+        event.result = ""
+
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMER_TIMELINE_EVENT_UPDATED",
+        entity_type="CUSTOMER_TIMELINE",
+        entity_id=customer.id,
+        detail=f"event_id={event.id},status={event.status}",
+    )
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@router.post(
+    "/{customer_id}/timeline-templates/{template_key}",
+    response_model=list[CustomerTimelineEventOut],
+    status_code=status.HTTP_201_CREATED,
+)
+def apply_customer_timeline_template(
+    customer_id: int,
+    template_key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    _ensure_customer_access(customer, current_user, db, for_write=True)
+
+    lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id)).scalar_one_or_none()
+    if lead is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source lead not found")
+
+    normalized_key = (template_key or "").strip().lower()
+    if normalized_key != "hk-company":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的客户模板")
+
+    candidates = _build_hk_company_template_events(customer, lead, current_user.id)
+    existing_rows = db.execute(
+        select(CustomerTimelineEvent).where(
+            CustomerTimelineEvent.customer_id == customer.id,
+            CustomerTimelineEvent.template_key == "HK_COMPANY",
+        )
+    ).scalars().all()
+    existing_keys = {
+        (item.template_key or "", item.content or "", item.reminder_at.isoformat() if item.reminder_at else "")
+        for item in existing_rows
+    }
+
+    created: list[CustomerTimelineEvent] = []
+    for item in candidates:
+        dedupe_key = (
+            item.template_key or "",
+            item.content or "",
+            item.reminder_at.isoformat() if item.reminder_at else "",
+        )
+        if dedupe_key in existing_keys:
+            continue
+        db.add(item)
+        created.append(item)
+
+    if not created:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="香港公司模板已应用到当前周期")
+
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMER_TIMELINE_TEMPLATE_APPLIED",
+        entity_type="CUSTOMER",
+        entity_id=customer.id,
+        detail=f"template=HK_COMPANY,count={len(created)}",
+    )
+    db.commit()
+    for item in created:
+        db.refresh(item)
+    return created
 
 
 @router.patch(
@@ -529,6 +795,10 @@ def update_customer(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned accountant not found")
         if accountant.role != "ACCOUNTANT":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be ACCOUNTANT")
+        if current_user.role == "MANAGER":
+            managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+            if accountant.id not in managed_ids:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能把客户改派给非直属下属")
         customer.assigned_accountant_id = accountant.id
 
     if payload.name is not None:
@@ -543,7 +813,7 @@ def update_customer(
         customer.phone = payload.phone
         lead.phone = payload.phone
     if payload.status is not None:
-        if current_user.role == "ACCOUNTANT":
+        if current_user.role in {"ACCOUNTANT", "MANAGER"}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
         customer.status = payload.status
 
