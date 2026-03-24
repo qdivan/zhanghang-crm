@@ -50,6 +50,18 @@
 - `P1`：无
 - `P2`：无
 
+
+## 追加移动端 smoke（390x844）
+- `MS-001` 工作台：首屏统计卡、系统待办卡片无横向空白，按钮可点击。
+  - 截图：`/Users/shangyifan/Documents/New project/output/playwright/real-device/mobile-dashboard.png`
+- `MS-002` 客户档案：信息卡、按钮区、时间线首屏布局正常，无回到旧式大表格。
+  - 截图：`/Users/shangyifan/Documents/New project/output/playwright/real-device/mobile-customer-detail.png`
+- `MS-003` 收费明细：汇总区、筛选区、收费卡片在手机宽度下无明显挤压或横向空白。
+  - 截图：`/Users/shangyifan/Documents/New project/output/playwright/real-device/mobile-billing.png`
+- `MS-004` 到账核对：账户汇总与流水入口在手机宽度下可读，筛选区无挤压溢出。
+  - 截图：`/Users/shangyifan/Documents/New project/output/playwright/real-device/mobile-receipt-reconciliation.png`
+- 结论：补测未发现新的 `P0/P1/P2`。
+
 ## 备注
 - 本轮以“页面收敛 + 实机回归”为主，没有扩新模块。
 - 公开资料页已补做白底低饱和收口，现已和登录页/工作台方向一致。
