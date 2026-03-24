@@ -1,0 +1,160 @@
+{
+  "results": [
+    {
+      "code": "UAT2-003",
+      "role": "boss",
+      "module": "客户开发",
+      "scene": "放弃线索后列表排序与提醒",
+      "expected": "进入已丢失且不再要求继续提醒",
+      "actual": "status=LOST, reminder=不跟进, next=None",
+      "severity": "PASS",
+      "evidence": "API GET /leads -> lead#20"
+    },
+    {
+      "code": "UAT2-004",
+      "role": "boss",
+      "module": "客户档案",
+      "scene": "新增待跟进事项并办结",
+      "expected": "状态、提醒、办结结果完整回写",
+      "actual": "status=DONE, reminder=2026-03-27, completed=2026-03-25, result=UAT2-004 已办结",
+      "severity": "PASS",
+      "evidence": "API /customers/13/timeline-events source_id=6"
+    },
+    {
+      "code": "UAT2-005",
+      "role": "boss",
+      "module": "客户档案",
+      "scene": "同一客户重复套用香港模板",
+      "expected": "同周期重复套用应被拦截",
+      "actual": "status=400, detail=香港公司模板已应用到当前周期",
+      "severity": "PASS",
+      "evidence": "API POST /customers/13/timeline-templates/hk-company"
+    },
+    {
+      "code": "UAT2-006",
+      "role": "accountant",
+      "module": "客户列表",
+      "scene": "直接访问他人客户详情 URL",
+      "expected": "被拦截或看不到越权数据",
+      "actual": "status=403, detail=No access to this customer",
+      "severity": "PASS",
+      "evidence": "API GET /customers/14 as accountant"
+    },
+    {
+      "code": "UAT2-007",
+      "role": "accountant",
+      "module": "收费明细",
+      "scene": "直接访问到账核对 URL",
+      "expected": "被拦截",
+      "actual": "status=403, detail=No access to receipt account ledger",
+      "severity": "PASS",
+      "evidence": "API GET /billing-records/receipt-account-ledger as accountant"
+    },
+    {
+      "code": "UAT2-008",
+      "role": "accountant",
+      "module": "收费明细",
+      "scene": "催收记录输入金额",
+      "expected": "不影响实收，金额仍按 0 处理",
+      "actual": "received_amount=0.0",
+      "severity": "PASS",
+      "evidence": "API GET /billing-records/19/activities + record list"
+    },
+    {
+      "code": "UAT2-009",
+      "role": "accountant",
+      "module": "收费明细",
+      "scene": "收款选择入账账户后到账核对同步",
+      "expected": "收费页与到账核对口径一致",
+      "actual": "latest_receipt_account=支付宝, ledger_matches=2, received=154.0",
+      "severity": "PASS",
+      "evidence": "API POST PAYMENTs + GET receipt-account-ledger?receipt_account=支付宝"
+    },
+    {
+      "code": "UAT2-011",
+      "role": "manager",
+      "module": "客户列表",
+      "scene": "查看非下属客户详情",
+      "expected": "不可见",
+      "actual": "status=403, detail=No access to this customer",
+      "severity": "PASS",
+      "evidence": "API GET /customers/13 as manager"
+    },
+    {
+      "code": "UAT2-012",
+      "role": "manager",
+      "module": "收费明细",
+      "scene": "查看非下属收费单",
+      "expected": "不可见",
+      "actual": "record_count=1, contains_customer_13=False",
+      "severity": "PASS",
+      "evidence": "API GET /billing-records as manager"
+    },
+    {
+      "code": "UAT2-013",
+      "role": "manager",
+      "module": "到账核对",
+      "scene": "切换账户与时间范围",
+      "expected": "只统计下属范围且汇总/流水一致",
+      "actual": "total_received=600.0, entry_sum=600.0, entries=1, all_subordinate=True",
+      "severity": "PASS",
+      "evidence": "API GET /billing-records/receipt-account-ledger?receipt_account=一帆光大 as manager"
+    },
+    {
+      "code": "UAT2-014",
+      "role": "admin",
+      "module": "管理员面板",
+      "scene": "把会计直属经理改派",
+      "expected": "保存后立即生效",
+      "actual": "old_manager_has_customer14=False, new_manager_has_customer14=True",
+      "severity": "PASS",
+      "evidence": "API PATCH /users/4 manager_user_id + GET /customers as old/new manager"
+    },
+    {
+      "code": "UAT2-015",
+      "role": "admin",
+      "module": "管理员面板",
+      "scene": "停用有直属下属的部门经理",
+      "expected": "被正确拦截",
+      "actual": "status=400, detail=该部门经理仍有关联下属，不能直接停用",
+      "severity": "PASS",
+      "evidence": "API PATCH /users/7 {is_active:false}"
+    },
+    {
+      "code": "UAT2-016",
+      "role": "admin",
+      "module": "常用资料",
+      "scene": "内部资料改成公开资料",
+      "expected": "公开页可见且系统页仍可编辑",
+      "actual": "public_hits=1, visibility=PUBLIC",
+      "severity": "PASS",
+      "evidence": "API PATCH /common-library-items/11 visibility=PUBLIC"
+    },
+    {
+      "code": "UAT2-017",
+      "role": "boss",
+      "module": "公开资料",
+      "scene": "公开资料搜索/筛选",
+      "expected": "能定位新增公开资料",
+      "actual": "keyword_hits=1, module_keyword_hits=1",
+      "severity": "PASS",
+      "evidence": "API GET /common-library-items/public?keyword=UAT2-016&module_type=TEMPLATE"
+    },
+    {
+      "code": "UAT2-018",
+      "role": "boss",
+      "module": "到账核对",
+      "scene": "筛选单一账户后累计入账连续正确",
+      "expected": "累计数不倒退",
+      "actual": "entries=2, monotonic=True, temp_entries=2, total_received=154.0",
+      "severity": "PASS",
+      "evidence": "API GET /billing-records/receipt-account-ledger?receipt_account=支付宝"
+    }
+  ],
+  "temp": {
+    "timeline_event_id": 6,
+    "billing_record_id": 19,
+    "temp_manager_id": 8,
+    "library_item_id": 11
+  }
+}
