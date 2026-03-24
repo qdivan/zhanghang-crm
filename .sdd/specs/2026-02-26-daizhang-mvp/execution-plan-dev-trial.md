@@ -56,6 +56,9 @@
 2. 标记是否出现 `P0/P1`
 3. 如果没有 `P0/P1`，继续下一天试运行
 4. 如果出现 `P0/P1`，冻结新增需求，先修缺陷
+5. 如需核对数据是否异常，先执行：
+- `python3 /Users/shangyifan/Documents/New project/scripts/capture_dev_trial_snapshot.py`
+- 再与最新基线文件对比
 
 ## 成功标准
 1. 连续试运行期间没有 `P0`
@@ -67,4 +70,4 @@
 - Dev 真实试运行计划：`IN_PROGRESS`
 - 当前阻塞项：`无`
 - 最新进展：`2026-03-25 已完成 Day 0 基线 smoke、Day 1 桌面端托管巡检（manager/admin）、Day 1 移动端托管巡检（boss/accountant），并生成人工试运行数据基线快照。`
-- 下一步：`进入真实人工试运行，并持续把问题记入反馈日志；如出现 P0/P1，立即冻结新增需求先修缺陷。`
+- 下一步：`进入真实人工试运行，并持续把问题记入反馈日志；如出现 P0/P1，立即冻结新增需求先修缺陷。老板/会计每日执行清单见 output/test-reports/dev-trial-daily-checklist.md。`

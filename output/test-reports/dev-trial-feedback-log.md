@@ -71,6 +71,10 @@
 - 作用：作为真实人工试运行的事实对照基线，用于判断后续数据变化是否异常。
 - 记录口径：线索/客户/收费单/待办/常用资料/账户收款分布。
 
+## 执行辅助
+- 每日清单：`/Users/shangyifan/Documents/New project/output/test-reports/dev-trial-daily-checklist.md`
+- 快照脚本：`python3 /Users/shangyifan/Documents/New project/scripts/capture_dev_trial_snapshot.py`
+
 ## 修复出队规则
 1. `P0`：立即修
 2. `P1`：按影响面排序后集中修
