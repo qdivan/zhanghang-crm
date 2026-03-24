@@ -20,7 +20,7 @@
 ## 每日汇总
 | 日期 | 新增问题数 | P0 | P1 | P2 | P3 | 是否继续试运行 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-03-25 | 0 | 0 | 0 | 0 | 0 | 是 | Day 0 基线 smoke + Day 1 托管巡检完成：boss/accountant/manager/admin 核心页面可用，未发现问题；真实人工试运行待持续记录。 |
+| 2026-03-25 | 0 | 0 | 0 | 0 | 0 | 是 | Day 0 基线 smoke + Day 1 桌面/移动端托管巡检完成：boss/accountant/manager/admin 核心页面可用，未发现问题；真实人工试运行待持续记录。 |
 
 ## Day 0 基线记录
 - 角色 `boss`：已验证登录、客户列表、客户档案、收费明细、到账核对。
@@ -48,6 +48,23 @@
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-18-368Z.yml`
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-38-050Z.yml`
   - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-21-38-762Z.yml`
+
+## Day 1 移动端托管巡检补充
+- 设备：`390x844`。
+- 角色 `boss`：已验证移动端登录、客户开发、收费明细、到账核对。
+- 角色 `accountant`：已验证移动端登录、客户开发、客户列表、收费明细、常用资料。
+- 结果：未发现 `P0/P1/P2/P3`。
+- 说明：移动端关键页面可进入，未出现明显阻塞。
+- 证据：
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-23-43-263Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-23-47-960Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-23-49-376Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-23-50-741Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-11-502Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-16-662Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-17-728Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-19-107Z.yml`
+  - `/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-24T18-24-20-284Z.yml`
 
 ## 修复出队规则
 1. `P0`：立即修
