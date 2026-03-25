@@ -25,6 +25,7 @@ const route = useRoute();
 const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
+const customersHydrated = ref(false);
 const keyword = ref("");
 const rows = ref<CustomerListItem[]>([]);
 const showMobileFilters = ref(false);
@@ -41,6 +42,7 @@ const customerFilterChips = computed(() =>
   keyword.value ? [{ key: "keyword" as const, label: `关键词：${keyword.value}` }] : [],
 );
 const customerFilterChipLabels = computed(() => customerFilterChips.value.map((item) => item.label));
+const showCustomerInitialSkeleton = computed(() => !customersHydrated.value);
 const customerRowActionItems = computed(() => {
   const row = selectedCustomerActionRow.value;
   if (!row) return [];
@@ -94,6 +96,7 @@ async function fetchCustomers() {
     ElMessage.error("获取客户列表失败");
   } finally {
     loading.value = false;
+    customersHydrated.value = true;
   }
 }
 
@@ -219,8 +222,12 @@ onMounted(async () => {
             />
           </div>
           <div class="mobile-toolbar-actions">
-            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
-            <el-button v-if="canManageGrant" plain @click="openGrantSettings">授权</el-button>
+            <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
+              筛选
+            </el-button>
+            <el-button v-if="canManageGrant" class="mobile-row-secondary-button" plain @click="openGrantSettings">
+              授权
+            </el-button>
           </div>
         </div>
         <div v-if="keyword" class="mobile-chip-row customer-mobile-chip-row">
@@ -238,15 +245,48 @@ onMounted(async () => {
             <div class="card-title">客户列表</div>
             <div class="card-subtitle">先看客户，再直接进档案、补收费或回看来源。</div>
           </div>
-          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+          <div v-if="showCustomerInitialSkeleton" class="mobile-skeleton-chip customer-mobile-count-skeleton"></div>
+          <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
 
-        <div v-loading="loading" class="customer-mobile-list">
-          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配的客户</div>
+        <div v-loading="loading && customersHydrated" class="customer-mobile-list">
+          <template v-if="showCustomerInitialSkeleton">
+            <article
+              v-for="index in 4"
+              :key="`customer-skeleton-${index}`"
+              class="customer-mobile-row customer-mobile-skeleton-row"
+            >
+              <div class="customer-mobile-row-top">
+                <div class="mobile-skeleton-line is-lg"></div>
+                <div class="mobile-skeleton-chip"></div>
+              </div>
+              <div class="mobile-skeleton-stack">
+                <div class="mobile-skeleton-line is-md"></div>
+                <div class="mobile-skeleton-line is-xl"></div>
+              </div>
+              <div class="customer-mobile-skeleton-metrics">
+                <div v-for="metricIndex in 4" :key="`customer-skeleton-metric-${index}-${metricIndex}`" class="customer-mobile-skeleton-metric">
+                  <div class="mobile-skeleton-line is-xs"></div>
+                  <div class="mobile-skeleton-line is-sm"></div>
+                </div>
+              </div>
+              <div class="customer-mobile-skeleton-actions">
+                <div class="mobile-skeleton-button"></div>
+                <div class="mobile-skeleton-button"></div>
+              </div>
+            </article>
+          </template>
+          <div v-else-if="!rows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">客户列表</div>
+            <div class="mobile-empty-title">当前没有匹配的客户</div>
+            <div class="mobile-empty-copy">换个关键词再查，或回到开发列表继续推进新增客户。</div>
+          </div>
           <article v-for="row in rows" :key="row.id" class="customer-mobile-row">
             <div class="customer-mobile-row-top">
               <button type="button" class="customer-mobile-name" @click="openCustomerDetail(row)">{{ row.name }}</button>
-              <el-tag size="small" effect="plain">{{ row.accountant_username || "未分配会计" }}</el-tag>
+              <el-tag class="mobile-status-tag" size="small" effect="plain">
+                {{ row.accountant_username || "未分配会计" }}
+              </el-tag>
             </div>
             <div class="customer-mobile-summary">{{ row.contact_name || "-" }} / {{ row.phone || "-" }}</div>
             <div class="customer-mobile-meta">
@@ -285,11 +325,27 @@ onMounted(async () => {
 
             <div class="mobile-action-stack customer-mobile-actions">
               <div class="mobile-action-main">
-                <el-button size="small" type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
-                <el-button v-if="canCreateBilling" size="small" plain @click="openCreateBillingDialog(row)">
+                <el-button class="mobile-row-primary-button" size="small" type="primary" @click="openCustomerDetail(row)">
+                  客户档案
+                </el-button>
+                <el-button
+                  v-if="canCreateBilling"
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  @click="openCreateBillingDialog(row)"
+                >
                   新增收费
                 </el-button>
-                <el-button v-else size="small" plain @click="openLeadDetail(row)">开发来源</el-button>
+                <el-button
+                  v-else
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  @click="openLeadDetail(row)"
+                >
+                  开发来源
+                </el-button>
               </div>
               <div class="mobile-action-sub">
                 <button v-if="canCreateBilling" type="button" class="mobile-action-link" @click="openLeadDetail(row)">
@@ -537,6 +593,10 @@ onMounted(async () => {
   margin-top: 14px;
 }
 
+.customer-mobile-count-skeleton {
+  flex-shrink: 0;
+}
+
 .customer-mobile-row {
   border-top: 1px solid var(--app-border-soft);
   padding-top: 12px;
@@ -552,6 +612,34 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.customer-mobile-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.customer-mobile-skeleton-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.customer-mobile-skeleton-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-bg-soft) 70%, white 30%);
+}
+
+.customer-mobile-skeleton-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .customer-mobile-name {
@@ -702,6 +790,12 @@ onMounted(async () => {
 
   .mobile-actions :deep(.el-button) {
     margin-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .customer-mobile-skeleton-metrics {
+    grid-template-columns: 1fr;
   }
 }
 </style>

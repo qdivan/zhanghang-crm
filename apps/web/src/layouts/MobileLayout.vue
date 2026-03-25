@@ -14,6 +14,8 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { getMobilePrimaryNavItems, getRoleLabel, resolveMobileBackPath } from "../mobile/config";
+import { startMobilePrimaryNavMeasurement } from "../mobile/metrics";
+import { prefetchMobileNavTarget } from "../mobile/prefetch";
 import { useAuthStore } from "../stores/auth";
 
 const auth = useAuthStore();
@@ -95,35 +97,56 @@ function goBack() {
   }
   router.push("/m/todo");
 }
+
+function warmNavTarget(key: keyof typeof navIcons) {
+  prefetchMobileNavTarget(key);
+}
+
+function navigateTo(path: string, label: string) {
+  if (!isNavActive(path)) {
+    startMobilePrimaryNavMeasurement({
+      sourceLabel: currentTitle.value,
+      sourcePath: route.path,
+      targetLabel: label,
+      targetPath: path,
+    });
+  }
+
+  router.push(path);
+}
 </script>
 
 <template>
   <div class="mobile-shell">
     <header class="mobile-shell-header">
-      <div class="mobile-shell-topline">
-        <button v-if="!isPrimaryRoute" class="mobile-shell-back" @click="goBack">返回</button>
-        <div v-else class="mobile-shell-mark">账航 · 一帆财税</div>
-        <div class="mobile-shell-user">{{ userLabel }}</div>
-      </div>
-      <div class="mobile-shell-heading">
-        <div class="mobile-shell-title-block">
-          <component :is="isPrimaryRoute ? currentPrimaryIcon : currentSectionIcon" class="mobile-shell-title-icon" />
-          <div>
-            <div class="mobile-shell-title">{{ currentTitle }}</div>
-            <div v-if="currentSubtitle" class="mobile-shell-copy">{{ currentSubtitle }}</div>
+      <div class="mobile-shell-header-inner">
+        <div class="mobile-shell-topline">
+          <button v-if="!isPrimaryRoute" class="mobile-shell-back" @click="goBack">返回</button>
+          <div v-else class="mobile-shell-mark">账航 · 一帆财税</div>
+          <div class="mobile-shell-user">{{ userLabel }}</div>
+        </div>
+        <div class="mobile-shell-heading">
+          <div class="mobile-shell-title-block">
+            <component :is="isPrimaryRoute ? currentPrimaryIcon : currentSectionIcon" class="mobile-shell-title-icon" />
+            <div class="mobile-shell-title-copy">
+              <div class="mobile-shell-title">{{ currentTitle }}</div>
+              <div v-if="currentSubtitle" class="mobile-shell-copy">{{ currentSubtitle }}</div>
+            </div>
           </div>
         </div>
       </div>
     </header>
 
     <main class="mobile-shell-main">
-      <router-view v-slot="{ Component }">
-        <transition name="mobile-screen" mode="out-in">
-          <div :key="route.fullPath" class="mobile-screen-frame">
-            <component :is="Component" />
-          </div>
-        </transition>
-      </router-view>
+      <div class="mobile-shell-main-inner">
+        <router-view v-slot="{ Component }">
+          <transition name="mobile-screen" mode="out-in">
+            <div :key="route.fullPath" class="mobile-screen-frame">
+              <component :is="Component" />
+            </div>
+          </transition>
+        </router-view>
+      </div>
     </main>
 
     <nav class="mobile-shell-nav">
@@ -133,7 +156,10 @@ function goBack() {
         type="button"
         class="mobile-shell-nav-item"
         :class="{ active: isNavActive(item.path) }"
-        @click="router.push(item.path)"
+        @focus="warmNavTarget(item.key)"
+        @pointerenter="warmNavTarget(item.key)"
+        @touchstart.passive="warmNavTarget(item.key)"
+        @click="navigateTo(item.path, item.label)"
       >
         <component :is="navIcons[item.key]" class="mobile-shell-nav-icon" />
         <span>{{ item.label }}</span>
@@ -159,6 +185,12 @@ function goBack() {
   border-bottom: 1px solid var(--app-border-soft);
   background: rgba(250, 252, 252, 0.94);
   backdrop-filter: blur(14px);
+}
+
+.mobile-shell-header-inner,
+.mobile-shell-main-inner {
+  width: min(100%, 680px);
+  margin: 0 auto;
 }
 
 .mobile-shell-topline {
@@ -202,7 +234,15 @@ function goBack() {
   min-width: 0;
 }
 
+.mobile-shell-title-copy {
+  min-width: 0;
+  flex: 1;
+}
+
 .mobile-shell-title-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
   font-size: 18px;
   color: var(--app-accent-strong);
   flex-shrink: 0;
@@ -236,8 +276,8 @@ function goBack() {
   z-index: 30;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  gap: 4px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(12px);
@@ -247,12 +287,14 @@ function goBack() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 3px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
   color: var(--app-text-muted);
-  padding: 8px 4px 7px;
+  min-height: 48px;
+  padding: 6px 4px 5px;
   font-size: 11px;
 }
 
@@ -262,7 +304,11 @@ function goBack() {
 }
 
 .mobile-shell-nav-icon {
-  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  display: block;
+  color: currentColor;
+  flex-shrink: 0;
 }
 
 .mobile-screen-enter-active,

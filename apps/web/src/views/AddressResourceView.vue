@@ -18,6 +18,7 @@ type ResourceForm = {
 };
 
 const loading = ref(false);
+const resourcesHydrated = ref(false);
 const { isMobile } = useResponsive();
 const route = useRoute();
 const rows = ref<AddressResource[]>([]);
@@ -25,6 +26,7 @@ const keyword = ref("");
 const showDialog = ref(false);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 const dialogTitle = computed(() => (form.id ? "编辑挂靠地址" : "新增挂靠地址"));
+const showAddressInitialSkeleton = computed(() => !resourcesHydrated.value);
 
 const form = reactive<ResourceForm>({
   id: null,
@@ -48,6 +50,7 @@ async function fetchResources() {
     ElMessage.error("获取挂靠地址失败");
   } finally {
     loading.value = false;
+    resourcesHydrated.value = true;
   }
 }
 
@@ -118,8 +121,8 @@ onMounted(fetchResources);
             @keyup.enter="fetchResources"
           />
           <div class="mobile-address-toolbar-actions">
-            <el-button @click="fetchResources">查询</el-button>
-            <el-button type="primary" @click="openCreateDialog">新增地址</el-button>
+            <el-button class="mobile-row-secondary-button" @click="fetchResources">查询</el-button>
+            <el-button class="mobile-row-primary-button" type="primary" @click="openCreateDialog">新增地址</el-button>
           </div>
         </div>
         <div v-if="keyword" class="mobile-chip-row mobile-address-chip-row">
@@ -136,31 +139,66 @@ onMounted(fetchResources);
             <div class="mobile-address-section-title">挂靠地址</div>
             <div class="mobile-address-section-copy">联系人、服务公司和说明集中在这里。</div>
           </div>
-          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+          <div v-if="showAddressInitialSkeleton" class="mobile-skeleton-chip mobile-address-count-skeleton"></div>
+          <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
 
-        <div v-if="!rows.length && !loading" class="mobile-empty-block">当前没有匹配地址资源</div>
-        <div v-else v-loading="loading" class="mobile-address-list">
-          <article v-for="row in rows" :key="row.id" class="mobile-address-row">
-            <div class="mobile-address-row-top">
-              <div>
-                <div class="mobile-address-row-title">{{ row.category || "未分类地址" }}</div>
-                <div class="mobile-address-row-subtitle">{{ row.contact_info || "未填地址 / 联系人" }}</div>
+        <div v-loading="loading && resourcesHydrated" class="mobile-address-list">
+          <template v-if="showAddressInitialSkeleton">
+            <article
+              v-for="index in 4"
+              :key="`address-skeleton-${index}`"
+              class="mobile-address-row mobile-address-skeleton-row"
+            >
+              <div class="mobile-address-row-top">
+                <div class="mobile-skeleton-stack mobile-address-skeleton-copy">
+                  <div class="mobile-skeleton-line is-lg"></div>
+                  <div class="mobile-skeleton-line is-sm"></div>
+                </div>
+                <div class="mobile-skeleton-button"></div>
               </div>
-              <el-button size="small" type="primary" plain @click="openEditDialog(row)">编辑</el-button>
-            </div>
-            <div class="mobile-address-row-grid">
-              <div class="mobile-address-row-item">
-                <span>已服务公司</span>
-                <strong>{{ row.served_companies || "-" }}</strong>
+              <div class="mobile-address-row-grid">
+                <div
+                  v-for="metricIndex in 2"
+                  :key="`address-skeleton-metric-${index}-${metricIndex}`"
+                  class="mobile-address-row-item mobile-address-skeleton-item"
+                >
+                  <div class="mobile-skeleton-line is-xs"></div>
+                  <div class="mobile-skeleton-line is-sm"></div>
+                </div>
               </div>
-              <div class="mobile-address-row-item">
-                <span>资源说明</span>
-                <strong>{{ row.description || "-" }}</strong>
+              <div class="mobile-skeleton-line is-md"></div>
+            </article>
+          </template>
+          <div v-else-if="!rows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">挂靠地址</div>
+            <div class="mobile-empty-title">当前没有匹配地址资源</div>
+            <div class="mobile-empty-copy">换个关键词再查，或直接新增一条地址资源。</div>
+          </div>
+          <template v-else>
+            <article v-for="row in rows" :key="row.id" class="mobile-address-row">
+              <div class="mobile-address-row-top">
+                <div>
+                  <div class="mobile-address-row-title">{{ row.category || "未分类地址" }}</div>
+                  <div class="mobile-address-row-subtitle">{{ row.contact_info || "未填地址 / 联系人" }}</div>
+                </div>
+                <el-button class="mobile-row-secondary-button" size="small" type="primary" plain @click="openEditDialog(row)">
+                  编辑
+                </el-button>
               </div>
-            </div>
-            <div v-if="row.notes" class="mobile-address-row-note">备注 {{ row.notes }}</div>
-          </article>
+              <div class="mobile-address-row-grid">
+                <div class="mobile-address-row-item">
+                  <span>已服务公司</span>
+                  <strong>{{ row.served_companies || "-" }}</strong>
+                </div>
+                <div class="mobile-address-row-item">
+                  <span>资源说明</span>
+                  <strong>{{ row.description || "-" }}</strong>
+                </div>
+              </div>
+              <div v-if="row.notes" class="mobile-address-row-note">备注 {{ row.notes }}</div>
+            </article>
+          </template>
         </div>
       </section>
     </section>
@@ -387,6 +425,10 @@ onMounted(fetchResources);
   color: var(--app-text-primary);
 }
 
+.mobile-address-count-skeleton {
+  flex-shrink: 0;
+}
+
 .mobile-address-section-copy,
 .mobile-address-row-subtitle,
 .mobile-address-row-note {
@@ -407,11 +449,25 @@ onMounted(fetchResources);
   background: var(--app-bg-soft);
 }
 
+.mobile-address-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-address-skeleton-copy {
+  flex: 1;
+}
+
 .mobile-address-row-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
+}
+
+.mobile-address-skeleton-item {
+  gap: 8px;
 }
 
 .mobile-address-row-item {

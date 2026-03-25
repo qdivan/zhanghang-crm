@@ -87,15 +87,20 @@ const customerSignalFacts = computed(() => {
     { label: "收费标准", value: displayText(detail.value.lead.fee_standard) },
   ];
 });
-const customerSummaryRows = computed(() => {
+const customerSummaryHighlights = computed(() => {
   if (!detail.value) return [];
   return [
     { label: "对接人", value: displayContactLine.value },
     { label: "国家 / 地区", value: displayCountry.value },
     { label: "服务方式", value: displayText(detail.value.lead.service_mode) },
-    { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
     { label: "下次提醒", value: displayText(detail.value.lead.next_reminder_at) },
-    { label: "主营产品", value: displayText(detail.value.lead.main_business), multiline: true },
+    { label: "主营产品", value: displayText(detail.value.lead.main_business), wide: true },
+  ];
+});
+const customerSummaryNotes = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
     { label: "介绍人", value: displayText(detail.value.lead.intro) },
     { label: "备注", value: displayText(detail.value.lead.notes), multiline: true },
   ];
@@ -461,29 +466,42 @@ onMounted(fetchDetail);
             <div class="customer-detail-mobile-copy">{{ customerHeroCopy }}</div>
           </div>
           <div class="customer-detail-mobile-primary-actions">
-            <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
+            <el-button class="mobile-row-primary-button" type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
               新增记录
             </el-button>
-            <el-button plain :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
+            <el-button class="mobile-row-secondary-button" plain :disabled="!detail || !canWriteCustomer" @click="openEditDialog">
+              编辑档案
+            </el-button>
           </div>
         </div>
-        <div v-if="detail" class="customer-detail-mobile-focus-strip">
-          <div class="customer-detail-mobile-focus-main">
-            <span>当前维护人</span>
-            <strong>{{ detail.accountant_username || "未分配" }}</strong>
+        <div v-if="detail" class="customer-detail-mobile-summary-card">
+          <div class="customer-detail-mobile-summary-head">
+            <div class="customer-detail-mobile-summary-main">
+              <span class="customer-detail-mobile-summary-kicker">当前维护人</span>
+              <strong>{{ detail.accountant_username || "未分配" }}</strong>
+              <div class="customer-detail-mobile-summary-copy">{{ displayContactLine }}</div>
+            </div>
+            <el-tag
+              class="mobile-status-tag"
+              size="small"
+              effect="plain"
+              :type="detail.lead.next_reminder_at ? 'warning' : 'info'"
+            >
+              {{ displayText(detail.lead.next_reminder_at) }}
+            </el-tag>
           </div>
-          <div class="customer-detail-mobile-focus-meta">
+          <div class="customer-detail-mobile-summary-meta">
             <span v-for="item in customerFocusMeta" :key="item">{{ item }}</span>
           </div>
-        </div>
-        <div v-if="detail" class="customer-detail-mobile-signal-grid">
-          <article v-for="item in customerSignalFacts" :key="item.label" class="customer-detail-mobile-signal">
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </article>
+          <div class="customer-detail-mobile-signal-grid">
+            <article v-for="item in customerSignalFacts" :key="item.label" class="customer-detail-mobile-signal">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
+          </div>
         </div>
         <div class="customer-detail-mobile-secondary-actions">
-          <el-button size="small" plain @click="showMobileSecondaryActionSheet = true">
+          <el-button class="mobile-row-secondary-button" size="small" plain @click="showMobileSecondaryActionSheet = true">
             更多操作
             <el-icon class="el-icon--right"><MoreFilled /></el-icon>
           </el-button>
@@ -491,19 +509,37 @@ onMounted(fetchDetail);
       </section>
 
       <section class="mobile-shell-panel" v-loading="loading">
-        <div class="customer-detail-mobile-section-title">客户信息</div>
-        <el-empty v-if="!detail" description="未找到客户" />
+        <div class="customer-detail-mobile-section-head">
+          <div class="customer-detail-mobile-section-title">客户摘要</div>
+          <div class="customer-detail-mobile-section-copy">首屏只保留会影响跟进、收费和交接判断的核心信息。</div>
+        </div>
+        <div v-if="!detail" class="mobile-empty-block">
+          <div class="mobile-empty-kicker">客户信息</div>
+          <div class="mobile-empty-title">未找到客户</div>
+          <div class="mobile-empty-copy">返回客户列表重新选择档案，或检查当前跳转路径。</div>
+        </div>
         <template v-else>
-          <div class="customer-detail-mobile-stack">
+          <div class="customer-detail-mobile-summary-grid">
             <div
-              v-for="item in customerSummaryRows"
+              v-for="item in customerSummaryHighlights"
               :key="item.label"
-              class="customer-detail-mobile-row"
-              :class="{ multiline: item.multiline }"
+              class="customer-detail-mobile-summary-tile"
+              :class="{ wide: item.wide }"
             >
               <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
             </div>
+          </div>
+          <div v-if="customerSummaryNotes.length" class="customer-detail-mobile-note-stack">
+            <article
+              v-for="item in customerSummaryNotes"
+              :key="item.label"
+              class="customer-detail-mobile-note-card"
+              :class="{ multiline: item.multiline }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
           </div>
         </template>
       </section>
@@ -511,9 +547,13 @@ onMounted(fetchDetail);
       <section class="mobile-shell-panel">
         <div class="customer-detail-mobile-section-head">
           <div class="customer-detail-mobile-section-title">客户时间线</div>
-          <el-tag size="small" type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
+          <el-tag class="mobile-count-tag" size="small" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
         </div>
-        <div v-if="!(detail?.timeline.length ?? 0)" class="mobile-empty-block">还没有客户时间线记录</div>
+        <div v-if="!(detail?.timeline.length ?? 0)" class="mobile-empty-block">
+          <div class="mobile-empty-kicker">客户时间线</div>
+          <div class="mobile-empty-title">还没有客户时间线记录</div>
+          <div class="mobile-empty-copy">先补一条客户记录，后续沟通、提醒和办结状态都会在这里累计。</div>
+        </div>
         <div v-else class="customer-detail-mobile-timeline">
           <article
             v-for="item in detail?.timeline ?? []"
@@ -526,10 +566,17 @@ onMounted(fetchDetail);
                 <div class="customer-detail-mobile-entry-copy">{{ timelineTypeLabel(item.source_type) }} · {{ item.actor_username || "系统" }}</div>
               </div>
               <div class="customer-detail-mobile-entry-side">
-                <el-tag size="small" :type="timelineTypeTag(item.source_type)" effect="plain">
+                <el-tag class="mobile-status-tag" size="small" :type="timelineTypeTag(item.source_type)" effect="plain">
                   {{ item.occurred_at }}
                 </el-tag>
-                <el-button v-if="canCompleteTimeline(item)" size="small" type="primary" plain @click="openCompleteDialog(item)">
+                <el-button
+                  v-if="canCompleteTimeline(item)"
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  type="primary"
+                  plain
+                  @click="openCompleteDialog(item)"
+                >
                   办结
                 </el-button>
               </div>
@@ -1065,6 +1112,14 @@ onMounted(fetchDetail);
   color: var(--app-text-muted);
 }
 
+.customer-detail-mobile-section-copy {
+  max-width: 220px;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
+  color: var(--app-text-muted);
+}
+
 .customer-detail-mobile-primary-actions,
 .customer-detail-mobile-secondary-actions {
   display: flex;
@@ -1080,7 +1135,7 @@ onMounted(fetchDetail);
   margin-top: 12px;
 }
 
-.customer-detail-mobile-focus-strip {
+.customer-detail-mobile-summary-card {
   margin-top: 12px;
   padding: 14px;
   border: 1px solid rgba(77, 128, 150, 0.18);
@@ -1089,26 +1144,42 @@ onMounted(fetchDetail);
     var(--app-bg-soft);
 }
 
-.customer-detail-mobile-focus-main {
+.customer-detail-mobile-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customer-detail-mobile-summary-main {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  flex: 1;
 }
 
-.customer-detail-mobile-focus-main span,
+.customer-detail-mobile-summary-kicker,
 .customer-detail-mobile-signal span,
-.customer-detail-mobile-row span {
+.customer-detail-mobile-summary-tile span,
+.customer-detail-mobile-note-card span {
   font-size: 11px;
   color: var(--app-text-muted);
 }
 
-.customer-detail-mobile-focus-main strong {
-  font-size: 28px;
+.customer-detail-mobile-summary-main strong {
+  font-size: 30px;
   line-height: 0.95;
   color: var(--app-text-primary);
 }
 
-.customer-detail-mobile-focus-meta {
+.customer-detail-mobile-summary-copy {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--app-text-secondary);
+}
+
+.customer-detail-mobile-summary-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
@@ -1134,33 +1205,50 @@ onMounted(fetchDetail);
 }
 
 .customer-detail-mobile-signal strong,
-.customer-detail-mobile-row strong {
+.customer-detail-mobile-summary-tile strong,
+.customer-detail-mobile-note-card strong {
   font-size: 13px;
   line-height: 1.45;
   color: var(--app-text-primary);
 }
 
-.customer-detail-mobile-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.customer-detail-mobile-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
 }
 
-.customer-detail-mobile-row {
+.customer-detail-mobile-summary-tile {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.customer-detail-mobile-summary-tile.wide {
+  grid-column: span 2;
+}
+
+.customer-detail-mobile-note-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.customer-detail-mobile-note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0 0;
   border-top: 1px solid var(--app-border-soft);
 }
 
-.customer-detail-mobile-row.multiline strong {
+.customer-detail-mobile-note-card.multiline strong {
   line-height: 1.6;
-}
-
-.customer-detail-mobile-row:first-child {
-  padding-top: 0;
-  border-top: none;
 }
 
 .customer-detail-mobile-timeline {
@@ -1229,8 +1317,26 @@ onMounted(fetchDetail);
     justify-content: flex-start;
   }
 
+  .customer-detail-mobile-section-head,
+  .customer-detail-mobile-summary-head {
+    flex-direction: column;
+  }
+
+  .customer-detail-mobile-section-copy {
+    max-width: none;
+    text-align: left;
+  }
+
   .customer-detail-mobile-signal-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .customer-detail-mobile-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-detail-mobile-summary-tile.wide {
+    grid-column: span 1;
   }
 }
 

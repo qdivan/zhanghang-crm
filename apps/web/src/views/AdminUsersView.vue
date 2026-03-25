@@ -4,6 +4,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import { formatDateTimeInBrowserTimeZone } from "../utils/time";
 import type {
@@ -29,6 +30,7 @@ type GrantStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "EFFECTIVE";
 const auth = useAuthStore();
 const route = useRoute();
 const activeTab = ref<"users" | "grants" | "security" | "ldap" | "logs">("users");
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const loading = ref(false);
 const createLoading = ref(false);
@@ -163,6 +165,23 @@ const panelScopeText = computed(() =>
     ? "管理员可管理全部本地用户（含管理员），并给会计指定部门经理"
     : "老板可管理除管理员以外的用户，并给会计指定部门经理",
 );
+const mobileTabItems = [
+  { key: "users", label: "用户" },
+  { key: "grants", label: "授权" },
+  { key: "security", label: "安全" },
+  { key: "ldap", label: "LDAP" },
+  { key: "logs", label: "日志" },
+] as const;
+const mobileUserStats = computed(() => [
+  { label: "全部", value: rows.value.length },
+  { label: "启用", value: rows.value.filter((item) => item.is_active).length },
+  { label: "停用", value: rows.value.filter((item) => !item.is_active).length },
+]);
+const mobileGrantStats = computed(() => [
+  { label: "全部", value: grantRows.value.length },
+  { label: "生效中", value: grantRows.value.filter((item) => item.is_effective).length },
+  { label: "停用", value: grantRows.value.filter((item) => !item.is_active).length },
+]);
 
 function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" {
   if (tab === "grants") return "grants";
@@ -669,7 +688,372 @@ watch(
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page admin-mobile-page">
+      <section class="mobile-shell-panel">
+        <div class="admin-mobile-hero">
+          <div class="admin-mobile-title-block">
+            <div class="admin-mobile-eyebrow">{{ canManageAdminUsers ? "管理员视图" : "老板视图" }}</div>
+            <div class="admin-mobile-title">用户与权限</div>
+            <div class="admin-mobile-copy">{{ panelScopeText }}</div>
+          </div>
+          <el-tag class="mobile-count-tag" size="small" effect="plain">{{ roleOptions.length }} 类角色</el-tag>
+        </div>
+        <div class="admin-mobile-tab-row">
+          <button
+            v-for="item in mobileTabItems"
+            :key="item.key"
+            type="button"
+            class="admin-mobile-tab"
+            :class="{ active: activeTab === item.key }"
+            @click="activeTab = item.key"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+      </section>
+
+      <template v-if="activeTab === 'users'">
+        <section class="mobile-shell-panel">
+          <div class="mobile-toolbar">
+            <div class="mobile-toolbar-main">
+              <div class="admin-mobile-section-title">用户管理</div>
+              <div class="admin-mobile-section-copy">账号、角色和直属经理都在这里维护。</div>
+            </div>
+            <div class="mobile-toolbar-actions">
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ visibleRows.length }} 人</el-tag>
+              <el-button class="mobile-row-primary-button" type="primary" @click="openCreateDialog">新增用户</el-button>
+            </div>
+          </div>
+          <div class="admin-mobile-filter-grid">
+            <el-input
+              v-model="filters.keyword"
+              placeholder="用户名 / 角色"
+              clearable
+              @keyup.enter="fetchUsers"
+            />
+            <el-select v-model="filters.role" placeholder="全部角色" clearable>
+              <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="filters.status" placeholder="全部状态">
+              <el-option label="全部" value="ALL" />
+              <el-option label="启用" value="ACTIVE" />
+              <el-option label="停用" value="INACTIVE" />
+            </el-select>
+          </div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-secondary-button" plain @click="fetchUsers">查询</el-button>
+          </div>
+          <div class="mobile-chip-row admin-mobile-stat-row">
+            <span v-for="item in mobileUserStats" :key="item.label" class="mobile-chip">{{ item.label }} {{ item.value }}</span>
+          </div>
+        </section>
+
+        <section class="mobile-shell-panel">
+          <div v-if="loading && !visibleRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">用户管理</div>
+            <div class="mobile-empty-title">正在加载账号</div>
+            <div class="mobile-empty-copy">用户、角色和直属经理会在这里显示。</div>
+          </div>
+          <div v-else-if="!visibleRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">用户管理</div>
+            <div class="mobile-empty-title">没有符合条件的账号</div>
+            <div class="mobile-empty-copy">换一个关键词或状态，再查一次。</div>
+          </div>
+          <div v-else class="mobile-record-list">
+            <article v-for="row in visibleRows" :key="row.id" class="mobile-record-card admin-mobile-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.username }}</div>
+                  <div class="mobile-record-subtitle">{{ roleLabel(row.role) }} · {{ authSourceLabel(row.auth_source) }}</div>
+                </div>
+                <el-tag class="mobile-status-tag" size="small" effect="plain" :type="row.is_active ? 'success' : 'info'">
+                  {{ row.is_active ? "启用" : "停用" }}
+                </el-tag>
+              </div>
+              <div class="mobile-record-metrics">
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">直属经理</div>
+                  <div class="mobile-metric-value">{{ row.manager_username || "-" }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">最近登录</div>
+                  <div class="mobile-metric-value">{{ formatDateTimeInBrowserTimeZone(row.last_login_at) }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">创建时间</div>
+                  <div class="mobile-metric-value">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">账号来源</div>
+                  <div class="mobile-metric-value">{{ authSourceLabel(row.auth_source) }}</div>
+                </div>
+              </div>
+              <div class="mobile-action-main">
+                <el-button class="mobile-row-primary-button" size="small" type="primary" @click="openEditDialog(row)">编辑</el-button>
+                <el-button
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  type="danger"
+                  :disabled="row.id === auth.user?.id"
+                  :loading="deleteLoadingUserId === row.id"
+                  @click="removeUser(row)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="activeTab === 'grants'">
+        <section class="mobile-shell-panel">
+          <div class="mobile-toolbar">
+            <div class="mobile-toolbar-main">
+              <div class="admin-mobile-section-title">数据授权</div>
+              <div class="admin-mobile-section-copy">临时只读授权只放开查看，不放开写入。</div>
+            </div>
+            <div class="mobile-toolbar-actions">
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ filteredGrantRows.length }} 条</el-tag>
+              <el-button class="mobile-row-primary-button" type="primary" @click="openGrantDialog">新增授权</el-button>
+            </div>
+          </div>
+          <div class="admin-mobile-filter-grid">
+            <el-input
+              v-model="grantFilters.keyword"
+              placeholder="会计 / 授权原因"
+              clearable
+              @keyup.enter="fetchDataAccessGrants"
+            />
+            <el-select v-model="grantFilters.module" placeholder="全部模块" clearable>
+              <el-option v-for="item in grantModuleOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="grantFilters.status" placeholder="全部状态">
+              <el-option label="全部" value="ALL" />
+              <el-option label="生效中" value="EFFECTIVE" />
+              <el-option label="启用" value="ACTIVE" />
+              <el-option label="停用" value="INACTIVE" />
+            </el-select>
+          </div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-secondary-button" plain @click="fetchDataAccessGrants">查询</el-button>
+          </div>
+          <div class="mobile-chip-row admin-mobile-stat-row">
+            <span v-for="item in mobileGrantStats" :key="item.label" class="mobile-chip">{{ item.label }} {{ item.value }}</span>
+          </div>
+        </section>
+
+        <section class="mobile-shell-panel">
+          <div v-if="grantLoading && !filteredGrantRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">数据授权</div>
+            <div class="mobile-empty-title">正在加载授权</div>
+            <div class="mobile-empty-copy">会计、模块和生效状态会在这里显示。</div>
+          </div>
+          <div v-else-if="!filteredGrantRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">数据授权</div>
+            <div class="mobile-empty-title">没有符合条件的授权</div>
+            <div class="mobile-empty-copy">可以换一个筛选条件，或直接新增授权。</div>
+          </div>
+          <div v-else class="mobile-record-list">
+            <article v-for="row in filteredGrantRows" :key="row.id" class="mobile-record-card admin-mobile-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.grantee_username }}</div>
+                  <div class="mobile-record-subtitle">{{ moduleLabel(row.module) }} · {{ row.reason || "未填写授权原因" }}</div>
+                </div>
+                <div class="admin-mobile-badge-stack">
+                  <el-tag class="mobile-status-tag" size="small" effect="plain" :type="row.is_effective ? 'success' : 'warning'">
+                    {{ row.is_effective ? "生效中" : "未生效" }}
+                  </el-tag>
+                  <el-tag class="mobile-status-tag" size="small" effect="plain" :type="row.is_active ? 'success' : 'info'">
+                    {{ row.is_active ? "启用" : "停用" }}
+                  </el-tag>
+                </div>
+              </div>
+              <div class="mobile-record-metrics">
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">生效时间</div>
+                  <div class="mobile-metric-value">{{ formatDateTimeInBrowserTimeZone(row.starts_at) }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">失效时间</div>
+                  <div class="mobile-metric-value">{{ formatDateTimeInBrowserTimeZone(row.ends_at) }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">授权人</div>
+                  <div class="mobile-metric-value">{{ row.granted_by_username || "-" }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">创建时间</div>
+                  <div class="mobile-metric-value">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</div>
+                </div>
+              </div>
+              <div class="mobile-action-main">
+                <el-button
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  :type="row.is_active ? 'danger' : 'primary'"
+                  :loading="grantToggleLoadingId === row.id"
+                  @click="toggleGrantActive(row, !row.is_active)"
+                >
+                  {{ row.is_active ? "停用" : "启用" }}
+                </el-button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="activeTab === 'security'">
+        <section class="mobile-shell-panel" v-loading="securityLoading">
+          <div class="admin-mobile-section-title">安全设置</div>
+          <div class="admin-mobile-section-copy">本地账号 IP 锁定只作用于本地登录，不影响 LDAP。</div>
+          <div class="mobile-chip-row admin-mobile-stat-row">
+            <span class="mobile-chip">窗口 {{ securityForm.local_ip_lock_window_minutes }} 分钟</span>
+            <span class="mobile-chip">阈值 {{ securityForm.local_ip_lock_max_attempts }} 次</span>
+          </div>
+          <el-form label-position="top" class="admin-mobile-form">
+            <el-form-item label="启用本地账号 IP 锁定">
+              <el-switch v-model="securityForm.local_ip_lock_enabled" active-text="启用" inactive-text="停用" />
+            </el-form-item>
+            <el-form-item label="统计窗口（分钟）">
+              <el-input-number
+                v-model="securityForm.local_ip_lock_window_minutes"
+                :min="1"
+                :max="1440"
+                :controls="false"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="失败阈值（次）">
+              <el-input-number
+                v-model="securityForm.local_ip_lock_max_attempts"
+                :min="1"
+                :max="1000"
+                :controls="false"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-form>
+          <div class="admin-mobile-note">默认规则是 5 分钟内同一 IP 连续输错 20 次后锁定。</div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-primary-button" type="primary" :loading="securitySaving" @click="saveSecuritySettings">保存安全设置</el-button>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="activeTab === 'ldap'">
+        <section class="mobile-shell-panel" v-loading="ldapLoading">
+          <div class="admin-mobile-section-title">LDAP 设置</div>
+          <div class="admin-mobile-section-copy">保存后可同步 LDAP 账号，默认角色按这里的配置落地。</div>
+          <div class="mobile-chip-row admin-mobile-stat-row">
+            <span class="mobile-chip">{{ hasBindPassword ? "已保存绑定密码" : "未保存绑定密码" }}</span>
+          </div>
+          <el-form label-position="top" class="admin-mobile-form">
+            <el-form-item label="启用 LDAP">
+              <el-switch v-model="ldapForm.enabled" active-text="启用" inactive-text="停用" />
+            </el-form-item>
+            <el-form-item label="默认角色">
+              <el-select v-model="ldapForm.default_role">
+                <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="服务器地址">
+              <el-input v-model="ldapForm.server_url" placeholder="如 ldaps://ldap.example.com:636" />
+            </el-form-item>
+            <el-form-item label="Base DN">
+              <el-input v-model="ldapForm.base_dn" placeholder="如 dc=example,dc=com" />
+            </el-form-item>
+            <el-form-item label="Bind DN">
+              <el-input v-model="ldapForm.bind_dn" placeholder="如 uid=admin,cn=users,dc=example,dc=com" />
+            </el-form-item>
+            <el-form-item label="Bind Password（留空不修改）">
+              <el-input v-model="ldapForm.bind_password" type="password" show-password />
+            </el-form-item>
+            <el-form-item label="用户搜索基准 DN">
+              <el-input v-model="ldapForm.user_base_dn" placeholder="如 cn=users,dc=example,dc=com" />
+            </el-form-item>
+            <el-form-item label="用户过滤器">
+              <el-input v-model="ldapForm.user_filter" placeholder="如 (uid=*)" />
+            </el-form-item>
+            <el-form-item label="用户名属性">
+              <el-input v-model="ldapForm.username_attr" placeholder="如 uid" />
+            </el-form-item>
+            <el-form-item label="显示名属性">
+              <el-input v-model="ldapForm.display_name_attr" placeholder="如 cn" />
+            </el-form-item>
+          </el-form>
+          <div class="mobile-action-main">
+            <el-button class="mobile-row-primary-button" type="primary" :loading="ldapSaving" @click="saveLdapSettings">保存设置</el-button>
+            <el-button class="mobile-row-secondary-button" plain :loading="ldapSyncing" @click="syncLdapUsers">立即同步</el-button>
+          </div>
+        </section>
+      </template>
+
+      <template v-else>
+        <section class="mobile-shell-panel">
+          <div class="mobile-toolbar">
+            <div class="mobile-toolbar-main">
+              <div class="admin-mobile-section-title">操作日志</div>
+              <div class="admin-mobile-section-copy">按关键词、动作和对象类型筛最近的后台操作。</div>
+            </div>
+            <div class="mobile-toolbar-actions">
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ logRows.length }} 条</el-tag>
+            </div>
+          </div>
+          <div class="admin-mobile-filter-grid">
+            <el-input v-model="logFilters.keyword" placeholder="操作描述 / 对象" clearable @keyup.enter="fetchLogs" />
+            <el-input v-model="logFilters.action" placeholder="如 USER_UPDATED" clearable />
+            <el-input v-model="logFilters.entity_type" placeholder="如 USER / LDAP" clearable />
+            <el-input-number v-model="logFilters.limit" :min="1" :max="500" :controls="false" />
+          </div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-secondary-button" plain @click="fetchLogs">查询</el-button>
+          </div>
+        </section>
+
+        <section class="mobile-shell-panel">
+          <div v-if="logLoading && !logRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">操作日志</div>
+            <div class="mobile-empty-title">正在加载日志</div>
+            <div class="mobile-empty-copy">后台操作、对象和时间会在这里显示。</div>
+          </div>
+          <div v-else-if="!logRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">操作日志</div>
+            <div class="mobile-empty-title">没有匹配的日志</div>
+            <div class="mobile-empty-copy">换一个关键词或对象类型，再查一次。</div>
+          </div>
+          <div v-else class="mobile-record-list">
+            <article v-for="row in logRows" :key="row.id" class="mobile-record-card admin-mobile-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ actionLabel(row.action) }}</div>
+                  <div class="mobile-record-subtitle">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</div>
+                </div>
+                <el-tag class="mobile-status-tag" size="small" effect="plain">{{ row.entity_type || "-" }}</el-tag>
+              </div>
+              <div class="mobile-record-note">{{ row.detail || "-" }}</div>
+              <div class="mobile-record-metrics">
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">操作人</div>
+                  <div class="mobile-metric-value">{{ row.actor_username || "-" }}</div>
+                </div>
+                <div class="mobile-metric">
+                  <div class="mobile-metric-label">对象ID</div>
+                  <div class="mobile-metric-value">{{ row.entity_id || "-" }}</div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </template>
+    </section>
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <el-alert :title="panelScopeText" type="info" :closable="false" />
 
     <el-tabs v-model="activeTab">
@@ -1284,6 +1668,88 @@ watch(
 </template>
 
 <style scoped>
+.admin-mobile-page {
+  gap: 12px;
+}
+
+.admin-mobile-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-mobile-title-block {
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-mobile-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.admin-mobile-title,
+.admin-mobile-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.admin-mobile-copy,
+.admin-mobile-section-copy,
+.admin-mobile-note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.admin-mobile-tab-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.admin-mobile-tab {
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-surface-muted);
+  padding: 9px 8px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.admin-mobile-tab.active {
+  border-color: rgba(77, 128, 150, 0.26);
+  background: rgba(77, 128, 150, 0.12);
+  color: var(--app-accent-strong);
+}
+
+.admin-mobile-filter-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.admin-mobile-filter-actions,
+.admin-mobile-stat-row {
+  margin-top: 10px;
+}
+
+.admin-mobile-card {
+  gap: 10px;
+}
+
+.admin-mobile-badge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
 .head {
   display: flex;
   align-items: center;
@@ -1291,9 +1757,23 @@ watch(
 }
 
 @media (max-width: 768px) {
+  .admin-mobile-hero {
+    flex-direction: column;
+  }
+
+  .admin-mobile-tab-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .admin-filter-form {
     display: flex;
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .admin-mobile-tab-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

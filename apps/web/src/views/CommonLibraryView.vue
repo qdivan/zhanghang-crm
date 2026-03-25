@@ -39,6 +39,7 @@ type ModuleMeta = {
 const { isMobile } = useResponsive();
 const route = useRoute();
 const loading = ref(false);
+const libraryHydrated = ref(false);
 const rows = ref<CommonLibraryItem[]>([]);
 const keyword = ref("");
 const activeTab = ref<CommonLibraryModuleType>("TEMPLATE");
@@ -113,6 +114,7 @@ const libraryFilterChips = computed(() =>
   ].filter(Boolean) as Array<{ key: "keyword" | "visibility"; label: string }>,
 );
 const activeFilterChips = computed(() => libraryFilterChips.value.map((item) => item.label));
+const showLibraryInitialSkeleton = computed(() => !libraryHydrated.value);
 const libraryRowActionItems = computed(() => {
   if (!selectedLibraryRow.value) return [];
   return [
@@ -160,6 +162,7 @@ async function fetchItems() {
     ElMessage.error("获取常用资料失败");
   } finally {
     loading.value = false;
+    libraryHydrated.value = true;
   }
 }
 
@@ -318,8 +321,10 @@ onMounted(() => {
             @keyup.enter="fetchItems"
           />
           <div class="mobile-library-toolbar-actions">
-            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
-            <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增</el-button>
+            <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
+              筛选
+            </el-button>
+            <el-button class="mobile-row-primary-button" type="primary" :icon="Plus" @click="openCreateDialog">新增</el-button>
           </div>
         </div>
         <div v-if="activeFilterChips.length" class="mobile-chip-row mobile-library-chip-row">
@@ -342,25 +347,52 @@ onMounted(() => {
             <div class="mobile-library-section-title">{{ activeMeta.label }}</div>
             <div class="mobile-library-section-copy">先筛范围，再处理资料。</div>
           </div>
-          <el-tag type="info" effect="plain">{{ rows.length }} 条</el-tag>
+          <div v-if="showLibraryInitialSkeleton" class="mobile-skeleton-chip mobile-library-count-skeleton"></div>
+          <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
 
-        <div v-loading="loading" class="mobile-library-list">
-          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配资料</div>
-          <article v-for="row in rows" :key="row.id" class="mobile-library-row">
-            <div class="mobile-library-row-top">
-              <div>
-                <div class="mobile-library-row-title">{{ row.title || row.category || activeMeta.label }}</div>
-                <div class="mobile-library-row-subtitle">{{ row.category || "未分类" }} · {{ visibilityLabel(row.visibility) }}</div>
+        <div v-loading="loading && libraryHydrated" class="mobile-library-list">
+          <template v-if="showLibraryInitialSkeleton">
+            <article
+              v-for="index in 4"
+              :key="`library-skeleton-${index}`"
+              class="mobile-library-row mobile-library-skeleton-row"
+            >
+              <div class="mobile-library-row-top">
+                <div class="mobile-skeleton-stack mobile-library-skeleton-copy">
+                  <div class="mobile-skeleton-line is-lg"></div>
+                  <div class="mobile-skeleton-line is-sm"></div>
+                </div>
+                <div class="mobile-skeleton-button"></div>
               </div>
-              <el-button size="small" plain @click="openLibraryRowActions(row)">
-                更多
-                <el-icon class="el-icon--right"><MoreFilled /></el-icon>
-              </el-button>
-            </div>
-            <div class="mobile-library-row-body">{{ primaryContent(row) }}</div>
-            <div v-if="row.notes" class="mobile-library-row-note">备注 {{ row.notes }}</div>
-          </article>
+              <div class="mobile-skeleton-stack">
+                <div class="mobile-skeleton-line is-full"></div>
+                <div class="mobile-skeleton-line is-half"></div>
+              </div>
+              <div class="mobile-skeleton-line is-md"></div>
+            </article>
+          </template>
+          <div v-else-if="!rows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">{{ activeMeta.label }}</div>
+            <div class="mobile-empty-title">当前没有匹配资料</div>
+            <div class="mobile-empty-copy">换个分类、关键词或范围，再继续定位要用的资料。</div>
+          </div>
+          <template v-else>
+            <article v-for="row in rows" :key="row.id" class="mobile-library-row">
+              <div class="mobile-library-row-top">
+                <div>
+                  <div class="mobile-library-row-title">{{ row.title || row.category || activeMeta.label }}</div>
+                  <div class="mobile-library-row-subtitle">{{ row.category || "未分类" }} · {{ visibilityLabel(row.visibility) }}</div>
+                </div>
+                <el-button class="mobile-row-secondary-button" size="small" plain @click="openLibraryRowActions(row)">
+                  更多
+                  <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+                </el-button>
+              </div>
+              <div class="mobile-library-row-body">{{ primaryContent(row) }}</div>
+              <div v-if="row.notes" class="mobile-library-row-note">备注 {{ row.notes }}</div>
+            </article>
+          </template>
         </div>
       </section>
     </section>
@@ -706,6 +738,10 @@ onMounted(() => {
   color: var(--app-text-primary);
 }
 
+.mobile-library-count-skeleton {
+  flex-shrink: 0;
+}
+
 .mobile-library-list {
   display: flex;
   flex-direction: column;
@@ -716,6 +752,16 @@ onMounted(() => {
   padding: 12px;
   border: 1px solid var(--app-border-soft);
   background: var(--app-bg-soft);
+}
+
+.mobile-library-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-library-skeleton-copy {
+  flex: 1;
 }
 
 .mobile-library-row-body {

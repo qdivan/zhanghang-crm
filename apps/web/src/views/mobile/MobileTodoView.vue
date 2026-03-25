@@ -12,6 +12,7 @@ import {
   useTodoWorkspace,
 } from "../../composables/useTodoWorkspace";
 import { mapPathForCurrentViewport } from "../../mobile/config";
+import { scheduleMobileTodoIdlePrefetch } from "../../mobile/prefetch";
 import { useAuthStore } from "../../stores/auth";
 import type { DashboardSummary, SystemTodoItem, TodoItem } from "../../types";
 
@@ -46,6 +47,21 @@ type AttentionEntry = {
   tone: ProcessingEntryTone;
   icon: typeof Money | typeof CollectionTag;
   pressure: number;
+};
+
+type TodoManualInsights = {
+  sortedTodayRows: TodoItem[];
+  sortedAllRows: TodoItem[];
+  todayHighPriorityCount: number;
+  allHighPriorityCount: number;
+  openHighPriorityCount: number;
+  allDoneRows: TodoItem[];
+  allPendingTodayRows: TodoItem[];
+};
+
+type TodoSystemInsights = {
+  leadCount: number;
+  billingCount: number;
 };
 
 const auth = useAuthStore();
@@ -85,6 +101,7 @@ const dashboardSummary = ref<DashboardSummary>({
 });
 
 const summaryLoading = ref(false);
+const workspaceReady = ref(false);
 const todayManualFocus = ref<"all" | "high">("all");
 const allManualFocus = ref<"all" | "high" | "pending_today" | "done">("all");
 
@@ -111,14 +128,54 @@ function sortManualRows(rows: TodoItem[]) {
   });
 }
 
-const sortedTodayRows = computed(() => sortManualRows(todayRows.value));
-const sortedAllRows = computed(() => sortManualRows(allRows.value));
+const manualRowInsights = computed<TodoManualInsights>(() => {
+  const sortedTodayRows = sortManualRows(todayRows.value);
+  const sortedAllRows = sortManualRows(allRows.value);
 
-const todayHighPriorityCount = computed(() => todayRows.value.filter((row) => row.priority === "HIGH").length);
-const allHighPriorityCount = computed(() => allRows.value.filter((row) => row.priority === "HIGH").length);
-const openHighPriorityCount = computed(
-  () => allRows.value.filter((row) => row.status === "OPEN" && row.priority === "HIGH").length,
-);
+  let todayHighPriorityCount = 0;
+  for (const row of todayRows.value) {
+    if (row.priority === "HIGH") {
+      todayHighPriorityCount += 1;
+    }
+  }
+
+  let allHighPriorityCount = 0;
+  let openHighPriorityCount = 0;
+  const allDoneRows: TodoItem[] = [];
+  const allPendingTodayRows: TodoItem[] = [];
+
+  for (const row of sortedAllRows) {
+    if (row.priority === "HIGH") {
+      allHighPriorityCount += 1;
+      if (row.status === "OPEN") {
+        openHighPriorityCount += 1;
+      }
+    }
+    if (row.status === "DONE") {
+      allDoneRows.push(row);
+      continue;
+    }
+    if (!row.is_in_today) {
+      allPendingTodayRows.push(row);
+    }
+  }
+
+  return {
+    sortedTodayRows,
+    sortedAllRows,
+    todayHighPriorityCount,
+    allHighPriorityCount,
+    openHighPriorityCount,
+    allDoneRows,
+    allPendingTodayRows,
+  };
+});
+
+const sortedTodayRows = computed(() => manualRowInsights.value.sortedTodayRows);
+const sortedAllRows = computed(() => manualRowInsights.value.sortedAllRows);
+const todayHighPriorityCount = computed(() => manualRowInsights.value.todayHighPriorityCount);
+const allHighPriorityCount = computed(() => manualRowInsights.value.allHighPriorityCount);
+const openHighPriorityCount = computed(() => manualRowInsights.value.openHighPriorityCount);
 
 const activeRows = computed(() => {
   if (activeTab.value === "today") return visibleManualRows.value;
@@ -140,6 +197,14 @@ async function fetchDashboardSummary() {
 
 async function refreshWorkspace() {
   await Promise.all([refreshAll(), fetchDashboardSummary()]);
+}
+
+async function bootstrapWorkspace() {
+  try {
+    await refreshWorkspace();
+  } finally {
+    workspaceReady.value = true;
+  }
 }
 
 function goTo(path: string) {
@@ -225,9 +290,27 @@ const signalChips = computed(() => [
     danger: dashboardSummary.value.outstanding_amount_total > 0,
   },
 ]);
+const showWorkspaceSkeleton = computed(() => !workspaceReady.value);
+const showSummaryOverlay = computed(() => summaryLoading.value && workspaceReady.value);
+const showTodoListOverlay = computed(() => loading.value && workspaceReady.value);
 
-const leadSystemTodoCount = computed(() => systemRows.value.filter((row) => row.module === "LEAD").length);
-const billingSystemTodoCount = computed(() => systemRows.value.filter((row) => row.module === "BILLING").length);
+const systemTodoInsights = computed<TodoSystemInsights>(() => {
+  let leadCount = 0;
+  let billingCount = 0;
+  for (const row of systemRows.value) {
+    if (row.module === "LEAD") {
+      leadCount += 1;
+      continue;
+    }
+    if (row.module === "BILLING") {
+      billingCount += 1;
+    }
+  }
+  return { leadCount, billingCount };
+});
+
+const leadSystemTodoCount = computed(() => systemTodoInsights.value.leadCount);
+const billingSystemTodoCount = computed(() => systemTodoInsights.value.billingCount);
 
 const quickEntries = computed(() => [
   {
@@ -384,9 +467,8 @@ const activePanelCopy = computed(() => {
   return "开放任务集中在这里，再挑重点加入今日。";
 });
 
-const allOpenRows = computed(() => allRows.value.filter((row) => row.status === "OPEN"));
-const allDoneRows = computed(() => allRows.value.filter((row) => row.status === "DONE"));
-const allPendingTodayCount = computed(() => allOpenRows.value.filter((row) => !row.is_in_today).length);
+const allDoneRows = computed(() => manualRowInsights.value.allDoneRows);
+const allPendingTodayCount = computed(() => manualRowInsights.value.allPendingTodayRows.length);
 const showAllBulkPanel = computed(() => activeTab.value === "all" && (allRows.value.length > 0 || doneManualCount.value > 0));
 const manualFocusOptions = computed(() => {
   if (activeTab.value === "today") {
@@ -441,6 +523,53 @@ const manualEmptyMessage = computed(() => {
   if (activeTab.value === "all" && allManualFocus.value === "pending_today") return "当前没有待加入今日的任务";
   if (activeTab.value === "all" && allManualFocus.value === "done") return "当前没有已完成待办";
   return "暂无手动任务";
+});
+const systemEmptyState = computed(() => ({
+  kicker: "系统提醒",
+  title: "当前没有待处理动作",
+  copy: "可以先回到今日任务，或直接进入开发、客户、收费页面。",
+}));
+const manualEmptyState = computed(() => {
+  if (activeTab.value === "today" && todayManualFocus.value === "high") {
+    return {
+      kicker: "今日任务",
+      title: manualEmptyMessage.value,
+      copy: "高优先项已经清空，可以切回全部任务继续推进。",
+    };
+  }
+  if (activeTab.value === "today") {
+    return {
+      kicker: "今日任务",
+      title: manualEmptyMessage.value,
+      copy: "把最重要的开放任务加入今日，保持清单足够轻。",
+    };
+  }
+  if (activeTab.value === "all" && allManualFocus.value === "high") {
+    return {
+      kicker: "全部任务",
+      title: manualEmptyMessage.value,
+      copy: "当前开放任务里没有高优先项，可以回到全部视图继续筛选。",
+    };
+  }
+  if (activeTab.value === "all" && allManualFocus.value === "pending_today") {
+    return {
+      kicker: "全部任务",
+      title: manualEmptyMessage.value,
+      copy: "开放任务都已经进入今日，当前清单比较干净。",
+    };
+  }
+  if (activeTab.value === "all" && allManualFocus.value === "done") {
+    return {
+      kicker: "全部任务",
+      title: manualEmptyMessage.value,
+      copy: "没有可清理的已完成项，继续保留当前任务池即可。",
+    };
+  }
+  return {
+    kicker: "全部任务",
+    title: manualEmptyMessage.value,
+    copy: "现在可以直接补充新任务，或从业务页面带回新的待办。",
+  };
 });
 
 function setManualFocus(key: "all" | "high" | "pending_today" | "done") {
@@ -522,244 +651,363 @@ function systemTodoActionNote(row: SystemTodoItem): string {
 }
 
 onMounted(() => {
-  void refreshWorkspace();
+  void bootstrapWorkspace();
+  scheduleMobileTodoIdlePrefetch();
 });
 </script>
 
 <template>
   <section class="mobile-page mobile-todo-page">
-    <section class="mobile-hero-block" v-loading="summaryLoading">
-      <div class="mobile-section-title-row">
-        <div>
-          <div class="mobile-section-eyebrow">{{ dashboardSummary.month || "本月" }} 工作台</div>
-          <div class="mobile-section-title">{{ focusPanel.label }}</div>
-          <div class="mobile-section-copy">{{ focusPanel.detail }}</div>
-        </div>
-        <el-button circle plain size="small" @click="refreshWorkspace">
-          <el-icon><RefreshRight /></el-icon>
-        </el-button>
-      </div>
-
-      <div class="mobile-focus-strip" :class="focusPanel.tone">
-        <div class="mobile-focus-main">
-          <span class="mobile-focus-label">{{ focusPanel.label }}</span>
-          <strong class="mobile-focus-value">{{ formatMetricValue(focusPanel.value) }}</strong>
-        </div>
-        <div class="mobile-focus-meta">
-          <span>开放 {{ formatMetricValue(openManualCount) }}</span>
-          <span>已完成 {{ formatMetricValue(doneManualCount) }}</span>
-          <el-button
-            v-if="focusPanel.actionLabel"
-            text
-            size="small"
-            type="primary"
-            class="mobile-focus-action"
-            @click="applyFocusPanelAction(focusPanel.actionMode)"
-          >
-            {{ focusPanel.actionLabel }}
-          </el-button>
-        </div>
-      </div>
-
-      <div class="mobile-signal-row">
-        <article
-          v-for="item in signalChips"
-          :key="item.label"
-          class="mobile-signal-chip"
-          :class="{ accent: item.accent, warning: item.warning, danger: item.danger }"
-        >
-          <span>{{ item.label }}</span>
-          <strong>{{ item.value }}</strong>
-        </article>
-      </div>
-
-      <div class="mobile-quick-links">
-        <button
-          v-for="entry in quickEntries"
-          :key="entry.path"
-          type="button"
-          class="mobile-quick-link"
-          @click="goTo(entry.path)"
-        >
-          <component :is="entry.icon" class="mobile-quick-link-icon" />
-          <div class="mobile-quick-link-copy">
-            <span>{{ entry.label }}</span>
-            <strong>{{ entry.value }}</strong>
-            <small>{{ entry.meta }}</small>
+    <section class="mobile-hero-block" v-loading="showSummaryOverlay">
+      <template v-if="showWorkspaceSkeleton">
+        <div class="mobile-section-title-row">
+          <div class="mobile-skeleton-stack todo-skeleton-copy">
+            <div class="mobile-skeleton-line is-xs"></div>
+            <div class="mobile-skeleton-line is-lg"></div>
+            <div class="mobile-skeleton-line is-xl"></div>
           </div>
-        </button>
-      </div>
-
-      <div
-        v-if="processingSpotlight"
-        class="mobile-processing-spotlight"
-        :class="processingSpotlight.tone"
-      >
-        <div class="mobile-processing-spotlight-main">
-          <div class="mobile-processing-spotlight-kicker">当前最急</div>
-          <div class="mobile-processing-spotlight-title">{{ processingSpotlight.label }}</div>
-          <div class="mobile-processing-spotlight-copy">{{ processingSpotlight.summary }}</div>
+          <div class="mobile-skeleton-circle"></div>
         </div>
-        <el-button
-          size="small"
-          :type="processingSpotlight.tone === 'danger' ? 'danger' : 'primary'"
-          @click="goTo(processingSpotlight.path)"
-        >
-          立即处理
-        </el-button>
-      </div>
 
-      <div class="mobile-processing-strip">
-        <button
-          v-for="entry in processingEntries"
-          :key="entry.key"
-          type="button"
-          class="mobile-processing-link"
-          :class="[entry.tone, { disabled: entry.disabled, priority: processingSpotlight?.key === entry.key }]"
-          :disabled="entry.disabled"
-          @click="goTo(entry.path)"
-        >
-          <div class="mobile-processing-main">
-            <span>{{ entry.label }}</span>
-            <strong>{{ entry.value }}</strong>
-          </div>
-          <small>{{ entry.meta }}</small>
-        </button>
-      </div>
-
-      <div v-if="attentionEntries.length" class="mobile-attention-strip">
-        <button
-          v-for="entry in attentionEntries"
-          :key="entry.key"
-          type="button"
-          class="mobile-attention-link"
-          :class="entry.tone"
-          @click="goTo(entry.path)"
-        >
-          <div class="mobile-attention-main">
-            <component :is="entry.icon" class="mobile-attention-icon" />
-            <div>
-              <div class="mobile-attention-title">{{ entry.label }}</div>
-              <div class="mobile-attention-copy">{{ entry.meta }}</div>
+        <div class="mobile-hero-stack todo-hero-skeleton-stack">
+          <div class="todo-skeleton-focus">
+            <div class="mobile-skeleton-stack">
+              <div class="mobile-skeleton-line is-sm"></div>
+              <div class="mobile-skeleton-line is-md"></div>
+            </div>
+            <div class="mobile-skeleton-stack todo-skeleton-focus-side">
+              <div class="mobile-skeleton-line is-xs"></div>
+              <div class="mobile-skeleton-line is-xs"></div>
             </div>
           </div>
-        </button>
-      </div>
+
+          <div class="mobile-signal-row">
+            <div v-for="index in 4" :key="`todo-signal-${index}`" class="todo-skeleton-signal">
+              <div class="mobile-skeleton-line is-xs"></div>
+              <div class="mobile-skeleton-line is-sm"></div>
+            </div>
+          </div>
+
+          <div class="mobile-quick-links">
+            <div v-for="index in 3" :key="`todo-link-${index}`" class="todo-skeleton-link">
+              <div class="mobile-skeleton-circle"></div>
+              <div class="mobile-skeleton-stack todo-skeleton-link-copy">
+                <div class="mobile-skeleton-line is-xs"></div>
+                <div class="mobile-skeleton-line is-sm"></div>
+                <div class="mobile-skeleton-line is-md"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="todo-skeleton-spotlight">
+            <div class="mobile-skeleton-stack todo-skeleton-spotlight-copy">
+              <div class="mobile-skeleton-line is-xs"></div>
+              <div class="mobile-skeleton-line is-md"></div>
+              <div class="mobile-skeleton-line is-lg"></div>
+            </div>
+            <div class="mobile-skeleton-button"></div>
+          </div>
+
+          <div class="mobile-processing-strip">
+            <div v-for="index in 2" :key="`todo-processing-${index}`" class="todo-skeleton-processing">
+              <div class="mobile-skeleton-row">
+                <div class="mobile-skeleton-line is-xs"></div>
+                <div class="mobile-skeleton-line is-xs"></div>
+              </div>
+              <div class="mobile-skeleton-line is-md"></div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template v-else>
+        <div class="mobile-section-title-row">
+          <div>
+            <div class="mobile-section-eyebrow">{{ dashboardSummary.month || "本月" }} 工作台</div>
+            <div class="mobile-section-title">{{ focusPanel.label }}</div>
+            <div class="mobile-section-copy">{{ focusPanel.detail }}</div>
+          </div>
+          <el-button circle plain size="small" @click="refreshWorkspace">
+            <el-icon><RefreshRight /></el-icon>
+          </el-button>
+        </div>
+
+        <div class="mobile-hero-stack">
+          <div class="mobile-focus-strip" :class="focusPanel.tone">
+            <div class="mobile-focus-main">
+              <span class="mobile-focus-label">{{ focusPanel.label }}</span>
+              <strong class="mobile-focus-value">{{ formatMetricValue(focusPanel.value) }}</strong>
+            </div>
+            <div class="mobile-focus-meta">
+              <span>开放 {{ formatMetricValue(openManualCount) }}</span>
+              <span>已完成 {{ formatMetricValue(doneManualCount) }}</span>
+              <el-button
+                v-if="focusPanel.actionLabel"
+                text
+                size="small"
+                type="primary"
+                class="mobile-focus-action"
+                @click="applyFocusPanelAction(focusPanel.actionMode)"
+              >
+                {{ focusPanel.actionLabel }}
+              </el-button>
+            </div>
+          </div>
+
+          <div class="mobile-signal-row">
+            <article
+              v-for="item in signalChips"
+              :key="item.label"
+              class="mobile-signal-chip"
+              :class="{ accent: item.accent, warning: item.warning, danger: item.danger }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
+          </div>
+
+          <div class="mobile-quick-links">
+            <button
+              v-for="entry in quickEntries"
+              :key="entry.path"
+              type="button"
+              class="mobile-quick-link"
+              @click="goTo(entry.path)"
+            >
+              <component :is="entry.icon" class="mobile-quick-link-icon" />
+              <div class="mobile-quick-link-copy">
+                <span>{{ entry.label }}</span>
+                <strong>{{ entry.value }}</strong>
+                <small>{{ entry.meta }}</small>
+              </div>
+            </button>
+          </div>
+
+          <div
+            v-if="processingSpotlight"
+            class="mobile-processing-spotlight"
+            :class="processingSpotlight.tone"
+          >
+            <div class="mobile-processing-spotlight-main">
+              <div class="mobile-processing-spotlight-kicker">当前最急</div>
+              <div class="mobile-processing-spotlight-title">{{ processingSpotlight.label }}</div>
+              <div class="mobile-processing-spotlight-copy">{{ processingSpotlight.summary }}</div>
+            </div>
+            <el-button
+              size="small"
+              :type="processingSpotlight.tone === 'danger' ? 'danger' : 'primary'"
+              @click="goTo(processingSpotlight.path)"
+            >
+              立即处理
+            </el-button>
+          </div>
+
+          <div class="mobile-processing-strip">
+            <button
+              v-for="entry in processingEntries"
+              :key="entry.key"
+              type="button"
+              class="mobile-processing-link"
+              :class="[entry.tone, { disabled: entry.disabled, priority: processingSpotlight?.key === entry.key }]"
+              :disabled="entry.disabled"
+              @click="goTo(entry.path)"
+            >
+              <div class="mobile-processing-main">
+                <span>{{ entry.label }}</span>
+                <strong>{{ entry.value }}</strong>
+              </div>
+              <small>{{ entry.meta }}</small>
+            </button>
+          </div>
+
+          <div v-if="attentionEntries.length" class="mobile-attention-strip">
+            <button
+              v-for="entry in attentionEntries"
+              :key="entry.key"
+              type="button"
+              class="mobile-attention-link"
+              :class="entry.tone"
+              @click="goTo(entry.path)"
+            >
+              <div class="mobile-attention-main">
+                <component :is="entry.icon" class="mobile-attention-icon" />
+                <div>
+                  <div class="mobile-attention-title">{{ entry.label }}</div>
+                  <div class="mobile-attention-copy">{{ entry.meta }}</div>
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section class="mobile-work-panel">
-      <div class="mobile-work-head">
-        <div>
-          <div class="mobile-section-title">{{ activePanelTitle }}</div>
-          <div class="mobile-section-copy">{{ activePanelCopy }}</div>
+      <template v-if="showWorkspaceSkeleton">
+        <div class="mobile-work-head">
+          <div class="mobile-skeleton-stack todo-skeleton-copy">
+            <div class="mobile-skeleton-line is-md"></div>
+            <div class="mobile-skeleton-line is-lg"></div>
+          </div>
+          <div class="mobile-skeleton-chip"></div>
         </div>
-        <el-tag size="small" effect="plain">{{ activeRows.length }} 条</el-tag>
-      </div>
 
-      <div class="mobile-segmented">
-        <button type="button" :class="{ active: activeTab === 'today' }" @click="activeTab = 'today'">
-          今日 {{ todayRows.length }}
-        </button>
-        <button type="button" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
-          全部 {{ openManualCount }}
-        </button>
-        <button type="button" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'">
-          系统 {{ systemRows.length }}
-        </button>
-      </div>
-
-      <div class="mobile-inline-summary">
-        <span>开放任务 {{ openManualCount }}</span>
-        <span>已完成 {{ doneManualCount }}</span>
-        <span>系统提醒 {{ dashboardSummary.system_todo_count }}</span>
-      </div>
-
-      <div class="mobile-create-block">
-        <div class="mobile-create-bar">
-          <el-input
-            v-model="createForm.title"
-            placeholder="添加新任务"
-            clearable
-            @keyup.enter="createTodo"
-          />
-          <el-button type="primary" :icon="DocumentAdd" :loading="creating" @click="createTodo">添加</el-button>
+        <div class="mobile-work-stack">
+          <div class="todo-skeleton-segmented">
+            <div v-for="index in 3" :key="`todo-segment-${index}`" class="mobile-skeleton-button"></div>
+          </div>
+          <div class="mobile-skeleton-row todo-skeleton-inline-summary">
+            <div v-for="index in 3" :key="`todo-inline-${index}`" class="mobile-skeleton-line is-sm"></div>
+          </div>
+          <div class="mobile-create-block">
+            <div class="todo-skeleton-create-bar">
+              <div class="mobile-skeleton-line is-full"></div>
+              <div class="mobile-skeleton-button"></div>
+            </div>
+            <div class="todo-skeleton-create-tools">
+              <div class="mobile-skeleton-line is-full"></div>
+              <div class="mobile-skeleton-line is-full"></div>
+            </div>
+          </div>
+          <div class="mobile-list-stack todo-skeleton-list">
+            <div v-for="index in 4" :key="`todo-row-${index}`" class="todo-skeleton-row">
+              <div class="mobile-skeleton-row">
+                <div class="mobile-skeleton-circle todo-skeleton-checkbox"></div>
+                <div class="mobile-skeleton-stack todo-skeleton-row-copy">
+                  <div class="mobile-skeleton-line is-lg"></div>
+                  <div class="mobile-skeleton-line is-md"></div>
+                </div>
+                <div class="mobile-skeleton-chip"></div>
+              </div>
+              <div class="mobile-skeleton-row todo-skeleton-row-actions">
+                <div class="mobile-skeleton-button"></div>
+                <div class="mobile-skeleton-button"></div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="mobile-create-tools">
-          <el-date-picker
-            v-model="createForm.due_date"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="截止日"
-          />
-          <el-select v-model="createForm.priority" placeholder="优先级">
-            <el-option label="高" value="HIGH" />
-            <el-option label="中" value="MEDIUM" />
-            <el-option label="低" value="LOW" />
-          </el-select>
-        </div>
-      </div>
+      </template>
 
-      <div v-if="showAllBulkPanel" class="manual-bulk-panel">
-        <div class="manual-bulk-head">
+      <template v-else>
+        <div class="mobile-work-head">
           <div>
-            <div class="manual-bulk-title">批量处理</div>
-            <div class="manual-bulk-copy">开放任务先推进到今日，已完成任务定期清理。</div>
+            <div class="mobile-section-title">{{ activePanelTitle }}</div>
+            <div class="mobile-section-copy">{{ activePanelCopy }}</div>
           </div>
-          <el-tag size="small" effect="plain">{{ allRows.length }} 条</el-tag>
+          <el-tag class="mobile-count-tag" size="small" effect="plain">{{ activeRows.length }} 条</el-tag>
         </div>
-        <div class="manual-bulk-stats">
-          <div class="manual-bulk-stat">
-            <span>开放</span>
-            <strong>{{ openManualCount }}</strong>
-          </div>
-          <div class="manual-bulk-stat">
-            <span>待加入今日</span>
-            <strong>{{ allPendingTodayCount }}</strong>
-          </div>
-          <div class="manual-bulk-stat">
-            <span>已完成</span>
-            <strong>{{ allDoneRows.length }}</strong>
-          </div>
-        </div>
-        <div class="mobile-toolbar-actions manual-bulk-actions">
-          <el-button
-            plain
-            size="small"
-            :icon="Calendar"
-            :disabled="allPendingTodayCount <= 0"
-            :loading="bulkActionLoading === 'add_today'"
-            @click="addAllToToday"
-          >
-            全部加入今日
-          </el-button>
-          <el-button
-            plain
-            size="small"
-            :icon="Files"
-            :disabled="allDoneRows.length <= 0"
-            :loading="bulkActionLoading === 'clear_done'"
-            @click="clearCompletedTodos"
-          >
-            清理已完成
-          </el-button>
-        </div>
-      </div>
 
-      <div v-if="activeTab === 'today' && todayRows.length" class="mobile-toolbar-actions">
-        <el-button
-          plain
-          size="small"
-          :icon="Files"
-          :loading="bulkActionLoading === 'clear_today'"
-          @click="clearToday"
-        >
-          撤销今日列表
-        </el-button>
-      </div>
+        <div class="mobile-work-stack">
+          <div class="mobile-segmented">
+            <button type="button" :class="{ active: activeTab === 'today' }" @click="activeTab = 'today'">
+              今日 {{ todayRows.length }}
+            </button>
+            <button type="button" :class="{ active: activeTab === 'all' }" @click="activeTab = 'all'">
+              全部 {{ openManualCount }}
+            </button>
+            <button type="button" :class="{ active: activeTab === 'system' }" @click="activeTab = 'system'">
+              系统 {{ systemRows.length }}
+            </button>
+          </div>
 
-      <div v-loading="loading" class="mobile-list-stack">
+          <div class="mobile-inline-summary">
+            <span>开放任务 {{ openManualCount }}</span>
+            <span>已完成 {{ doneManualCount }}</span>
+            <span>系统提醒 {{ dashboardSummary.system_todo_count }}</span>
+          </div>
+
+          <div class="mobile-create-block">
+            <div class="mobile-create-bar">
+              <el-input
+                v-model="createForm.title"
+                placeholder="添加新任务"
+                clearable
+                @keyup.enter="createTodo"
+              />
+              <el-button type="primary" :icon="DocumentAdd" :loading="creating" @click="createTodo">添加</el-button>
+            </div>
+            <div class="mobile-create-tools">
+              <el-date-picker
+                v-model="createForm.due_date"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="截止日"
+              />
+              <el-select v-model="createForm.priority" placeholder="优先级">
+                <el-option label="高" value="HIGH" />
+                <el-option label="中" value="MEDIUM" />
+                <el-option label="低" value="LOW" />
+              </el-select>
+            </div>
+          </div>
+
+          <div v-if="showAllBulkPanel" class="manual-bulk-panel">
+            <div class="manual-bulk-head">
+              <div>
+                <div class="manual-bulk-title">批量处理</div>
+                <div class="manual-bulk-copy">开放任务先推进到今日，已完成任务定期清理。</div>
+              </div>
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ allRows.length }} 条</el-tag>
+            </div>
+            <div class="manual-bulk-stats">
+              <div class="manual-bulk-stat">
+                <span>开放</span>
+                <strong>{{ openManualCount }}</strong>
+              </div>
+              <div class="manual-bulk-stat">
+                <span>待加入今日</span>
+                <strong>{{ allPendingTodayCount }}</strong>
+              </div>
+              <div class="manual-bulk-stat">
+                <span>已完成</span>
+                <strong>{{ allDoneRows.length }}</strong>
+              </div>
+            </div>
+            <div class="mobile-toolbar-actions manual-bulk-actions">
+              <el-button
+                plain
+                size="small"
+                :icon="Calendar"
+                :disabled="allPendingTodayCount <= 0"
+                :loading="bulkActionLoading === 'add_today'"
+                @click="addAllToToday"
+              >
+                全部加入今日
+              </el-button>
+              <el-button
+                plain
+                size="small"
+                :icon="Files"
+                :disabled="allDoneRows.length <= 0"
+                :loading="bulkActionLoading === 'clear_done'"
+                @click="clearCompletedTodos"
+              >
+                清理已完成
+              </el-button>
+            </div>
+          </div>
+
+          <div v-if="activeTab === 'today' && todayRows.length" class="mobile-toolbar-actions">
+            <el-button
+              plain
+              size="small"
+              :icon="Files"
+              :loading="bulkActionLoading === 'clear_today'"
+              @click="clearToday"
+            >
+              撤销今日列表
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <div v-loading="showTodoListOverlay" class="mobile-list-stack">
         <template v-if="activeTab === 'system'">
-          <div v-if="!activeRows.length" class="mobile-empty-state">暂无系统提醒</div>
+          <div v-if="!activeRows.length" class="mobile-empty-state">
+            <div class="mobile-empty-kicker">{{ systemEmptyState.kicker }}</div>
+            <div class="mobile-empty-title">{{ systemEmptyState.title }}</div>
+            <div class="mobile-empty-copy">{{ systemEmptyState.copy }}</div>
+          </div>
           <section v-for="group in systemTodoGroups" :key="group.key" class="system-todo-group">
             <div class="system-todo-group-head">
               <div>
@@ -767,9 +1015,10 @@ onMounted(() => {
                 <div class="system-todo-group-copy">{{ group.copy }}</div>
               </div>
               <div class="system-todo-group-side">
-                <el-tag size="small" effect="plain">{{ group.rows.length }} 条</el-tag>
+                <el-tag class="mobile-count-tag" size="small" effect="plain">{{ group.rows.length }} 条</el-tag>
                 <el-button
                   v-if="group.queuePath"
+                  class="system-todo-queue-link"
                   text
                   size="small"
                   @click="goTo(group.queuePath)"
@@ -782,7 +1031,9 @@ onMounted(() => {
               <div class="mobile-item-main">
                 <div class="mobile-item-title-line">
                   <span class="mobile-item-title">{{ row.title }}</span>
-                  <el-tag size="small" :type="priorityTagType(row.priority)" effect="plain">{{ priorityLabel(row.priority) }}</el-tag>
+                  <el-tag class="mobile-priority-tag" size="small" :type="priorityTagType(row.priority)" effect="plain">
+                    {{ priorityLabel(row.priority) }}
+                  </el-tag>
                 </div>
                 <div class="mobile-item-meta">{{ systemTodoMeta(row) }}</div>
                 <div v-if="row.description" class="mobile-item-note">{{ row.description }}</div>
@@ -790,7 +1041,7 @@ onMounted(() => {
               <div class="system-todo-actions">
                 <div class="system-todo-action-note">{{ systemTodoActionNote(row) }}</div>
                 <div class="mobile-item-actions">
-                  <el-button size="small" type="primary" @click="openSystemAction(row)">
+                  <el-button class="mobile-primary-action" size="small" type="primary" @click="openSystemAction(row)">
                     {{ systemTodoPrimaryLabel(row) }}
                   </el-button>
                 </div>
@@ -817,7 +1068,9 @@ onMounted(() => {
             <div class="manual-focus-hint">{{ manualFocusHint }}</div>
           </div>
           <div v-if="!visibleManualRows.length" class="mobile-empty-state">
-            {{ manualEmptyMessage }}
+            <div class="mobile-empty-kicker">{{ manualEmptyState.kicker }}</div>
+            <div class="mobile-empty-title">{{ manualEmptyState.title }}</div>
+            <div class="mobile-empty-copy">{{ manualEmptyState.copy }}</div>
           </div>
           <article
             v-for="row in visibleManualRows"
@@ -828,18 +1081,22 @@ onMounted(() => {
             <div class="mobile-item-main">
               <div class="mobile-item-title-line with-checkbox">
                 <el-checkbox
+                  class="mobile-row-checkbox"
                   :model-value="row.status === 'DONE'"
                   :disabled="actionLoadingTodoId === row.id"
                   @change="(checked: unknown) => toggleTodoDone(row, Boolean(checked))"
                 />
                 <span class="mobile-item-title">{{ row.title }}</span>
-                <el-tag size="small" :type="priorityTagType(row.priority)" effect="plain">{{ priorityLabel(row.priority) }}</el-tag>
+                <el-tag class="mobile-priority-tag" size="small" :type="priorityTagType(row.priority)" effect="plain">
+                  {{ priorityLabel(row.priority) }}
+                </el-tag>
               </div>
               <div class="mobile-item-meta">{{ todoRowMeta(row) }}</div>
             </div>
             <div class="mobile-item-actions">
               <el-button
                 v-if="row.status === 'OPEN' && activeTab === 'today'"
+                class="mobile-inline-action"
                 text
                 size="small"
                 :loading="actionLoadingTodoId === row.id"
@@ -849,6 +1106,7 @@ onMounted(() => {
               </el-button>
               <el-button
                 v-else-if="row.status === 'OPEN'"
+                class="mobile-inline-action"
                 text
                 size="small"
                 :loading="actionLoadingTodoId === row.id"
@@ -857,6 +1115,7 @@ onMounted(() => {
                 {{ row.is_in_today ? "撤销今日" : "加入今日" }}
               </el-button>
               <el-button
+                class="mobile-inline-action"
                 text
                 size="small"
                 type="danger"
@@ -877,7 +1136,7 @@ onMounted(() => {
 .mobile-todo-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .mobile-hero-block,
@@ -885,7 +1144,7 @@ onMounted(() => {
   border: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.88);
   box-shadow: var(--app-shadow-soft);
-  padding: 14px;
+  padding: 12px;
 }
 
 .mobile-section-eyebrow {
@@ -899,29 +1158,145 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .mobile-section-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--app-text-primary);
 }
 
 .mobile-section-copy {
-  margin-top: 3px;
+  margin-top: 2px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--app-text-muted);
+}
+
+.todo-skeleton-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.todo-hero-skeleton-stack {
+  margin-top: 10px;
+}
+
+.todo-skeleton-focus,
+.todo-skeleton-spotlight {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.todo-skeleton-focus-side {
+  align-items: flex-end;
+}
+
+.todo-skeleton-signal,
+.todo-skeleton-processing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.todo-skeleton-link {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.todo-skeleton-link-copy,
+.todo-skeleton-spotlight-copy,
+.todo-skeleton-row-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.todo-skeleton-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.todo-skeleton-segmented .mobile-skeleton-button {
+  width: 100%;
+}
+
+.todo-skeleton-inline-summary {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.todo-skeleton-create-bar,
+.todo-skeleton-create-tools {
+  display: grid;
+  gap: 8px;
+}
+
+.todo-skeleton-create-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.todo-skeleton-create-tools {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+
+.todo-skeleton-create-bar .mobile-skeleton-line,
+.todo-skeleton-create-tools .mobile-skeleton-line {
+  height: 32px;
+}
+
+.todo-skeleton-list {
+  margin-top: 10px;
+}
+
+.todo-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.todo-skeleton-row:first-child {
+  border-top: none;
+}
+
+.todo-skeleton-checkbox {
+  width: 18px;
+  height: 18px;
+}
+
+.todo-skeleton-row-actions {
+  justify-content: flex-end;
+}
+
+.mobile-hero-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .mobile-focus-strip {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 14px;
+  gap: 10px;
+  margin-top: 0;
+  padding: 12px;
   border: 1px solid rgba(77, 128, 150, 0.16);
   background:
     linear-gradient(135deg, rgba(77, 128, 150, 0.14), rgba(255, 255, 255, 0.96)),
@@ -945,17 +1320,17 @@ onMounted(() => {
 .mobile-focus-main {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
 .mobile-focus-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--app-text-muted);
 }
 
 .mobile-focus-value {
-  font-size: 30px;
+  font-size: 26px;
   line-height: 0.95;
   color: var(--app-text-primary);
 }
@@ -964,8 +1339,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
-  font-size: 12px;
+  gap: 4px;
+  font-size: 11px;
   color: var(--app-text-muted);
 }
 
@@ -977,15 +1352,15 @@ onMounted(() => {
 .mobile-signal-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .mobile-signal-chip {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 9px 10px;
+  gap: 3px;
+  padding: 8px 9px;
   border: 1px solid var(--app-border-soft);
   background: var(--app-bg-soft);
 }
@@ -1006,57 +1381,60 @@ onMounted(() => {
 }
 
 .mobile-signal-chip span {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--app-text-muted);
 }
 
 .mobile-signal-chip strong {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--app-text-primary);
 }
 
 .mobile-quick-links {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .mobile-quick-link {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
   border: 1px solid var(--app-border-soft);
   background: #fff;
-  padding: 12px;
+  padding: 10px;
   color: var(--app-text-primary);
 }
 
 .mobile-quick-link-icon {
-  font-size: 18px;
+  width: 20px;
+  height: 20px;
+  display: block;
   color: var(--app-accent-strong);
+  flex-shrink: 0;
 }
 
 .mobile-quick-link-copy {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
 }
 
 .mobile-quick-link-copy span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--app-text-muted);
 }
 
 .mobile-quick-link-copy strong {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--app-text-primary);
 }
 
 .mobile-quick-link-copy small {
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: var(--app-text-muted);
 }
 
@@ -1064,23 +1442,41 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 8px;
+}
+
+:deep(.mobile-count-tag.el-tag) {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text-secondary);
+  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.mobile-work-stack {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  margin-top: 12px;
 }
 
 .mobile-processing-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .mobile-processing-spotlight {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 12px;
+  gap: 10px;
+  margin-top: 0;
+  padding: 10px;
   border: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.92);
 }
@@ -1111,26 +1507,26 @@ onMounted(() => {
 }
 
 .mobile-processing-spotlight-title {
-  margin-top: 4px;
-  font-size: 14px;
+  margin-top: 3px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--app-text-primary);
 }
 
 .mobile-processing-spotlight-copy {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .mobile-processing-link {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.9);
-  padding: 12px;
+  padding: 10px;
   text-align: left;
   color: var(--app-text-primary);
 }
@@ -1158,14 +1554,14 @@ onMounted(() => {
 .mobile-attention-strip {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .mobile-attention-link {
   border: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.9);
-  padding: 12px;
+  padding: 10px;
   text-align: left;
 }
 
@@ -1184,12 +1580,14 @@ onMounted(() => {
 .mobile-attention-main {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 .mobile-attention-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
   margin-top: 2px;
-  font-size: 18px;
   color: var(--app-accent-strong);
   flex-shrink: 0;
 }
@@ -1201,9 +1599,9 @@ onMounted(() => {
 }
 
 .mobile-attention-copy {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
@@ -1215,33 +1613,33 @@ onMounted(() => {
 }
 
 .mobile-processing-main span {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--app-text-muted);
 }
 
 .mobile-processing-main strong {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--app-text-primary);
 }
 
 .mobile-processing-link small {
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .mobile-segmented {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 0;
 }
 
 .mobile-segmented button {
   border: 1px solid var(--app-border-soft);
   background: var(--app-bg-soft);
   color: var(--app-text-muted);
-  padding: 10px 8px;
+  padding: 9px 8px;
   font-size: 12px;
 }
 
@@ -1254,8 +1652,8 @@ onMounted(() => {
 .mobile-inline-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 10px;
+  gap: 6px 10px;
+  margin-top: 0;
   font-size: 12px;
   color: var(--app-text-muted);
 }
@@ -1263,9 +1661,9 @@ onMounted(() => {
 .mobile-create-block {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
+  gap: 8px;
+  margin-top: 0;
+  padding-top: 10px;
   border-top: 1px solid var(--app-border-soft);
 }
 
@@ -1287,12 +1685,12 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .manual-bulk-panel {
-  margin-top: 12px;
-  padding: 12px;
+  margin-top: 0;
+  padding: 10px;
   border: 1px solid var(--app-border-soft);
   background: var(--app-surface-muted);
 }
@@ -1301,7 +1699,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .manual-bulk-title {
@@ -1311,24 +1709,24 @@ onMounted(() => {
 }
 
 .manual-bulk-copy {
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .manual-bulk-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .manual-bulk-stat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 9px 10px;
+  gap: 3px;
+  padding: 8px 9px;
   border: 1px solid var(--app-border-soft);
   background: rgba(255, 255, 255, 0.85);
 }
@@ -1339,19 +1737,19 @@ onMounted(() => {
 }
 
 .manual-bulk-stat strong {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--app-text-primary);
 }
 
 .manual-bulk-actions {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .mobile-list-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .manual-focus-block {
@@ -1363,17 +1761,17 @@ onMounted(() => {
 }
 
 .manual-focus-hint {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.45;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .mobile-item-row {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 0;
+  gap: 8px;
+  padding: 10px 0;
   border-top: 1px solid var(--app-border-soft);
 }
 
@@ -1394,44 +1792,75 @@ onMounted(() => {
 .mobile-item-title-line {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 6px;
 }
 
 .mobile-item-title-line.with-checkbox {
   align-items: center;
 }
 
+:deep(.mobile-row-checkbox.el-checkbox) {
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+:deep(.mobile-row-checkbox .el-checkbox__inner) {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border-color: rgba(148, 163, 184, 0.38);
+}
+
+:deep(.mobile-row-checkbox .el-checkbox__input.is-checked .el-checkbox__inner) {
+  border-color: var(--app-accent-strong);
+  background: var(--app-accent-strong);
+}
+
+:deep(.mobile-row-checkbox .el-checkbox__input.is-focus .el-checkbox__inner) {
+  border-color: rgba(77, 128, 150, 0.46);
+}
+
 .mobile-item-title {
   min-width: 0;
   flex: 1;
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--app-text-primary);
   word-break: break-word;
 }
 
 .mobile-item-meta {
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .mobile-item-note {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.55;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--app-text-secondary);
 }
 
 .mobile-item-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+}
+
+:deep(.mobile-priority-tag.el-tag) {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .system-todo-group + .system-todo-group {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--app-border-soft);
 }
 
@@ -1439,7 +1868,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .system-todo-group-title {
@@ -1449,9 +1878,9 @@ onMounted(() => {
 }
 
 .system-todo-group-copy {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.45;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
@@ -1459,26 +1888,69 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: 3px;
 }
 
 .system-todo-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .system-todo-action-note {
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.4;
   color: var(--app-text-muted);
 }
 
 .mobile-empty-state {
-  padding: 18px 0 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 10px 8px;
   text-align: center;
-  font-size: 13px;
+}
+
+.mobile-empty-kicker {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--app-text-muted);
+}
+
+.mobile-empty-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-empty-copy {
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.system-todo-row {
+  gap: 6px;
+}
+
+:deep(.mobile-primary-action.el-button) {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 10px;
+}
+
+:deep(.mobile-inline-action.el-button) {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+}
+
+:deep(.system-todo-queue-link.el-button) {
+  min-height: auto;
+  padding: 0;
 }
 
 @media (max-width: 420px) {
@@ -1487,6 +1959,11 @@ onMounted(() => {
   }
 
   .mobile-quick-links {
+    grid-template-columns: 1fr;
+  }
+
+  .todo-skeleton-create-bar,
+  .todo-skeleton-create-tools {
     grid-template-columns: 1fr;
   }
 

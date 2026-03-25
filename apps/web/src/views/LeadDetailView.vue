@@ -99,14 +99,19 @@ const leadSignalFacts = computed(() => {
     { label: "提醒值", value: lead.value.reminder_value || "-" },
   ];
 });
-const leadSummaryRows = computed(() => {
+const leadSummaryHighlights = computed(() => {
   if (!lead.value) return [];
   return [
     { label: "联系人", value: leadContactLine.value },
-    { label: "下次提醒", value: lead.value.next_reminder_at || "-" },
-    { label: "主营", value: lead.value.main_business || "-", multiline: true },
-    { label: "介绍人", value: lead.value.intro || "-" },
-    { label: "备注", value: lead.value.notes || "-", multiline: true },
+    { label: "下次提醒", value: lead.value.next_reminder_at || "待设置" },
+    { label: "主营", value: lead.value.main_business || "待补充", wide: true },
+  ];
+});
+const leadSummaryNotes = computed(() => {
+  if (!lead.value) return [];
+  return [
+    { label: "介绍人", value: lead.value.intro || "未补充" },
+    { label: "备注", value: lead.value.notes || "未补充", multiline: true },
   ];
 });
 const mobileSecondaryActionItems = computed(() =>
@@ -310,44 +315,80 @@ onMounted(fetchLeadDetail);
             <div class="lead-detail-mobile-copy">{{ leadHeroCopy }}</div>
           </div>
           <div class="lead-detail-mobile-hero-actions">
-            <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增开发跟进</el-button>
-            <el-button v-if="hasMobileSecondaryActions" plain @click="showMobileSecondaryActionSheet = true">
+            <el-button class="mobile-row-primary-button" type="primary" :disabled="!lead" @click="openFollowupDialog">
+              新增开发跟进
+            </el-button>
+            <el-button
+              v-if="hasMobileSecondaryActions"
+              class="mobile-row-secondary-button"
+              plain
+              @click="showMobileSecondaryActionSheet = true"
+            >
               更多操作
               <el-icon class="el-icon--right"><MoreFilled /></el-icon>
             </el-button>
           </div>
         </div>
-        <div v-if="lead" class="lead-detail-mobile-focus-strip">
-          <div class="lead-detail-mobile-focus-main">
-            <span>当前状态</span>
-            <strong>{{ statusLabel(lead.status) }}</strong>
+        <div v-if="lead" class="lead-detail-mobile-summary-card">
+          <div class="lead-detail-mobile-summary-head">
+            <div class="lead-detail-mobile-summary-main">
+              <span class="lead-detail-mobile-summary-kicker">当前状态</span>
+              <strong>{{ statusLabel(lead.status) }}</strong>
+              <div class="lead-detail-mobile-summary-copy">{{ leadContactLine }}</div>
+            </div>
+            <el-tag
+              class="mobile-status-tag"
+              size="small"
+              effect="plain"
+              :type="lead.next_reminder_at ? 'warning' : 'info'"
+            >
+              {{ lead.next_reminder_at || "无提醒" }}
+            </el-tag>
           </div>
-          <div class="lead-detail-mobile-focus-meta">
+          <div class="lead-detail-mobile-summary-meta">
             <span v-for="item in leadFocusMeta" :key="item">{{ item }}</span>
           </div>
-        </div>
-        <div v-if="lead" class="lead-detail-mobile-signal-grid">
-          <article v-for="item in leadSignalFacts" :key="item.label" class="lead-detail-mobile-signal">
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </article>
+          <div class="lead-detail-mobile-signal-grid">
+            <article v-for="item in leadSignalFacts" :key="item.label" class="lead-detail-mobile-signal">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
+          </div>
         </div>
       </section>
 
       <section class="mobile-shell-panel" v-loading="loading">
-        <div class="lead-detail-mobile-section-title">线索信息</div>
-        <el-empty v-if="!lead" description="未找到线索" />
+        <div class="lead-detail-mobile-section-head">
+          <div class="lead-detail-mobile-section-title">线索摘要</div>
+          <div class="lead-detail-mobile-section-copy">先看判断线索和下一步动作需要的关键信息。</div>
+        </div>
+        <div v-if="!lead" class="mobile-empty-block">
+          <div class="mobile-empty-kicker">线索信息</div>
+          <div class="mobile-empty-title">未找到线索</div>
+          <div class="mobile-empty-copy">返回开发列表重新选择线索，或检查当前跳转路径。</div>
+        </div>
         <template v-else>
-          <div class="lead-detail-mobile-stack">
+          <div class="lead-detail-mobile-summary-grid">
             <div
-              v-for="item in leadSummaryRows"
+              v-for="item in leadSummaryHighlights"
               :key="item.label"
-              class="lead-detail-mobile-row"
-              :class="{ multiline: item.multiline }"
+              class="lead-detail-mobile-summary-tile"
+              :class="{ wide: item.wide }"
             >
               <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
             </div>
+          </div>
+          <div v-if="leadSummaryNotes.length" class="lead-detail-mobile-note-stack">
+            <article
+              v-for="item in leadSummaryNotes"
+              :key="item.label"
+              class="lead-detail-mobile-note-card"
+              :class="{ multiline: item.multiline }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
           </div>
         </template>
       </section>
@@ -355,9 +396,13 @@ onMounted(fetchLeadDetail);
       <section class="mobile-shell-panel">
         <div class="lead-detail-mobile-section-head">
           <div class="lead-detail-mobile-section-title">开发跟进记录</div>
-          <el-tag size="small" type="success" effect="plain">{{ followups.length }} 条</el-tag>
+          <el-tag class="mobile-count-tag" size="small" effect="plain">{{ followups.length }} 条</el-tag>
         </div>
-        <div v-if="!followups.length" class="mobile-empty-block">还没有开发跟进记录</div>
+        <div v-if="!followups.length" class="mobile-empty-block">
+          <div class="mobile-empty-kicker">开发跟进记录</div>
+          <div class="mobile-empty-title">还没有开发跟进记录</div>
+          <div class="mobile-empty-copy">先补一条跟进，后续提醒和进展会在这里连续累积。</div>
+        </div>
         <div v-else class="lead-detail-mobile-timeline">
           <article v-for="item in followups" :key="item.id" class="lead-detail-mobile-entry">
             <div class="lead-detail-mobile-entry-head">
@@ -365,7 +410,7 @@ onMounted(fetchLeadDetail);
                 <strong>{{ item.followup_at }}</strong>
                 <div class="lead-detail-mobile-entry-copy">记录人 {{ item.created_by_username || "-" }}</div>
               </div>
-              <el-tag size="small" effect="plain" :type="item.next_reminder_at ? 'warning' : 'info'">
+              <el-tag class="mobile-status-tag" size="small" effect="plain" :type="item.next_reminder_at ? 'warning' : 'info'">
                 {{ item.next_reminder_at || "无提醒" }}
               </el-tag>
             </div>
@@ -634,6 +679,14 @@ onMounted(fetchLeadDetail);
   color: var(--app-text-muted);
 }
 
+.lead-detail-mobile-section-copy {
+  max-width: 220px;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
+  color: var(--app-text-muted);
+}
+
 .lead-detail-mobile-hero-actions {
   display: flex;
   flex-wrap: wrap;
@@ -641,7 +694,7 @@ onMounted(fetchLeadDetail);
   gap: 8px;
 }
 
-.lead-detail-mobile-focus-strip {
+.lead-detail-mobile-summary-card {
   margin-top: 12px;
   padding: 14px;
   border: 1px solid rgba(77, 128, 150, 0.18);
@@ -650,26 +703,42 @@ onMounted(fetchLeadDetail);
     var(--app-bg-soft);
 }
 
-.lead-detail-mobile-focus-main {
+.lead-detail-mobile-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lead-detail-mobile-summary-main {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  flex: 1;
 }
 
-.lead-detail-mobile-focus-main span,
+.lead-detail-mobile-summary-kicker,
 .lead-detail-mobile-signal span,
-.lead-detail-mobile-row span {
+.lead-detail-mobile-summary-tile span,
+.lead-detail-mobile-note-card span {
   font-size: 11px;
   color: var(--app-text-muted);
 }
 
-.lead-detail-mobile-focus-main strong {
-  font-size: 28px;
+.lead-detail-mobile-summary-main strong {
+  font-size: 30px;
   line-height: 0.95;
   color: var(--app-text-primary);
 }
 
-.lead-detail-mobile-focus-meta {
+.lead-detail-mobile-summary-copy {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--app-text-secondary);
+}
+
+.lead-detail-mobile-summary-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
@@ -695,34 +764,50 @@ onMounted(fetchLeadDetail);
 }
 
 .lead-detail-mobile-signal strong,
-.lead-detail-mobile-row strong {
+.lead-detail-mobile-summary-tile strong,
+.lead-detail-mobile-note-card strong {
   font-size: 13px;
   line-height: 1.45;
   color: var(--app-text-primary);
 }
 
-.lead-detail-mobile-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.lead-detail-mobile-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin-top: 12px;
 }
 
-.lead-detail-mobile-row {
+.lead-detail-mobile-summary-tile {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.lead-detail-mobile-summary-tile.wide {
+  grid-column: span 2;
+}
+
+.lead-detail-mobile-note-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lead-detail-mobile-note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0 0;
   border-top: 1px solid var(--app-border-soft);
 }
 
-.lead-detail-mobile-row.multiline strong {
+.lead-detail-mobile-note-card.multiline strong {
   line-height: 1.6;
-}
-
-.lead-detail-mobile-row:first-child {
-  padding-top: 0;
-  border-top: none;
 }
 
 .lead-detail-mobile-timeline {
@@ -796,6 +881,16 @@ onMounted(fetchLeadDetail);
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .lead-detail-mobile-section-head,
+  .lead-detail-mobile-summary-head {
+    flex-direction: column;
+  }
+
+  .lead-detail-mobile-section-copy {
+    max-width: none;
+    text-align: left;
+  }
+
   .head {
     flex-direction: column;
     align-items: flex-start;
@@ -834,6 +929,14 @@ onMounted(fetchLeadDetail);
     line-height: 1.6;
     color: #111827;
     word-break: break-word;
+  }
+
+  .lead-detail-mobile-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lead-detail-mobile-summary-tile.wide {
+    grid-column: span 1;
   }
 }
 

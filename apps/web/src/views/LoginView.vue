@@ -5,6 +5,8 @@ import { reactive } from "vue";
 import { useRouter } from "vue-router";
 
 import { getDefaultProtectedPath } from "../mobile/config";
+import { startMobileLoginToTodoMeasurement } from "../mobile/metrics";
+import { scheduleMobileWorkspacePrefetch } from "../mobile/prefetch";
 import { useAuthStore } from "../stores/auth";
 
 const router = useRouter();
@@ -29,6 +31,8 @@ async function login() {
   state.loading = true;
   try {
     await auth.login(form.username, form.password);
+    startMobileLoginToTodoMeasurement();
+    scheduleMobileWorkspacePrefetch();
     ElMessage.success("登录成功");
     router.push(getDefaultProtectedPath());
   } catch (error: any) {
@@ -275,15 +279,41 @@ function openPublicLibrary() {
 }
 
 @media (max-width: 640px) {
+  .login-page {
+    min-height: auto;
+  }
+
   .login-shell {
-    padding: 18px;
+    min-height: auto;
+    gap: 14px;
+    padding: 18px 18px 24px;
   }
 
   .login-title {
+    margin-top: 12px;
     font-size: 34px;
   }
 
+  .login-copy {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .login-scope-strip {
+    margin-top: 14px;
+  }
+
+  .login-scope-pill {
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .intro-link {
+    margin-top: 12px;
+  }
+
   .login-panel {
+    justify-content: flex-start;
     padding: 18px;
   }
 }

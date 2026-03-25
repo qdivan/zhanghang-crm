@@ -75,6 +75,7 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
+const leadsHydrated = ref(false);
 const rows = ref<LeadItem[]>([]);
 const showLeadDialog = ref(false);
 const showRedevelopDialog = ref(false);
@@ -143,6 +144,7 @@ const leadPageActionItems = computed(() => [
   { key: "guide", label: "流程说明", description: "查看开发流程和字段使用说明。" },
   { key: "import", label: "导入 Excel", description: "保留导入入口，后续继续接入。", disabled: true },
 ]);
+const showLeadInitialSkeleton = computed(() => !leadsHydrated.value);
 const leadRowActionItems = computed(() => {
   const row = selectedLeadActionRow.value;
   if (!row) return [];
@@ -195,6 +197,7 @@ async function fetchLeads() {
     ElMessage.error("获取线索失败");
   } finally {
     loading.value = false;
+    leadsHydrated.value = true;
   }
 }
 
@@ -695,7 +698,7 @@ onMounted(async () => {
   if (isMobileWorkflow.value) {
     restoreSavedLeadFilters();
   }
-  await Promise.all([fetchLeads(), fetchAccountants()]);
+  await fetchLeads();
   await handleLeadRouteQueue();
 });
 
@@ -721,9 +724,11 @@ watch(
             />
           </div>
           <div class="mobile-toolbar-actions">
-            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
-            <el-button type="primary" @click="openCreateLeadDialog">新增线索</el-button>
-            <el-button plain @click="showLeadPageActionSheet = true">
+            <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
+              筛选
+            </el-button>
+            <el-button class="mobile-row-primary-button" type="primary" @click="openCreateLeadDialog">新增线索</el-button>
+            <el-button class="mobile-row-secondary-button" plain @click="showLeadPageActionSheet = true">
               操作
               <el-icon class="el-icon--right"><MoreFilled /></el-icon>
             </el-button>
@@ -762,24 +767,52 @@ watch(
             <div class="mobile-queue-kicker">连续跟进</div>
             <div class="mobile-queue-copy">按当前筛选顺序处理 {{ rows.length }} 条线索。</div>
           </div>
-          <el-button size="small" plain @click="startLeadFollowupQueue">从首条开始</el-button>
+          <el-button class="mobile-row-secondary-button" size="small" plain @click="startLeadFollowupQueue">
+            从首条开始
+          </el-button>
         </div>
         <div class="lead-mobile-head">
           <div>
             <div class="lead-mobile-title">客户开发</div>
             <div class="lead-mobile-copy">先看状态和提醒，再直接跟进或转化。</div>
           </div>
-          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+          <div v-if="showLeadInitialSkeleton" class="mobile-skeleton-chip lead-mobile-count-skeleton"></div>
+          <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
         </div>
 
-        <div v-loading="loading" class="lead-mobile-list">
-          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配的线索</div>
+        <div v-loading="loading && leadsHydrated" class="lead-mobile-list">
+          <template v-if="showLeadInitialSkeleton">
+            <article v-for="index in 4" :key="`lead-skeleton-${index}`" class="lead-mobile-row lead-mobile-skeleton-row">
+              <div class="lead-mobile-row-top">
+                <div class="mobile-skeleton-line is-lg"></div>
+                <div class="lead-mobile-skeleton-tags">
+                  <div class="mobile-skeleton-chip"></div>
+                  <div class="mobile-skeleton-chip"></div>
+                </div>
+              </div>
+              <div class="mobile-skeleton-stack">
+                <div class="mobile-skeleton-line is-md"></div>
+                <div class="mobile-skeleton-line is-xl"></div>
+              </div>
+              <div class="lead-mobile-skeleton-actions">
+                <div class="mobile-skeleton-button"></div>
+                <div class="mobile-skeleton-button"></div>
+              </div>
+            </article>
+          </template>
+          <div v-else-if="!rows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">客户开发</div>
+            <div class="mobile-empty-title">当前没有匹配的线索</div>
+            <div class="mobile-empty-copy">换个状态、关键词或快速筛选，继续收口当前线索池。</div>
+          </div>
           <article v-for="row in rows" :key="row.id" class="lead-mobile-row">
             <div class="lead-mobile-row-top">
               <button type="button" class="lead-mobile-name" @click="openCompanyPage(row)">{{ row.name }}</button>
               <div class="lead-mobile-tags">
-                <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
-                <el-tag size="small" :type="statusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
+                <el-tag class="mobile-status-tag" size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
+                <el-tag class="mobile-status-tag" size="small" :type="statusTagType(row.status)">
+                  {{ getStatusLabel(row.status) }}
+                </el-tag>
               </div>
             </div>
             <div class="lead-mobile-summary">{{ getLeadContactText(row) || "未填写联系人" }}</div>
@@ -813,8 +846,10 @@ watch(
 
             <div class="mobile-action-stack lead-mobile-actions">
               <div class="mobile-action-main">
-                <el-button size="small" type="primary" @click="openFollowupDialog(row)">跟进</el-button>
-                <el-button size="small" plain @click="handleLeadQuickAction(row)">
+                <el-button class="mobile-row-primary-button" size="small" type="primary" @click="openFollowupDialog(row)">
+                  跟进
+                </el-button>
+                <el-button class="mobile-row-secondary-button" size="small" plain @click="handleLeadQuickAction(row)">
                   {{ leadQuickActionLabel(row) }}
                 </el-button>
               </div>
@@ -1001,11 +1036,30 @@ watch(
   color: var(--app-text-muted);
 }
 
+.lead-mobile-count-skeleton {
+  flex-shrink: 0;
+}
+
 .lead-mobile-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-top: 14px;
+}
+
+.lead-mobile-skeleton-row {
+  gap: 10px;
+}
+
+.lead-mobile-skeleton-tags,
+.lead-mobile-skeleton-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lead-mobile-skeleton-actions {
+  justify-content: flex-start;
 }
 
 .lead-mobile-row {

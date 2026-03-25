@@ -1,25 +1,28 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import { flushMobilePerformanceForRoute } from "../mobile/metrics";
+import { scheduleMobileWorkspacePrefetch } from "../mobile/prefetch";
 import { useAuthStore } from "../stores/auth";
-import AddressResourceView from "../views/AddressResourceView.vue";
-import AdminUsersView from "../views/AdminUsersView.vue";
-import AppLayout from "../layouts/AppLayout.vue";
-import MobileLayout from "../layouts/MobileLayout.vue";
-import BillingView from "../views/BillingView.vue";
-import CommonLibraryView from "../views/CommonLibraryView.vue";
-import CostView from "../views/CostView.vue";
-import CustomerDetailView from "../views/CustomerDetailView.vue";
-import CustomersView from "../views/CustomersView.vue";
-import DashboardView from "../views/DashboardView.vue";
-import LeadDetailView from "../views/LeadDetailView.vue";
-import LeadView from "../views/LeadView.vue";
-import LoginView from "../views/LoginView.vue";
-import PublicLibraryView from "../views/PublicLibraryView.vue";
-import ReceiptReconciliationView from "../views/ReceiptReconciliationView.vue";
 import { getDefaultProtectedPath, isHandsetViewport, isMobileAppPath, mapPathToMobile } from "../mobile/config";
-import MobileMoreView from "../views/mobile/MobileMoreView.vue";
-import MobileTodoView from "../views/mobile/MobileTodoView.vue";
 import type { UserRole } from "../types";
+
+const AppLayout = () => import("../layouts/AppLayout.vue");
+const MobileLayout = () => import("../layouts/MobileLayout.vue");
+const LoginView = () => import("../views/LoginView.vue");
+const PublicLibraryView = () => import("../views/PublicLibraryView.vue");
+const DashboardView = () => import("../views/DashboardView.vue");
+const LeadView = () => import("../views/LeadView.vue");
+const LeadDetailView = () => import("../views/LeadDetailView.vue");
+const CustomersView = () => import("../views/CustomersView.vue");
+const CustomerDetailView = () => import("../views/CustomerDetailView.vue");
+const BillingView = () => import("../views/BillingView.vue");
+const ReceiptReconciliationView = () => import("../views/ReceiptReconciliationView.vue");
+const CommonLibraryView = () => import("../views/CommonLibraryView.vue");
+const AddressResourceView = () => import("../views/AddressResourceView.vue");
+const CostView = () => import("../views/CostView.vue");
+const AdminUsersView = () => import("../views/AdminUsersView.vue");
+const MobileTodoView = () => import("../views/mobile/MobileTodoView.vue");
+const MobileMoreView = () => import("../views/mobile/MobileMoreView.vue");
 
 function canAccessReceiptReconciliation(user: { role: UserRole; granted_read_modules: string[] } | null) {
   if (!user) return false;
@@ -283,6 +286,9 @@ router.beforeEach(async (to) => {
   if (roleLimit && (!auth.user || !roleLimit.includes(auth.user.role))) {
     return getDefaultProtectedPath();
   }
+  if (auth.isLoggedIn) {
+    scheduleMobileWorkspacePrefetch();
+  }
   if (auth.isLoggedIn && isHandsetViewport() && !isMobileAppPath(to.path)) {
     const mobileTarget = mapPathToMobile(to.fullPath);
     if (mobileTarget && mobileTarget !== to.fullPath) {
@@ -290,6 +296,10 @@ router.beforeEach(async (to) => {
     }
   }
   return true;
+});
+
+router.afterEach((to) => {
+  flushMobilePerformanceForRoute(to.path);
 });
 
 export default router;

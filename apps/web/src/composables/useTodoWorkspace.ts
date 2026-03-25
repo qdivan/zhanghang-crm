@@ -40,8 +40,20 @@ export function useTodoWorkspace() {
     priority: "MEDIUM" as "HIGH" | "MEDIUM" | "LOW",
   });
 
-  const openManualCount = computed(() => allRows.value.filter((item) => item.status === "OPEN").length);
-  const doneManualCount = computed(() => allRows.value.filter((item) => item.status === "DONE").length);
+  const manualCounts = computed(() => {
+    let open = 0;
+    let done = 0;
+    for (const item of allRows.value) {
+      if (item.status === "DONE") {
+        done += 1;
+        continue;
+      }
+      open += 1;
+    }
+    return { open, done };
+  });
+  const openManualCount = computed(() => manualCounts.value.open);
+  const doneManualCount = computed(() => manualCounts.value.done);
 
   async function fetchAllTodos() {
     const resp = await apiClient.get<TodoItem[]>("/todos", {

@@ -73,11 +73,26 @@ type UserLite = {
 
 type BillingQuickView = "ALL" | "OVERDUE" | "DUE_SOON" | "OPEN" | "CLEARED";
 
+type BillingRowInsights = {
+  visibleOutstandingTotal: number;
+  dueSoonCount: number;
+  overdueCount: number;
+  openBillingCount: number;
+  clearedBillingCount: number;
+  overdueRows: BillingRecord[];
+  dueSoonRows: BillingRecord[];
+  openRows: BillingRecord[];
+  clearedRows: BillingRecord[];
+};
+
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
+const summaryLoading = ref(false);
+const billingListHydrated = ref(false);
+const billingSummaryHydrated = ref(false);
 const rows = ref<BillingRecord[]>([]);
 const customers = ref<CustomerListItem[]>([]);
 const summary = ref({
@@ -95,9 +110,7 @@ const billingMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.bill
   ...createBillingFilters(),
   quick_view: "ALL",
 });
-const customerFilterOptions = computed(() => {
-  return [...customers.value].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
-});
+const customerFilterOptions = computed(() => customers.value);
 
 const showCreateDialog = ref(false);
 const createCustomerId = ref<number | null>(null);
@@ -194,33 +207,61 @@ function getDaysUntilDue(dateText: string): number | null {
   return Math.round((due.getTime() - today.getTime()) / 86400000);
 }
 
-const visibleOutstandingTotal = computed(() =>
-  rows.value.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0),
-);
+const billingRowInsights = computed<BillingRowInsights>(() => {
+  let visibleOutstandingTotal = 0;
+  let dueSoonCount = 0;
+  let overdueCount = 0;
+  let openBillingCount = 0;
+  let clearedBillingCount = 0;
+  const overdueRows: BillingRecord[] = [];
+  const dueSoonRows: BillingRecord[] = [];
+  const openRows: BillingRecord[] = [];
+  const clearedRows: BillingRecord[] = [];
 
-const dueSoonCount = computed(() =>
-  rows.value.filter((item) => {
-    if (Number(item.outstanding_amount || 0) <= 0) return false;
-    const days = getDaysUntilDue(item.due_month || "");
-    return days !== null && days >= 0 && days <= 7;
-  }).length,
-);
+  for (const row of rows.value) {
+    const outstanding = Number(row.outstanding_amount || 0);
+    const isOpen = outstanding > 0;
+    const isCleared = row.status === "CLEARED" || !isOpen;
 
-const overdueCount = computed(() =>
-  rows.value.filter((item) => {
-    if (Number(item.outstanding_amount || 0) <= 0) return false;
-    const days = getDaysUntilDue(item.due_month || "");
-    return days !== null && days < 0;
-  }).length,
-);
+    if (isOpen) {
+      visibleOutstandingTotal += outstanding;
+      openBillingCount += 1;
+      openRows.push(row);
 
-const openBillingCount = computed(() =>
-  rows.value.filter((item) => Number(item.outstanding_amount || 0) > 0).length,
-);
+      const days = getDaysUntilDue(row.due_month || "");
+      if (days !== null && days < 0) {
+        overdueCount += 1;
+        overdueRows.push(row);
+      } else if (days !== null && days <= 7) {
+        dueSoonCount += 1;
+        dueSoonRows.push(row);
+      }
+    }
 
-const clearedBillingCount = computed(() =>
-  rows.value.filter((item) => item.status === "CLEARED").length,
-);
+    if (isCleared) {
+      clearedBillingCount += 1;
+      clearedRows.push(row);
+    }
+  }
+
+  return {
+    visibleOutstandingTotal,
+    dueSoonCount,
+    overdueCount,
+    openBillingCount,
+    clearedBillingCount,
+    overdueRows,
+    dueSoonRows,
+    openRows,
+    clearedRows,
+  };
+});
+
+const visibleOutstandingTotal = computed(() => billingRowInsights.value.visibleOutstandingTotal);
+const dueSoonCount = computed(() => billingRowInsights.value.dueSoonCount);
+const overdueCount = computed(() => billingRowInsights.value.overdueCount);
+const openBillingCount = computed(() => billingRowInsights.value.openBillingCount);
+const clearedBillingCount = computed(() => billingRowInsights.value.clearedBillingCount);
 
 function formatAmount(value: number): string {
   const amount = Number(value || 0);
@@ -287,6 +328,8 @@ const billingFilterChips = computed(() => {
   }>;
 });
 const activeFilterChips = computed(() => billingFilterChips.value.map((item) => item.label));
+const showBillingListInitialSkeleton = computed(() => !billingListHydrated.value);
+const showBillingSummarySkeleton = computed(() => !billingSummaryHydrated.value);
 
 function currentBillingFilterSnapshot() {
   return {
@@ -389,13 +432,19 @@ async function fetchRecords() {
     if (filters.status) {
       filteredRows = filteredRows.filter((item) => item.status === filters.status);
     }
-    rows.value = [...filteredRows].sort((left, right) => {
-      const leftPriority = getDuePriority(left);
-      const rightPriority = getDuePriority(right);
-      if (leftPriority[0] !== rightPriority[0]) return leftPriority[0] - rightPriority[0];
-      if (leftPriority[1] !== rightPriority[1]) return leftPriority[1].localeCompare(rightPriority[1]);
-      return leftPriority[2] - rightPriority[2];
-    });
+    rows.value = filteredRows
+      .map((item) => ({
+        item,
+        priority: getDuePriority(item),
+      }))
+      .sort((left, right) => {
+        const leftPriority = left.priority;
+        const rightPriority = right.priority;
+        if (leftPriority[0] !== rightPriority[0]) return leftPriority[0] - rightPriority[0];
+        if (leftPriority[1] !== rightPriority[1]) return leftPriority[1].localeCompare(rightPriority[1]);
+        return leftPriority[2] - rightPriority[2];
+      })
+      .map(({ item }) => item);
     if (!isMobile.value) {
       void prefetchLedgerRows(rows.value);
     }
@@ -403,10 +452,12 @@ async function fetchRecords() {
     ElMessage.error("获取收费记录失败");
   } finally {
     loading.value = false;
+    billingListHydrated.value = true;
   }
 }
 
 async function fetchSummary() {
+  summaryLoading.value = true;
   try {
     const resp = await apiClient.get("/billing-records/summary", {
       params: {
@@ -422,6 +473,9 @@ async function fetchSummary() {
     summary.value = resp.data;
   } catch (error) {
     ElMessage.error("获取收费统计失败");
+  } finally {
+    summaryLoading.value = false;
+    billingSummaryHydrated.value = true;
   }
 }
 
@@ -442,22 +496,16 @@ const billingQuickFilters = computed(() => [
 
 const billingVisibleRows = computed(() => {
   if (billingQuickView.value === "OVERDUE") {
-    return rows.value.filter((row) => {
-      const days = getDaysUntilDue(row.due_month || "");
-      return Number(row.outstanding_amount || 0) > 0 && days !== null && days < 0;
-    });
+    return billingRowInsights.value.overdueRows;
   }
   if (billingQuickView.value === "DUE_SOON") {
-    return rows.value.filter((row) => {
-      const days = getDaysUntilDue(row.due_month || "");
-      return Number(row.outstanding_amount || 0) > 0 && days !== null && days >= 0 && days <= 7;
-    });
+    return billingRowInsights.value.dueSoonRows;
   }
   if (billingQuickView.value === "OPEN") {
-    return rows.value.filter((row) => Number(row.outstanding_amount || 0) > 0);
+    return billingRowInsights.value.openRows;
   }
   if (billingQuickView.value === "CLEARED") {
-    return rows.value.filter((row) => row.status === "CLEARED" || Number(row.outstanding_amount || 0) <= 0);
+    return billingRowInsights.value.clearedRows;
   }
   return rows.value;
 });
@@ -515,7 +563,7 @@ const billingRowActionItems = computed(() => {
 async function fetchCustomers() {
   try {
     const resp = await apiClient.get<CustomerListItem[]>("/customers");
-    customers.value = resp.data;
+    customers.value = [...resp.data].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
   } catch (error) {
     ElMessage.error("获取客户列表失败");
   }
@@ -1292,7 +1340,7 @@ onMounted(async () => {
     restoreSavedBillingFilters();
   }
   await runBillingQuery();
-  await fetchCustomers();
+  void fetchCustomers();
   await handleRouteAction();
   await handleBillingRouteQueue();
 });
@@ -1309,44 +1357,73 @@ watch(
 <template>
   <template v-if="isMobileWorkflow">
     <section class="mobile-page billing-mobile-page">
-      <section class="mobile-shell-panel billing-mobile-focus-panel">
-        <div class="billing-mobile-summary-head">
-          <div>
-            <div class="billing-mobile-title">{{ mobileFocusSummary.title }}</div>
-            <div class="billing-mobile-copy">{{ mobileFocusSummary.detail }}</div>
+      <section class="mobile-shell-panel billing-mobile-focus-panel" v-loading="summaryLoading && billingSummaryHydrated">
+        <template v-if="showBillingSummarySkeleton">
+          <div class="billing-mobile-summary-head">
+            <div class="mobile-skeleton-stack billing-mobile-skeleton-copy">
+              <div class="mobile-skeleton-line is-md"></div>
+              <div class="mobile-skeleton-line is-xl"></div>
+            </div>
+            <div class="mobile-skeleton-button"></div>
           </div>
-          <el-button
-            v-if="canViewReceiptLedger"
-            text
-            size="small"
-            type="primary"
-            @click="openReceiptReconciliation"
-          >
-            到账核对
-          </el-button>
-        </div>
 
-        <div class="billing-mobile-balance-strip" :class="mobileFocusSummary.tone">
-          <div class="billing-mobile-balance-main">
-            <span>未收合计</span>
-            <strong>{{ formatAmount(visibleOutstandingTotal) }}</strong>
+          <div class="billing-mobile-skeleton-balance">
+            <div class="mobile-skeleton-stack">
+              <div class="mobile-skeleton-line is-xs"></div>
+              <div class="mobile-skeleton-line is-lg"></div>
+            </div>
+            <div class="billing-mobile-skeleton-meta">
+              <div v-for="index in 3" :key="`billing-meta-${index}`" class="mobile-skeleton-line is-sm"></div>
+            </div>
           </div>
-          <div class="billing-mobile-balance-meta">
-            <span v-for="item in mobileHeadlineStats" :key="item">{{ item }}</span>
-          </div>
-        </div>
 
-        <div class="billing-mobile-stats">
-          <article
-            v-for="item in mobileSummaryCards"
-            :key="item.label"
-            class="billing-mobile-stat"
-            :class="{ accent: item.accent, warning: item.warning, danger: item.danger }"
-          >
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </article>
-        </div>
+          <div class="billing-mobile-stats">
+            <div v-for="index in 3" :key="`billing-stat-${index}`" class="billing-mobile-skeleton-stat">
+              <div class="mobile-skeleton-line is-xs"></div>
+              <div class="mobile-skeleton-line is-sm"></div>
+            </div>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="billing-mobile-summary-head">
+            <div>
+              <div class="billing-mobile-title">{{ mobileFocusSummary.title }}</div>
+              <div class="billing-mobile-copy">{{ mobileFocusSummary.detail }}</div>
+            </div>
+            <el-button
+              v-if="canViewReceiptLedger"
+              text
+              size="small"
+              type="primary"
+              @click="openReceiptReconciliation"
+            >
+              到账核对
+            </el-button>
+          </div>
+
+          <div class="billing-mobile-balance-strip" :class="mobileFocusSummary.tone">
+            <div class="billing-mobile-balance-main">
+              <span>未收合计</span>
+              <strong>{{ formatAmount(visibleOutstandingTotal) }}</strong>
+            </div>
+            <div class="billing-mobile-balance-meta">
+              <span v-for="item in mobileHeadlineStats" :key="item">{{ item }}</span>
+            </div>
+          </div>
+
+          <div class="billing-mobile-stats">
+            <article
+              v-for="item in mobileSummaryCards"
+              :key="item.label"
+              class="billing-mobile-stat"
+              :class="{ accent: item.accent, warning: item.warning, danger: item.danger }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
+          </div>
+        </template>
       </section>
 
       <section class="mobile-shell-panel">
@@ -1360,8 +1437,10 @@ watch(
             />
           </div>
           <div class="mobile-toolbar-actions">
-            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
-            <el-button type="primary" @click="openCreateDialog">新增收费单</el-button>
+            <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
+              筛选
+            </el-button>
+            <el-button class="mobile-row-primary-button" type="primary" @click="openCreateDialog">新增收费单</el-button>
           </div>
         </div>
         <div class="mobile-filter-presets">
@@ -1398,15 +1477,42 @@ watch(
             <div class="mobile-queue-kicker">连续催收</div>
             <div class="mobile-queue-copy">按当前筛选顺序处理 {{ billingActivityQueueRows.length }} 条待跟进收费单。</div>
           </div>
-          <el-button size="small" plain @click="startBillingActivityQueue">从首条开始</el-button>
+          <el-button class="mobile-row-secondary-button" size="small" plain @click="startBillingActivityQueue">
+            从首条开始
+          </el-button>
         </div>
         <div class="billing-mobile-list-head">
           <div class="billing-mobile-title">{{ billingListTitle }}</div>
-          <el-tag size="small" type="success" effect="plain">{{ billingVisibleRows.length }} 条</el-tag>
+          <div v-if="showBillingListInitialSkeleton" class="mobile-skeleton-chip billing-mobile-count-skeleton"></div>
+          <el-tag v-else class="mobile-count-tag" size="small" effect="plain">{{ billingVisibleRows.length }} 条</el-tag>
         </div>
 
-        <div v-loading="loading" class="billing-mobile-list">
-          <div v-if="!billingVisibleRows.length" class="mobile-empty-block">当前没有匹配的收费单</div>
+        <div v-loading="loading && billingListHydrated" class="billing-mobile-list">
+          <template v-if="showBillingListInitialSkeleton">
+            <article v-for="index in 4" :key="`billing-skeleton-${index}`" class="billing-mobile-row billing-mobile-skeleton-row">
+              <div class="billing-mobile-row-top">
+                <div class="billing-mobile-row-head billing-mobile-skeleton-copy">
+                  <div class="mobile-skeleton-line is-lg"></div>
+                  <div class="mobile-skeleton-line is-md"></div>
+                </div>
+                <div class="mobile-skeleton-chip"></div>
+              </div>
+              <div class="mobile-skeleton-stack">
+                <div class="mobile-skeleton-line is-md"></div>
+                <div class="mobile-skeleton-line is-xl"></div>
+              </div>
+              <div class="billing-mobile-skeleton-actions">
+                <div class="mobile-skeleton-button"></div>
+                <div class="mobile-skeleton-button"></div>
+                <div class="mobile-skeleton-button"></div>
+              </div>
+            </article>
+          </template>
+          <div v-else-if="!billingVisibleRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">收费明细</div>
+            <div class="mobile-empty-title">当前没有匹配的收费单</div>
+            <div class="mobile-empty-copy">切换快速视图、客户或账户筛选，继续定位待处理收费单。</div>
+          </div>
           <article
             v-for="row in billingVisibleRows"
             :key="row.id"
@@ -1420,7 +1526,9 @@ watch(
                 </button>
                 <div class="billing-mobile-summary">{{ row.summary || row.charge_category || "代账" }}</div>
               </div>
-              <el-tag size="small" effect="plain" :type="mobileDueTagType(row)">{{ mobileDueText(row) }}</el-tag>
+              <el-tag class="mobile-status-tag" size="small" effect="plain" :type="mobileDueTagType(row)">
+                {{ mobileDueText(row) }}
+              </el-tag>
             </div>
 
             <div class="billing-mobile-amount-line">
@@ -1461,6 +1569,7 @@ watch(
             <div class="billing-mobile-actions">
               <div class="mobile-action-main">
                 <el-button
+                  class="mobile-row-primary-button"
                   size="small"
                   type="primary"
                   :disabled="!canWriteBillingRecord(row)"
@@ -1468,8 +1577,12 @@ watch(
                 >
                   催收/收款
                 </el-button>
-                <el-button size="small" plain @click="openExecutionDrawer(row)">执行进度</el-button>
-                <el-button size="small" plain @click="openLedgerDialog(row)">往来账</el-button>
+                <el-button class="mobile-row-secondary-button" size="small" plain @click="openExecutionDrawer(row)">
+                  执行进度
+                </el-button>
+                <el-button class="mobile-row-secondary-button" size="small" plain @click="openLedgerDialog(row)">
+                  往来账
+                </el-button>
               </div>
               <div class="mobile-action-sub">
                 <button type="button" class="mobile-action-link is-muted" @click="toggleExpandedBilling(row.id)">
@@ -1751,6 +1864,40 @@ watch(
   color: var(--app-text-muted);
 }
 
+.billing-mobile-skeleton-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.billing-mobile-skeleton-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.billing-mobile-skeleton-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.billing-mobile-skeleton-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.billing-mobile-count-skeleton {
+  flex-shrink: 0;
+}
+
 .billing-mobile-balance-strip {
   margin-top: 12px;
   padding: 14px;
@@ -1856,6 +2003,16 @@ watch(
   flex-direction: column;
   gap: 10px;
   margin-top: 14px;
+}
+
+.billing-mobile-skeleton-row {
+  gap: 10px;
+}
+
+.billing-mobile-skeleton-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .billing-mobile-row {

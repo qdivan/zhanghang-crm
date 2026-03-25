@@ -18,6 +18,7 @@ const auth = useAuthStore();
 const { isMobile } = useResponsive();
 
 const loading = ref(false);
+const receiptHydrated = ref(false);
 const receiptAccount = ref("");
 const dateRange = ref<[string, string] | null>(null);
 const data = ref<BillingReceiptAccountLedgerData | null>(null);
@@ -51,6 +52,7 @@ const scopeLabel = computed(() => {
 const selectedAccountLabel = computed(() => receiptAccount.value || "全部账户");
 const accountCount = computed(() => data.value?.account_summaries.length ?? 0);
 const visibleEntries = computed(() => data.value?.entries || []);
+const showReceiptInitialSkeleton = computed(() => !receiptHydrated.value);
 const mobileAccountPresets = computed(() => {
   const items = data.value?.account_summaries || [];
   return [
@@ -162,6 +164,7 @@ async function fetchReceiptLedger() {
     ElMessage.error(error?.response?.data?.detail ?? "加载到账核对失败");
   } finally {
     loading.value = false;
+    receiptHydrated.value = true;
   }
 }
 
@@ -220,42 +223,67 @@ watch(
 
 <template>
   <section v-if="isMobileWorkflow" class="mobile-page receipt-mobile-page">
-    <section class="mobile-shell-panel">
-      <div class="receipt-mobile-summary-head">
-        <div>
-          <div class="receipt-mobile-summary-title">{{ selectedAccountLabel }}</div>
-          <div class="receipt-mobile-summary-copy">{{ scopeLabel }}</div>
+    <section v-loading="loading && receiptHydrated" class="mobile-shell-panel">
+      <template v-if="showReceiptInitialSkeleton">
+        <div class="receipt-mobile-summary-head">
+          <div class="receipt-mobile-skeleton-copy">
+            <div class="mobile-skeleton-line is-lg"></div>
+            <div class="mobile-skeleton-line is-md"></div>
+          </div>
+          <div class="mobile-skeleton-button"></div>
         </div>
-        <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
-      </div>
-      <div class="receipt-mobile-stat-grid">
-        <article class="receipt-mobile-stat-card">
-          <span>入账合计</span>
-          <strong>{{ data?.total_received ?? 0 }}</strong>
-        </article>
-        <article class="receipt-mobile-stat-card">
-          <span>收款笔数</span>
-          <strong>{{ data?.payment_count ?? 0 }}</strong>
-        </article>
-        <article class="receipt-mobile-stat-card">
-          <span>账户数</span>
-          <strong>{{ accountCount }}</strong>
-        </article>
-      </div>
-      <div class="mobile-filter-presets receipt-mobile-presets">
-        <button
-          v-for="item in mobileAccountPresets"
-          :key="`receipt-preset-${item.key || 'all'}`"
-          type="button"
-          class="mobile-filter-preset"
-          :class="{ active: receiptAccount === item.key }"
-          @click="applyAccount(item.key)"
-        >
-          <span>{{ item.label }}</span>
-          <strong>{{ item.total }}</strong>
-        </button>
-      </div>
-      <div v-if="activeFilterChips.length" class="mobile-chip-row receipt-mobile-chip-row">
+        <div class="receipt-mobile-stat-grid">
+          <article v-for="index in 3" :key="`receipt-stat-skeleton-${index}`" class="receipt-mobile-stat-card receipt-mobile-skeleton-stat">
+            <div class="mobile-skeleton-line is-xs"></div>
+            <div class="mobile-skeleton-line is-sm"></div>
+          </article>
+        </div>
+        <div class="mobile-filter-presets receipt-mobile-presets receipt-mobile-skeleton-presets">
+          <div v-for="index in 3" :key="`receipt-preset-skeleton-${index}`" class="mobile-filter-preset receipt-mobile-skeleton-preset">
+            <div class="mobile-skeleton-line is-sm"></div>
+            <div class="mobile-skeleton-line is-xs"></div>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="receipt-mobile-summary-head">
+          <div>
+            <div class="receipt-mobile-summary-title">{{ selectedAccountLabel }}</div>
+            <div class="receipt-mobile-summary-copy">{{ scopeLabel }}</div>
+          </div>
+          <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
+            筛选
+          </el-button>
+        </div>
+        <div class="receipt-mobile-stat-grid">
+          <article class="receipt-mobile-stat-card">
+            <span>入账合计</span>
+            <strong>{{ data?.total_received ?? 0 }}</strong>
+          </article>
+          <article class="receipt-mobile-stat-card">
+            <span>收款笔数</span>
+            <strong>{{ data?.payment_count ?? 0 }}</strong>
+          </article>
+          <article class="receipt-mobile-stat-card">
+            <span>账户数</span>
+            <strong>{{ accountCount }}</strong>
+          </article>
+        </div>
+        <div class="mobile-filter-presets receipt-mobile-presets">
+          <button
+            v-for="item in mobileAccountPresets"
+            :key="`receipt-preset-${item.key || 'all'}`"
+            type="button"
+            class="mobile-filter-preset"
+            :class="{ active: receiptAccount === item.key }"
+            @click="applyAccount(item.key)"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.total }}</strong>
+          </button>
+        </div>
+      </template>
+      <div v-if="!showReceiptInitialSkeleton && activeFilterChips.length" class="mobile-chip-row receipt-mobile-chip-row">
         <button
           v-for="chip in receiptFilterChips"
           :key="chip.key"
@@ -276,31 +304,56 @@ watch(
           <div class="receipt-mobile-summary-title">到账流水</div>
           <div class="receipt-mobile-summary-copy">先看账户，再核对金额和凭证。</div>
         </div>
-        <el-tag size="small" type="success" effect="plain">{{ visibleEntries.length }} 条</el-tag>
+        <div v-if="showReceiptInitialSkeleton" class="mobile-skeleton-chip receipt-mobile-count-skeleton"></div>
+        <el-tag v-else class="mobile-count-tag" size="small" effect="plain">{{ visibleEntries.length }} 条</el-tag>
       </div>
 
-      <div v-if="!visibleEntries.length && !loading" class="mobile-empty-block">当前筛选范围内没有到账流水</div>
-      <div v-else v-loading="loading" class="receipt-mobile-list">
-        <article
-          v-for="row in visibleEntries"
-          :key="`${row.occurred_at}-${row.customer_name}-${row.received_amount}`"
-          class="receipt-mobile-item"
-        >
-          <div class="receipt-mobile-top">
-            <div>
-              <div class="receipt-mobile-company">{{ row.customer_name }}</div>
-              <div class="receipt-mobile-summary">{{ row.summary }}</div>
+      <div v-loading="loading && receiptHydrated" class="receipt-mobile-list">
+        <template v-if="showReceiptInitialSkeleton">
+          <article
+            v-for="index in 4"
+            :key="`receipt-row-skeleton-${index}`"
+            class="receipt-mobile-item receipt-mobile-skeleton-row"
+          >
+            <div class="receipt-mobile-top">
+              <div class="receipt-mobile-skeleton-copy">
+                <div class="mobile-skeleton-line is-lg"></div>
+                <div class="mobile-skeleton-line is-xl"></div>
+              </div>
+              <div class="mobile-skeleton-line is-sm receipt-mobile-skeleton-amount"></div>
             </div>
-            <div class="receipt-mobile-amount">{{ row.received_amount }}</div>
-          </div>
-          <div class="receipt-mobile-meta">
-            <span>{{ row.occurred_at }}</span>
-            <span>{{ buildVoucherNo(row) }}</span>
-            <span>{{ row.receipt_account }}</span>
-            <span>累计 {{ row.cumulative_received }}</span>
-            <span>{{ row.actor_username || "-" }}</span>
-          </div>
-        </article>
+            <div class="receipt-mobile-skeleton-meta">
+              <div v-for="metaIndex in 4" :key="`receipt-meta-skeleton-${index}-${metaIndex}`" class="mobile-skeleton-line is-sm"></div>
+            </div>
+          </article>
+        </template>
+        <div v-else-if="!visibleEntries.length" class="mobile-empty-block">
+          <div class="mobile-empty-kicker">到账流水</div>
+          <div class="mobile-empty-title">当前筛选范围内没有到账流水</div>
+          <div class="mobile-empty-copy">切换账户或时间预设，继续核对当前范围内的回款记录。</div>
+        </div>
+        <template v-else>
+          <article
+            v-for="row in visibleEntries"
+            :key="`${row.occurred_at}-${row.customer_name}-${row.received_amount}`"
+            class="receipt-mobile-item"
+          >
+            <div class="receipt-mobile-top">
+              <div>
+                <div class="receipt-mobile-company">{{ row.customer_name }}</div>
+                <div class="receipt-mobile-summary">{{ row.summary }}</div>
+              </div>
+              <div class="receipt-mobile-amount">{{ row.received_amount }}</div>
+            </div>
+            <div class="receipt-mobile-meta">
+              <span>{{ row.occurred_at }}</span>
+              <span>{{ buildVoucherNo(row) }}</span>
+              <span>{{ row.receipt_account }}</span>
+              <span>累计 {{ row.cumulative_received }}</span>
+              <span>{{ row.actor_username || "-" }}</span>
+            </div>
+          </article>
+        </template>
       </div>
     </section>
 
@@ -511,11 +564,21 @@ watch(
   color: var(--app-text-muted);
 }
 
+.receipt-mobile-skeleton-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .receipt-mobile-stat-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 12px;
+}
+
+.receipt-mobile-skeleton-stat {
+  justify-content: space-between;
 }
 
 .receipt-mobile-stat-card {
@@ -541,8 +604,22 @@ watch(
   margin-top: 12px;
 }
 
+.receipt-mobile-skeleton-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.receipt-mobile-skeleton-preset {
+  pointer-events: none;
+}
+
 .receipt-mobile-chip-row {
   margin-top: 10px;
+}
+
+.receipt-mobile-count-skeleton {
+  flex-shrink: 0;
 }
 
 .receipt-clear-chip {
@@ -751,6 +828,23 @@ watch(
   gap: 8px;
 }
 
+.receipt-mobile-skeleton-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.receipt-mobile-skeleton-amount {
+  flex-shrink: 0;
+  width: 72px;
+}
+
+.receipt-mobile-skeleton-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .receipt-mobile-item {
   padding: 10px 12px;
   background: #f7f9f9;
@@ -818,6 +912,10 @@ watch(
   .receipt-stat-block {
     flex: 1 1 calc(50% - 4px);
     min-width: 0;
+  }
+
+  .receipt-mobile-skeleton-meta {
+    grid-template-columns: 1fr;
   }
 }
 </style>
