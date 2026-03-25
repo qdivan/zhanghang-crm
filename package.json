@@ -20,7 +20,13 @@
     "test": "npm run test:api && npm run test:web",
     "test:api": "bash ./scripts/test-api.sh",
     "test:web": "npm run build:web",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:report": "playwright show-report output/playwright/e2e-report",
     "build:web": "npm --workspace apps/web run build",
     "lint:web": "npm --workspace apps/web run lint --if-present"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }
