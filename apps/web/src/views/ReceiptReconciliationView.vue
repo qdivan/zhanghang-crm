@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { Filter } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import type { BillingReceiptAccountLedgerData } from "../types";
+import { addDaysToDateString, todayInBrowserTimeZone } from "../utils/time";
 import { getMonthDateRange, receiptAccountOptions } from "./billing/viewMeta";
 
 const route = useRoute();
@@ -17,6 +21,10 @@ const loading = ref(false);
 const receiptAccount = ref("");
 const dateRange = ref<[string, string] | null>(null);
 const data = ref<BillingReceiptAccountLedgerData | null>(null);
+const showMobileFilters = ref(false);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
+type ReceiptDatePreset = "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | "LAST_MONTH";
+const receiptDatePreset = ref<ReceiptDatePreset | "">("");
 
 const accountOptions = computed(() => {
   const dynamicOptions = (data.value?.account_summaries || []).map((item) => ({
@@ -34,15 +42,95 @@ const accountOptions = computed(() => {
 });
 
 const scopeLabel = computed(() => {
-  if (auth.user?.role === "MANAGER") return "当前按直属下属范围核对到账流水";
-  if (auth.user?.role === "ADMIN") return "当前按管理员可见范围核对到账流水";
-  if (auth.user?.role === "ACCOUNTANT") return "当前按收费只读授权范围核对到账流水";
-  return "当前按全公司范围核对到账流水";
+  if (auth.user?.role === "MANAGER") return "当前范围：直属下属";
+  if (auth.user?.role === "ADMIN") return "当前范围：管理员可见";
+  if (auth.user?.role === "ACCOUNTANT") return "当前范围：收费授权";
+  return "当前范围：全公司";
 });
 
 const selectedAccountLabel = computed(() => receiptAccount.value || "全部账户");
 const accountCount = computed(() => data.value?.account_summaries.length ?? 0);
 const visibleEntries = computed(() => data.value?.entries || []);
+const mobileAccountPresets = computed(() => {
+  const items = data.value?.account_summaries || [];
+  return [
+    {
+      key: "",
+      label: "全部账户",
+      meta: `${data.value?.payment_count ?? 0} 笔`,
+      total: data.value?.total_received ?? 0,
+    },
+    ...items.map((item) => ({
+      key: item.receipt_account,
+      label: item.receipt_account,
+      meta: `${item.payment_count} 笔`,
+      total: item.total_received,
+    })),
+  ];
+});
+const receiptDatePresetOptions = computed(() => [
+  { key: "LAST_7_DAYS" as const, label: "最近7天" },
+  { key: "LAST_30_DAYS" as const, label: "最近30天" },
+  { key: "THIS_MONTH" as const, label: "本月" },
+  { key: "LAST_MONTH" as const, label: "上月" },
+]);
+
+const receiptFilterChips = computed(() =>
+  [
+    receiptAccount.value ? { key: "account" as const, label: `账户：${receiptAccount.value}` } : null,
+    dateRange.value?.[0] && dateRange.value?.[1]
+      ? {
+          key: "date" as const,
+          label: receiptDatePreset.value
+            ? `时间：${receiptDatePresetLabel(receiptDatePreset.value)}`
+            : `时间：${dateRange.value[0]} 至 ${dateRange.value[1]}`,
+        }
+      : null,
+  ].filter(Boolean) as Array<{ key: "account" | "date"; label: string }>,
+);
+const activeFilterChips = computed(() => receiptFilterChips.value.map((item) => item.label));
+
+function getMonthToken(offset = 0) {
+  const current = new Date(`${todayInBrowserTimeZone()}T00:00:00`);
+  current.setMonth(current.getMonth() + offset);
+  const year = current.getFullYear();
+  const month = String(current.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function receiptDatePresetLabel(preset: ReceiptDatePreset) {
+  return receiptDatePresetOptions.value.find((item) => item.key === preset)?.label || "时间范围";
+}
+
+function getReceiptPresetRange(preset: ReceiptDatePreset): [string, string] | null {
+  if (preset === "LAST_7_DAYS") {
+    const end = todayInBrowserTimeZone();
+    const start = addDaysToDateString(end, -6);
+    return start ? [start, end] : null;
+  }
+  if (preset === "LAST_30_DAYS") {
+    const end = todayInBrowserTimeZone();
+    const start = addDaysToDateString(end, -29);
+    return start ? [start, end] : null;
+  }
+  if (preset === "THIS_MONTH") {
+    return getMonthDateRange(getMonthToken());
+  }
+  return getMonthDateRange(getMonthToken(-1));
+}
+
+function syncReceiptDatePreset() {
+  if (!dateRange.value?.[0] || !dateRange.value?.[1]) {
+    receiptDatePreset.value = "";
+    return;
+  }
+  const currentToken = `${dateRange.value[0]}|${dateRange.value[1]}`;
+  const matched = receiptDatePresetOptions.value.find((item) => {
+    const range = getReceiptPresetRange(item.key);
+    return range ? `${range[0]}|${range[1]}` === currentToken : false;
+  });
+  receiptDatePreset.value = matched?.key || "";
+}
 
 function buildVoucherNo(row: { payment_id: number | null; billing_record_id: number | null }) {
   if (row.payment_id) return `收-${String(row.payment_id).padStart(4, "0")}`;
@@ -55,6 +143,7 @@ function applyRouteQuery() {
   const queryMonth = typeof route.query.month === "string" ? route.query.month.trim() : "";
   receiptAccount.value = queryAccount;
   dateRange.value = getMonthDateRange(queryMonth);
+  syncReceiptDatePreset();
 }
 
 async function fetchReceiptLedger() {
@@ -84,6 +173,26 @@ async function applyAccount(accountName: string) {
 async function resetFilters() {
   receiptAccount.value = "";
   dateRange.value = null;
+  receiptDatePreset.value = "";
+  await fetchReceiptLedger();
+}
+
+async function applyMobileFilters() {
+  showMobileFilters.value = false;
+  await fetchReceiptLedger();
+}
+
+function applyDatePreset(preset: ReceiptDatePreset) {
+  receiptDatePreset.value = preset;
+  dateRange.value = getReceiptPresetRange(preset);
+}
+
+async function removeReceiptFilterChip(key: "account" | "date") {
+  if (key === "account") receiptAccount.value = "";
+  if (key === "date") {
+    dateRange.value = null;
+    receiptDatePreset.value = "";
+  }
   await fetchReceiptLedger();
 }
 
@@ -99,10 +208,154 @@ watch(
     await fetchReceiptLedger();
   },
 );
+
+watch(
+  () => dateRange.value,
+  () => {
+    syncReceiptDatePreset();
+  },
+  { deep: true },
+);
 </script>
 
 <template>
-  <div class="receipt-page">
+  <section v-if="isMobileWorkflow" class="mobile-page receipt-mobile-page">
+    <section class="mobile-shell-panel">
+      <div class="receipt-mobile-summary-head">
+        <div>
+          <div class="receipt-mobile-summary-title">{{ selectedAccountLabel }}</div>
+          <div class="receipt-mobile-summary-copy">{{ scopeLabel }}</div>
+        </div>
+        <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
+      </div>
+      <div class="receipt-mobile-stat-grid">
+        <article class="receipt-mobile-stat-card">
+          <span>入账合计</span>
+          <strong>{{ data?.total_received ?? 0 }}</strong>
+        </article>
+        <article class="receipt-mobile-stat-card">
+          <span>收款笔数</span>
+          <strong>{{ data?.payment_count ?? 0 }}</strong>
+        </article>
+        <article class="receipt-mobile-stat-card">
+          <span>账户数</span>
+          <strong>{{ accountCount }}</strong>
+        </article>
+      </div>
+      <div class="mobile-filter-presets receipt-mobile-presets">
+        <button
+          v-for="item in mobileAccountPresets"
+          :key="`receipt-preset-${item.key || 'all'}`"
+          type="button"
+          class="mobile-filter-preset"
+          :class="{ active: receiptAccount === item.key }"
+          @click="applyAccount(item.key)"
+        >
+          <span>{{ item.label }}</span>
+          <strong>{{ item.total }}</strong>
+        </button>
+      </div>
+      <div v-if="activeFilterChips.length" class="mobile-chip-row receipt-mobile-chip-row">
+        <button
+          v-for="chip in receiptFilterChips"
+          :key="chip.key"
+          type="button"
+          class="mobile-chip-button"
+          @click="removeReceiptFilterChip(chip.key)"
+        >
+          <span>{{ chip.label }}</span>
+          <span class="mobile-chip-close">移除</span>
+        </button>
+        <button type="button" class="receipt-clear-chip" @click="resetFilters">清空</button>
+      </div>
+    </section>
+
+    <section class="mobile-shell-panel">
+      <div class="receipt-mobile-list-head">
+        <div>
+          <div class="receipt-mobile-summary-title">到账流水</div>
+          <div class="receipt-mobile-summary-copy">先看账户，再核对金额和凭证。</div>
+        </div>
+        <el-tag size="small" type="success" effect="plain">{{ visibleEntries.length }} 条</el-tag>
+      </div>
+
+      <div v-if="!visibleEntries.length && !loading" class="mobile-empty-block">当前筛选范围内没有到账流水</div>
+      <div v-else v-loading="loading" class="receipt-mobile-list">
+        <article
+          v-for="row in visibleEntries"
+          :key="`${row.occurred_at}-${row.customer_name}-${row.received_amount}`"
+          class="receipt-mobile-item"
+        >
+          <div class="receipt-mobile-top">
+            <div>
+              <div class="receipt-mobile-company">{{ row.customer_name }}</div>
+              <div class="receipt-mobile-summary">{{ row.summary }}</div>
+            </div>
+            <div class="receipt-mobile-amount">{{ row.received_amount }}</div>
+          </div>
+          <div class="receipt-mobile-meta">
+            <span>{{ row.occurred_at }}</span>
+            <span>{{ buildVoucherNo(row) }}</span>
+            <span>{{ row.receipt_account }}</span>
+            <span>累计 {{ row.cumulative_received }}</span>
+            <span>{{ row.actor_username || "-" }}</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <MobileFilterSheet
+      v-model="showMobileFilters"
+      title="筛选到账流水"
+      subtitle="先缩小账户和时间范围。"
+      :summary-items="activeFilterChips"
+      empty-summary="当前未设置筛选条件"
+    >
+      <el-form label-position="top" class="receipt-mobile-filter-form">
+        <el-form-item label="入账账户">
+          <el-select v-model="receiptAccount" clearable filterable placeholder="全部账户">
+            <el-option
+              v-for="item in accountOptions"
+              :key="`receipt-mobile-${item.value}`"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="时间快捷预设">
+          <div class="mobile-filter-presets receipt-mobile-date-presets">
+            <button
+              v-for="item in receiptDatePresetOptions"
+              :key="item.key"
+              type="button"
+              class="mobile-filter-preset"
+              :class="{ active: receiptDatePreset === item.key }"
+              @click="applyDatePreset(item.key)"
+            >
+              <span>{{ item.label }}</span>
+            </button>
+          </div>
+        </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            format="YYYY-MM-DD"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            unlink-panels
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetFilters">重置</el-button>
+        <el-button type="primary" @click="applyMobileFilters">应用筛选</el-button>
+      </template>
+    </MobileFilterSheet>
+  </section>
+
+  <div v-else class="receipt-page">
     <section class="receipt-header">
       <div>
         <div class="receipt-eyebrow">到账核对</div>
@@ -233,6 +486,84 @@ watch(
 </template>
 
 <style scoped>
+.receipt-mobile-page {
+  gap: 12px;
+}
+
+.receipt-mobile-summary-head,
+.receipt-mobile-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receipt-mobile-summary-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.receipt-mobile-summary-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.receipt-mobile-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.receipt-mobile-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.receipt-mobile-stat-card span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.receipt-mobile-stat-card strong {
+  font-size: 16px;
+  color: var(--app-text-primary);
+}
+
+.receipt-mobile-presets {
+  margin-top: 12px;
+}
+
+.receipt-mobile-chip-row {
+  margin-top: 10px;
+}
+
+.receipt-clear-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--app-border-soft);
+  background: transparent;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.receipt-mobile-date-presets {
+  margin-top: 0;
+}
+
+.receipt-mobile-filter-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
 .receipt-page {
   display: flex;
   flex-direction: column;

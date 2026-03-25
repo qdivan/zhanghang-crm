@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { Filter } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
+import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
 import BillingActivityDrawer from "../components/billing/BillingActivityDrawer.vue";
 import BillingAssignmentDialog from "../components/billing/BillingAssignmentDialog.vue";
 import BillingCreateDialog from "../components/billing/BillingCreateDialog.vue";
@@ -16,7 +19,9 @@ import BillingRenewDialog from "../components/billing/BillingRenewDialog.vue";
 import BillingSplitPaymentDialog from "../components/billing/BillingSplitPaymentDialog.vue";
 import BillingSummaryPanel from "../components/billing/BillingSummaryPanel.vue";
 import BillingTerminateDialog from "../components/billing/BillingTerminateDialog.vue";
+import { useMobileFilterMemory } from "../composables/useMobileFilterMemory";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import type {
   BillingActivity,
@@ -57,6 +62,7 @@ import {
   normalizeActivityType,
   normalizePaymentMethod,
   receiptAccountOptions,
+  statusLabel,
 } from "./billing/viewMeta";
 
 type UserLite = {
@@ -64,6 +70,8 @@ type UserLite = {
   username: string;
   role: string;
 };
+
+type BillingQuickView = "ALL" | "OVERDUE" | "DUE_SOON" | "OPEN" | "CLEARED";
 
 const router = useRouter();
 const route = useRoute();
@@ -81,7 +89,12 @@ const summary = ref({
   receipt_account_distribution: [] as Array<{ receipt_account: string; payment_count: number; total_amount: number }>,
 });
 
+const billingQuickView = ref<BillingQuickView>("ALL");
 const filters = reactive(createBillingFilters());
+const billingMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.billing", {
+  ...createBillingFilters(),
+  quick_view: "ALL",
+});
 const customerFilterOptions = computed(() => {
   return [...customers.value].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
 });
@@ -145,6 +158,7 @@ const ledgerTargetRecord = ref<BillingRecord | null>(null);
 const ledgerDateRange = ref<[string, string] | null>(null);
 const ledgerData = ref<BillingLedgerData | null>(null);
 const ledgerPanelAnchor = ref<HTMLElement | null>(null);
+const ledgerCache = new Map<string, BillingLedgerData>();
 const canViewReceiptLedger = computed(
   () =>
     auth.user?.role === "OWNER" ||
@@ -156,6 +170,12 @@ const ledgerHasDateFilter = computed(() => {
   return Boolean(ledgerDateRange.value?.[0] || ledgerDateRange.value?.[1]);
 });
 const routeActionHandling = ref(false);
+const billingRouteQueueHandling = ref(false);
+const showMobileFilters = ref(false);
+const expandedBillingId = ref<number | null>(null);
+const showBillingRowActionSheet = ref(false);
+const selectedBillingActionRow = ref<BillingRecord | null>(null);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const splitAllocatedTotal = computed(() => {
   return splitAllocations.value.reduce((sum, item) => sum + Number(item.allocated_amount || 0), 0);
@@ -164,6 +184,122 @@ const splitAllocatedTotal = computed(() => {
 const splitRemainingAmount = computed(() => {
   return Number((splitForm.amount - splitAllocatedTotal.value).toFixed(2));
 });
+
+function getDaysUntilDue(dateText: string): number | null {
+  const raw = (dateText || "").trim();
+  if (!raw) return null;
+  const due = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(due.getTime())) return null;
+  const today = new Date(`${todayInBrowserTimeZone()}T00:00:00`);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+const visibleOutstandingTotal = computed(() =>
+  rows.value.reduce((sum, item) => sum + Number(item.outstanding_amount || 0), 0),
+);
+
+const dueSoonCount = computed(() =>
+  rows.value.filter((item) => {
+    if (Number(item.outstanding_amount || 0) <= 0) return false;
+    const days = getDaysUntilDue(item.due_month || "");
+    return days !== null && days >= 0 && days <= 7;
+  }).length,
+);
+
+const overdueCount = computed(() =>
+  rows.value.filter((item) => {
+    if (Number(item.outstanding_amount || 0) <= 0) return false;
+    const days = getDaysUntilDue(item.due_month || "");
+    return days !== null && days < 0;
+  }).length,
+);
+
+const openBillingCount = computed(() =>
+  rows.value.filter((item) => Number(item.outstanding_amount || 0) > 0).length,
+);
+
+const clearedBillingCount = computed(() =>
+  rows.value.filter((item) => item.status === "CLEARED").length,
+);
+
+function formatAmount(value: number): string {
+  const amount = Number(value || 0);
+  return amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+const mobileFocusSummary = computed(() => {
+  if (overdueCount.value > 0) {
+    return {
+      title: "先处理逾期收费",
+      detail: `${overdueCount.value} 条已逾期，优先催收和登记收款。`,
+      tone: "danger",
+    };
+  }
+  if (dueSoonCount.value > 0) {
+    return {
+      title: "近期待收需要跟进",
+      detail: `${dueSoonCount.value} 条 7 天内到期，建议先联系客户。`,
+      tone: "warning",
+    };
+  }
+  if (visibleOutstandingTotal.value > 0) {
+    return {
+      title: "仍有未收款待推进",
+      detail: `当前未收 ${formatAmount(visibleOutstandingTotal.value)}，继续保持跟进节奏。`,
+      tone: "accent",
+    };
+  }
+  return {
+    title: "当前收费状态稳定",
+    detail: "没有逾期或近期待收，继续维护台账与到账核对。",
+    tone: "quiet",
+  };
+});
+
+const mobileSummaryCards = computed(() => [
+  { label: "未收合计", value: formatAmount(visibleOutstandingTotal.value), accent: true },
+  { label: "7天内", value: String(dueSoonCount.value), warning: dueSoonCount.value > 0 },
+  { label: "逾期", value: String(overdueCount.value), danger: overdueCount.value > 0 },
+]);
+
+const mobileHeadlineStats = computed(() => [
+  `收费单 ${rows.value.length}`,
+  `待处理 ${openBillingCount.value}`,
+  `已清 ${clearedBillingCount.value}`,
+]);
+
+const billingFilterChips = computed(() => {
+  const selectedCustomer = customers.value.find((item) => item.id === filters.customer_id)?.name;
+  return [
+    filters.keyword ? { key: "keyword", label: `关键词：${filters.keyword}` } : null,
+    selectedCustomer ? { key: "customer_id", label: `客户：${selectedCustomer}` } : null,
+    filters.billing_month ? { key: "billing_month", label: `月份：${filters.billing_month}` } : null,
+    filters.receipt_account ? { key: "receipt_account", label: `账户：${filters.receipt_account}` } : null,
+    filters.contact_name ? { key: "contact_name", label: `联系人：${filters.contact_name}` } : null,
+    filters.payment_method ? { key: "payment_method", label: `收款方式：${filters.payment_method}` } : null,
+    filters.status ? { key: "status", label: `状态：${statusLabel(filters.status)}` } : null,
+  ].filter(Boolean) as Array<{
+    key: "keyword" | "customer_id" | "billing_month" | "receipt_account" | "contact_name" | "payment_method" | "status";
+    label: string;
+  }>;
+});
+const activeFilterChips = computed(() => billingFilterChips.value.map((item) => item.label));
+
+function currentBillingFilterSnapshot() {
+  return {
+    keyword: filters.keyword,
+    customer_id: filters.customer_id,
+    billing_month: filters.billing_month,
+    receipt_account: filters.receipt_account,
+    contact_name: filters.contact_name,
+    payment_method: filters.payment_method,
+    status: filters.status,
+    quick_view: billingQuickView.value,
+  };
+}
 
 function updateCreateRows(nextRows: BillingCreatePayload[]) {
   createRows.value = nextRows;
@@ -233,6 +369,7 @@ function getDuePriority(record: BillingRecord): [number, string, number] {
 
 async function fetchRecords() {
   loading.value = true;
+  ledgerCache.clear();
   try {
     const resp = await apiClient.get<BillingRecord[]>("/billing-records", {
       params: {
@@ -259,6 +396,9 @@ async function fetchRecords() {
       if (leftPriority[1] !== rightPriority[1]) return leftPriority[1].localeCompare(rightPriority[1]);
       return leftPriority[2] - rightPriority[2];
     });
+    if (!isMobile.value) {
+      void prefetchLedgerRows(rows.value);
+    }
   } catch (error) {
     ElMessage.error("获取收费记录失败");
   } finally {
@@ -286,8 +426,91 @@ async function fetchSummary() {
 }
 
 async function runBillingQuery() {
+  if (isMobileWorkflow.value) {
+    billingMobileFilterMemory.saveState(currentBillingFilterSnapshot());
+  }
   await Promise.all([fetchRecords(), fetchSummary()]);
 }
+
+const billingQuickFilters = computed(() => [
+  { key: "ALL" as BillingQuickView, label: "全部", count: rows.value.length },
+  { key: "OVERDUE" as BillingQuickView, label: "逾期", count: overdueCount.value },
+  { key: "DUE_SOON" as BillingQuickView, label: "7天内", count: dueSoonCount.value },
+  { key: "OPEN" as BillingQuickView, label: "未收", count: openBillingCount.value },
+  { key: "CLEARED" as BillingQuickView, label: "已清", count: clearedBillingCount.value },
+]);
+
+const billingVisibleRows = computed(() => {
+  if (billingQuickView.value === "OVERDUE") {
+    return rows.value.filter((row) => {
+      const days = getDaysUntilDue(row.due_month || "");
+      return Number(row.outstanding_amount || 0) > 0 && days !== null && days < 0;
+    });
+  }
+  if (billingQuickView.value === "DUE_SOON") {
+    return rows.value.filter((row) => {
+      const days = getDaysUntilDue(row.due_month || "");
+      return Number(row.outstanding_amount || 0) > 0 && days !== null && days >= 0 && days <= 7;
+    });
+  }
+  if (billingQuickView.value === "OPEN") {
+    return rows.value.filter((row) => Number(row.outstanding_amount || 0) > 0);
+  }
+  if (billingQuickView.value === "CLEARED") {
+    return rows.value.filter((row) => row.status === "CLEARED" || Number(row.outstanding_amount || 0) <= 0);
+  }
+  return rows.value;
+});
+
+const billingActivityQueueRows = computed(() =>
+  billingVisibleRows.value.filter((row) => Number(row.outstanding_amount || 0) > 0 && canWriteBillingRecord(row)),
+);
+
+const billingActivityQueueLabel = computed(() => {
+  const currentId = selectedRecord.value?.id ?? null;
+  if (!currentId) return "";
+  const currentIndex = billingActivityQueueRows.value.findIndex((item) => item.id === currentId);
+  if (currentIndex < 0) return "";
+  return `${currentIndex + 1} / ${billingActivityQueueRows.value.length}`;
+});
+
+const hasNextBillingActivityRecord = computed(() => {
+  const currentId = selectedRecord.value?.id ?? null;
+  if (!currentId) return false;
+  const currentIndex = billingActivityQueueRows.value.findIndex((item) => item.id === currentId);
+  return currentIndex >= 0 && currentIndex < billingActivityQueueRows.value.length - 1;
+});
+
+const billingListTitle = computed(() => {
+  if (billingQuickView.value === "OVERDUE") return "逾期收费";
+  if (billingQuickView.value === "DUE_SOON") return "近期待收";
+  if (billingQuickView.value === "OPEN") return "未收收费";
+  if (billingQuickView.value === "CLEARED") return "已清收费";
+  return activeFilterChips.value.length ? "筛选结果" : "当前收费单";
+});
+const billingRowActionItems = computed(() => {
+  const row = selectedBillingActionRow.value;
+  if (!row) return [];
+  return [
+    { key: "ledger", label: "往来账", description: "查看当前客户的明细往来账。" },
+    { key: "execution", label: "执行进度", description: "进入执行进度和交付过程。" },
+    {
+      key: "split",
+      label: "分摊收款",
+      description: canWriteBillingRecord(row) ? "按规则把一笔收款分摊到多条收费单。" : "当前账号没有这条收费单的写权限。",
+      disabled: !canWriteBillingRecord(row),
+    },
+    canManageAssignment.value
+      ? { key: "assignment", label: "分派执行", description: "把这条收费单分给执行人员处理。" }
+      : null,
+    canManageBillingLifecycle.value
+      ? { key: "renew", label: "确认续费", description: "基于当前收费单快速生成续费单。" }
+      : null,
+    canManageBillingLifecycle.value
+      ? { key: "terminate", label: "提前终止", description: "按提前结束情况冲减费用。", danger: true }
+      : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
+});
 
 async function fetchCustomers() {
   try {
@@ -300,6 +523,7 @@ async function fetchCustomers() {
 
 async function fetchAssignableUsers() {
   if (!canManageAssignment.value) return;
+  if (assignableUsers.value.length) return;
   try {
     const resp = await apiClient.get<UserLite[]>("/users");
     assignableUsers.value = resp.data.filter((item) => item.role !== "OWNER");
@@ -422,7 +646,7 @@ function openCustomerDetail(record: BillingRecord) {
 
 function openGrantSettings() {
   router.push({
-    path: "/admin/users",
+    path: isMobileWorkflow.value ? "/m/admin/users" : "/admin/users",
     query: { tab: "grants" },
   });
 }
@@ -623,11 +847,16 @@ async function submitTerminate() {
 
 async function fetchLedgerData() {
   if (!ledgerTargetRecord.value?.customer_id) return;
+  const customerId = ledgerTargetRecord.value.customer_id;
+  const cacheKey = `${customerId}:${ledgerDateRange.value?.[0] || ""}:${ledgerDateRange.value?.[1] || ""}`;
+  const cached = ledgerCache.get(cacheKey);
+  if (cached) {
+    ledgerData.value = cached;
+    return;
+  }
   ledgerLoading.value = true;
   try {
-    const params: Record<string, string | number> = {
-      customer_id: ledgerTargetRecord.value.customer_id,
-    };
+    const params: Record<string, string | number> = { customer_id: customerId };
     if (ledgerDateRange.value?.[0]) {
       params.date_from = ledgerDateRange.value[0];
     }
@@ -635,6 +864,7 @@ async function fetchLedgerData() {
       params.date_to = ledgerDateRange.value[1];
     }
     const resp = await apiClient.get<BillingLedgerData>("/billing-records/ledger", { params });
+    ledgerCache.set(cacheKey, resp.data);
     ledgerData.value = resp.data;
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "加载客户明细账失败");
@@ -644,9 +874,29 @@ async function fetchLedgerData() {
   }
 }
 
+async function prefetchLedgerRows(records: BillingRecord[]) {
+  const topRows = records.filter((item) => item.customer_id).slice(0, 3);
+  await Promise.all(
+    topRows.map(async (row) => {
+      const customerId = row.customer_id;
+      if (!customerId) return;
+      const cacheKey = `${customerId}::`;
+      if (ledgerCache.has(cacheKey)) return;
+      try {
+        const resp = await apiClient.get<BillingLedgerData>("/billing-records/ledger", {
+          params: { customer_id: customerId },
+        });
+        ledgerCache.set(cacheKey, resp.data);
+      } catch {
+        // Ignore background prefetch failures.
+      }
+    }),
+  );
+}
+
 function openReceiptReconciliation() {
   router.push({
-    path: "/receipt-reconciliation",
+    path: isMobileWorkflow.value ? "/m/receipt-reconciliation" : "/receipt-reconciliation",
     query: {
       account: filters.receipt_account || undefined,
       month: filters.billing_month || undefined,
@@ -696,6 +946,125 @@ function clearLedgerPanel() {
   ledgerData.value = null;
 }
 
+function resetMobileFilters() {
+  Object.assign(filters, createBillingFilters());
+  billingQuickView.value = "ALL";
+  billingMobileFilterMemory.clearState();
+  void runBillingQuery();
+}
+
+function restoreSavedBillingFilters() {
+  billingMobileFilterMemory.restoreSavedState((snapshot) => {
+    const { quick_view, ...rest } = snapshot;
+    Object.assign(filters, createBillingFilters(), rest);
+    billingQuickView.value =
+      quick_view === "OVERDUE" || quick_view === "DUE_SOON" || quick_view === "OPEN" || quick_view === "CLEARED"
+        ? quick_view
+        : "ALL";
+  });
+}
+
+function setBillingQuickView(view: BillingQuickView) {
+  billingQuickView.value = view;
+  if (isMobileWorkflow.value) {
+    billingMobileFilterMemory.saveState(currentBillingFilterSnapshot());
+  }
+}
+
+function removeBillingFilterChip(
+  key: "keyword" | "customer_id" | "billing_month" | "receipt_account" | "contact_name" | "payment_method" | "status",
+) {
+  if (key === "keyword") filters.keyword = "";
+  if (key === "customer_id") filters.customer_id = null;
+  if (key === "billing_month") filters.billing_month = "";
+  if (key === "receipt_account") filters.receipt_account = "";
+  if (key === "contact_name") filters.contact_name = "";
+  if (key === "payment_method") filters.payment_method = "";
+  if (key === "status") filters.status = "";
+  void runBillingQuery();
+}
+
+function toggleExpandedBilling(recordId: number) {
+  expandedBillingId.value = expandedBillingId.value === recordId ? null : recordId;
+}
+
+function mobileRowTone(row: BillingRecord): "" | "warning" | "danger" | "settled" {
+  if (row.status === "CLEARED" || Number(row.outstanding_amount || 0) <= 0) return "settled";
+  const days = getDaysUntilDue(row.due_month || "");
+  if (days !== null && days < 0) return "danger";
+  if (days !== null && days <= 7) return "warning";
+  return "";
+}
+
+function mobileDueTagType(row: BillingRecord): "" | "success" | "warning" | "danger" | "info" {
+  if (row.status === "CLEARED" || Number(row.outstanding_amount || 0) <= 0) return "success";
+  const days = getDaysUntilDue(row.due_month || "");
+  if (days !== null && days < 0) return "danger";
+  if (days !== null && days <= 7) return "warning";
+  return "info";
+}
+
+function mobileDueText(row: BillingRecord): string {
+  const due = (row.due_month || "").trim();
+  if (!due) return "无到期日";
+  if (row.status === "CLEARED") return `已清账 · ${due}`;
+  const date = new Date(`${due}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return due;
+  const today = new Date(`${todayInBrowserTimeZone()}T00:00:00`);
+  const diffDays = Math.round((date.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0) return `已逾期 ${Math.abs(diffDays)} 天`;
+  if (diffDays === 0) return "今天到期";
+  if (diffDays <= 7) return `${diffDays} 天后到期`;
+  return due;
+}
+
+function mobileRowBalanceText(row: BillingRecord): string {
+  if (row.status === "CLEARED" || Number(row.outstanding_amount || 0) <= 0) {
+    return `已收 ${formatAmount(row.received_amount)}`;
+  }
+  return `余额 ${formatAmount(row.outstanding_amount)}`;
+}
+
+function mobileRowAmountMeta(row: BillingRecord): string {
+  return `应收 ${formatAmount(row.total_fee)} · 实收 ${formatAmount(row.received_amount)}`;
+}
+
+function mobileRowBusinessMeta(row: BillingRecord): string {
+  return [
+    statusLabel(row.status),
+    normalizePaymentMethod(row.payment_method),
+    row.receivable_period_text || "-",
+    row.accountant_username || "-",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function mobileLatestPaymentText(row: BillingRecord): string {
+  if (!row.latest_payment_at || Number(row.latest_payment_amount || 0) <= 0) return "-";
+  return `${row.latest_payment_at} · ${formatAmount(row.latest_payment_amount)}`;
+}
+
+function handleBillingMenuCommand(command: string, row: BillingRecord) {
+  if (command === "ledger") void openLedgerDialog(row);
+  if (command === "split") void openSplitPaymentDialog(row);
+  if (command === "execution") void openExecutionDrawer(row);
+  if (command === "activity") void openActivityDrawer(row);
+  if (command === "assignment") void openAssignmentDialog(row);
+  if (command === "renew") openRenewDialog(row);
+  if (command === "terminate") openTerminateDialog(row);
+}
+
+function openBillingRowActions(row: BillingRecord) {
+  selectedBillingActionRow.value = row;
+  showBillingRowActionSheet.value = true;
+}
+
+function handleBillingRowActionSelect(action: string) {
+  if (!selectedBillingActionRow.value) return;
+  handleBillingMenuCommand(action, selectedBillingActionRow.value);
+}
+
 async function handleRouteAction() {
   if (routeActionHandling.value) return;
   const action = String(route.query.action || "").trim();
@@ -729,6 +1098,31 @@ async function handleRouteAction() {
     delete nextQuery.record_id;
     await router.replace({ path: route.path, query: nextQuery });
     routeActionHandling.value = false;
+  }
+}
+
+async function handleBillingRouteQueue() {
+  if (billingRouteQueueHandling.value || !isMobileWorkflow.value) return;
+  const queue = String(route.query.queue || "").trim();
+  if (queue !== "activity") return;
+
+  billingRouteQueueHandling.value = true;
+  try {
+    Object.assign(filters, createBillingFilters());
+    billingQuickView.value = "OPEN";
+    await Promise.all([fetchRecords(), fetchSummary()]);
+
+    const nextQuery = { ...route.query };
+    delete nextQuery.queue;
+    await router.replace({ path: route.path, query: nextQuery });
+
+    if (!billingActivityQueueRows.value.length) {
+      ElMessage.warning("当前没有可连续处理的收费单");
+      return;
+    }
+    startBillingActivityQueue();
+  } finally {
+    billingRouteQueueHandling.value = false;
   }
 }
 
@@ -823,7 +1217,22 @@ async function openActivityDrawer(record: BillingRecord) {
   await fetchActivities();
 }
 
-async function submitActivity() {
+function getNextBillingActivityRecordId(currentRecordId: number) {
+  const currentIndex = billingActivityQueueRows.value.findIndex((item) => item.id === currentRecordId);
+  if (currentIndex < 0 || currentIndex >= billingActivityQueueRows.value.length - 1) return null;
+  return billingActivityQueueRows.value[currentIndex + 1]?.id ?? null;
+}
+
+function startBillingActivityQueue() {
+  const firstRecord = billingActivityQueueRows.value[0];
+  if (!firstRecord) {
+    ElMessage.warning("当前没有可连续处理的收费单");
+    return;
+  }
+  void openActivityDrawer(firstRecord);
+}
+
+async function submitActivity(mode: "close" | "next" = "close") {
   if (!selectedRecord.value) return;
   if (!canWriteBillingRecord(selectedRecord.value)) {
     ElMessage.warning("该客户处于临时只读授权范围，不能新增催收/收款日志");
@@ -856,35 +1265,321 @@ async function submitActivity() {
           is_prepay: false,
           is_settlement: false,
         };
+  const currentRecordId = selectedRecord.value.id;
+  const nextRecordId = mode === "next" ? getNextBillingActivityRecordId(currentRecordId) : null;
   try {
-    await apiClient.post(`/billing-records/${selectedRecord.value.id}/activities`, payload);
-    ElMessage.success("记录已保存");
+    await apiClient.post(`/billing-records/${currentRecordId}/activities`, payload);
     resetActivityForm();
     await fetchActivities();
     await fetchRecords();
     await fetchSummary();
+    if (mode === "next" && nextRecordId && isMobileWorkflow.value) {
+      const nextRecord = rows.value.find((item) => item.id === nextRecordId);
+      if (nextRecord && canWriteBillingRecord(nextRecord) && Number(nextRecord.outstanding_amount || 0) > 0) {
+        ElMessage.success("记录已保存，已切到下一条");
+        await openActivityDrawer(nextRecord);
+        return;
+      }
+    }
+    ElMessage.success(mode === "next" ? "记录已保存，已到最后一条" : "记录已保存");
   } catch (error) {
     ElMessage.error("保存失败");
   }
 }
 
 onMounted(async () => {
+  if (isMobileWorkflow.value) {
+    restoreSavedBillingFilters();
+  }
   await runBillingQuery();
   await fetchCustomers();
-  await fetchAssignableUsers();
   await handleRouteAction();
+  await handleBillingRouteQueue();
 });
 
 watch(
   () => route.fullPath,
   () => {
     void handleRouteAction();
+    void handleBillingRouteQueue();
   },
 );
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page billing-mobile-page">
+      <section class="mobile-shell-panel billing-mobile-focus-panel">
+        <div class="billing-mobile-summary-head">
+          <div>
+            <div class="billing-mobile-title">{{ mobileFocusSummary.title }}</div>
+            <div class="billing-mobile-copy">{{ mobileFocusSummary.detail }}</div>
+          </div>
+          <el-button
+            v-if="canViewReceiptLedger"
+            text
+            size="small"
+            type="primary"
+            @click="openReceiptReconciliation"
+          >
+            到账核对
+          </el-button>
+        </div>
+
+        <div class="billing-mobile-balance-strip" :class="mobileFocusSummary.tone">
+          <div class="billing-mobile-balance-main">
+            <span>未收合计</span>
+            <strong>{{ formatAmount(visibleOutstandingTotal) }}</strong>
+          </div>
+          <div class="billing-mobile-balance-meta">
+            <span v-for="item in mobileHeadlineStats" :key="item">{{ item }}</span>
+          </div>
+        </div>
+
+        <div class="billing-mobile-stats">
+          <article
+            v-for="item in mobileSummaryCards"
+            :key="item.label"
+            class="billing-mobile-stat"
+            :class="{ accent: item.accent, warning: item.warning, danger: item.danger }"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel">
+        <div class="mobile-toolbar">
+          <div class="mobile-toolbar-main">
+            <el-input
+              v-model="filters.keyword"
+              placeholder="公司 / 项目 / 备注"
+              clearable
+              @keyup.enter="runBillingQuery"
+            />
+          </div>
+          <div class="mobile-toolbar-actions">
+            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
+            <el-button type="primary" @click="openCreateDialog">新增收费单</el-button>
+          </div>
+        </div>
+        <div class="mobile-filter-presets">
+          <button
+            v-for="item in billingQuickFilters"
+            :key="item.key"
+            type="button"
+            class="mobile-filter-preset"
+            :class="{ active: billingQuickView === item.key }"
+            @click="setBillingQuickView(item.key)"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.count }}</strong>
+          </button>
+        </div>
+        <div v-if="activeFilterChips.length" class="mobile-chip-row billing-mobile-chip-row">
+          <button
+            v-for="chip in billingFilterChips"
+            :key="chip.key"
+            type="button"
+            class="mobile-chip-button"
+            @click="removeBillingFilterChip(chip.key)"
+          >
+            <span>{{ chip.label }}</span>
+            <span class="mobile-chip-close">移除</span>
+          </button>
+          <button type="button" class="billing-clear-chip" @click="resetMobileFilters">清空</button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel billing-mobile-list-panel">
+        <div v-if="billingActivityQueueRows.length" class="mobile-queue-strip">
+          <div class="mobile-queue-main">
+            <div class="mobile-queue-kicker">连续催收</div>
+            <div class="mobile-queue-copy">按当前筛选顺序处理 {{ billingActivityQueueRows.length }} 条待跟进收费单。</div>
+          </div>
+          <el-button size="small" plain @click="startBillingActivityQueue">从首条开始</el-button>
+        </div>
+        <div class="billing-mobile-list-head">
+          <div class="billing-mobile-title">{{ billingListTitle }}</div>
+          <el-tag size="small" type="success" effect="plain">{{ billingVisibleRows.length }} 条</el-tag>
+        </div>
+
+        <div v-loading="loading" class="billing-mobile-list">
+          <div v-if="!billingVisibleRows.length" class="mobile-empty-block">当前没有匹配的收费单</div>
+          <article
+            v-for="row in billingVisibleRows"
+            :key="row.id"
+            class="billing-mobile-row"
+            :class="mobileRowTone(row)"
+          >
+            <div class="billing-mobile-row-top">
+              <div class="billing-mobile-row-head">
+                <button type="button" class="billing-mobile-name" @click="openLedgerDialog(row)">
+                  {{ row.customer_name }}
+                </button>
+                <div class="billing-mobile-summary">{{ row.summary || row.charge_category || "代账" }}</div>
+              </div>
+              <el-tag size="small" effect="plain" :type="mobileDueTagType(row)">{{ mobileDueText(row) }}</el-tag>
+            </div>
+
+            <div class="billing-mobile-amount-line">
+              <strong class="billing-mobile-balance-value">{{ mobileRowBalanceText(row) }}</strong>
+              <span>{{ mobileRowAmountMeta(row) }}</span>
+            </div>
+
+            <div class="billing-mobile-meta">
+              {{ mobileRowBusinessMeta(row) }}
+            </div>
+
+            <transition name="billing-expand">
+              <div v-if="expandedBillingId === row.id" class="billing-mobile-expanded">
+                <div class="billing-mobile-extra-grid">
+                  <div class="billing-mobile-extra-item">
+                    <span>到期提醒</span>
+                    <strong>{{ mobileDueText(row) }}</strong>
+                  </div>
+                  <div class="billing-mobile-extra-item">
+                    <span>最近收款</span>
+                    <strong>{{ mobileLatestPaymentText(row) }}</strong>
+                  </div>
+                  <div class="billing-mobile-extra-item">
+                    <span>入账账户</span>
+                    <strong>{{ row.latest_receipt_account || "-" }}</strong>
+                  </div>
+                  <div class="billing-mobile-extra-item">
+                    <span>联系人</span>
+                    <strong>{{ row.customer_contact_name || "-" }}</strong>
+                  </div>
+                </div>
+                <div v-if="row.note || row.extra_note" class="billing-mobile-note">
+                  {{ [row.note, row.extra_note].filter(Boolean).join(" · ") }}
+                </div>
+              </div>
+            </transition>
+
+            <div class="billing-mobile-actions">
+              <div class="mobile-action-main">
+                <el-button
+                  size="small"
+                  type="primary"
+                  :disabled="!canWriteBillingRecord(row)"
+                  @click="openActivityDrawer(row)"
+                >
+                  催收/收款
+                </el-button>
+                <el-button size="small" plain @click="openExecutionDrawer(row)">执行进度</el-button>
+                <el-button size="small" plain @click="openLedgerDialog(row)">往来账</el-button>
+              </div>
+              <div class="mobile-action-sub">
+                <button type="button" class="mobile-action-link is-muted" @click="toggleExpandedBilling(row.id)">
+                  {{ expandedBillingId === row.id ? "收起补充信息" : "展开补充信息" }}
+                </button>
+                <button
+                  v-if="canManageBillingLifecycle"
+                  type="button"
+                  class="mobile-action-link"
+                  @click="openRenewDialog(row)"
+                >
+                  确认续费
+                </button>
+                <button type="button" class="mobile-action-link" @click="openBillingRowActions(row)">更多操作</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileFilterSheet
+      v-model="showMobileFilters"
+      title="筛选收费单"
+      subtitle="筛完直接应用，优先看逾期和近期待收。"
+      :summary-items="activeFilterChips"
+      empty-summary="当前未设置筛选条件"
+      size="82vh"
+    >
+      <el-form label-position="top" class="billing-mobile-filter-form">
+        <div v-if="billingMobileFilterMemory.hasSavedState.value" class="mobile-filter-restore">
+          <el-button text type="primary" @click="restoreSavedBillingFilters">恢复上次已应用条件</el-button>
+        </div>
+        <el-form-item label="关键词">
+          <el-input
+            v-model="filters.keyword"
+            placeholder="公司 / 项目 / 备注"
+            clearable
+            @keyup.enter="runBillingQuery"
+          />
+        </el-form-item>
+        <el-form-item label="客户">
+          <el-select v-model="filters.customer_id" filterable clearable placeholder="全部客户">
+            <el-option
+              v-for="item in customerFilterOptions"
+              :key="`mobile-customer-${item.id}`"
+              :label="item.name"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="账务月份">
+          <el-date-picker
+            v-model="filters.billing_month"
+            type="month"
+            value-format="YYYY-MM"
+            format="YYYY-MM"
+            placeholder="全部月份"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="入账账户">
+          <el-select v-model="filters.receipt_account" clearable filterable placeholder="全部账户">
+            <el-option
+              v-for="item in receiptAccountOptions"
+              :key="`mobile-filter-account-${item.value}`"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="联系人">
+          <el-input
+            v-model="filters.contact_name"
+            placeholder="客户联系人"
+            clearable
+            @keyup.enter="runBillingQuery"
+          />
+        </el-form-item>
+        <el-form-item label="付款方式">
+          <el-select v-model="filters.payment_method" placeholder="全部" clearable>
+            <el-option label="预收" value="预收" />
+            <el-option label="后收" value="后收" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="台账状态">
+          <el-select v-model="filters.status" placeholder="全部" clearable>
+            <el-option label="清账" value="CLEARED" />
+            <el-option label="全欠" value="FULL_ARREARS" />
+            <el-option label="部分收费" value="PARTIAL" />
+          </el-select>
+        </el-form-item>
+        <el-button v-if="canManageGrant" plain @click="openGrantSettings">数据授权配置</el-button>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetMobileFilters">重置</el-button>
+        <el-button type="primary" @click="showMobileFilters = false; runBillingQuery()">应用筛选</el-button>
+      </template>
+    </MobileFilterSheet>
+
+    <MobileActionSheet
+      v-model="showBillingRowActionSheet"
+      title="收费单操作"
+      :subtitle="selectedBillingActionRow ? `${selectedBillingActionRow.customer_name} · ${selectedBillingActionRow.summary || selectedBillingActionRow.charge_category || '代账'}` : ''"
+      :items="billingRowActionItems"
+      @select="handleBillingRowActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <BillingSummaryPanel
       :summary="summary"
       :rows="rows"
@@ -1018,7 +1713,296 @@ watch(
     :form="activityForm"
     :loading="activityLoading"
     :rows="activityRows"
+    :queue-label="isMobileWorkflow ? billingActivityQueueLabel : ''"
+    :show-next-action="isMobileWorkflow && hasNextBillingActivityRecord"
     @activity-type-change="onActivityTypeChange"
-    @submit="submitActivity"
+    @submit="submitActivity()"
+    @submit-next="submitActivity('next')"
   />
 </template>
+
+<style scoped>
+.billing-mobile-page {
+  gap: 12px;
+}
+
+.billing-mobile-focus-panel {
+  overflow: hidden;
+}
+
+.billing-mobile-summary-head,
+.billing-mobile-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.billing-mobile-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-balance-strip {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(77, 128, 150, 0.18);
+  background:
+    linear-gradient(135deg, rgba(77, 128, 150, 0.14), rgba(255, 255, 255, 0.96)),
+    var(--app-bg-soft);
+}
+
+.billing-mobile-balance-strip.warning {
+  border-color: rgba(198, 138, 24, 0.2);
+  background: linear-gradient(135deg, rgba(198, 138, 24, 0.14), rgba(255, 255, 255, 0.96));
+}
+
+.billing-mobile-balance-strip.danger {
+  border-color: rgba(187, 77, 77, 0.18);
+  background: linear-gradient(135deg, rgba(187, 77, 77, 0.14), rgba(255, 255, 255, 0.96));
+}
+
+.billing-mobile-balance-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.billing-mobile-balance-main span {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-balance-main strong {
+  font-size: 30px;
+  line-height: 0.95;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-balance-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.billing-mobile-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.billing-mobile-stat.accent {
+  background: rgba(77, 128, 150, 0.1);
+}
+
+.billing-mobile-stat.warning {
+  background: rgba(198, 138, 24, 0.08);
+}
+
+.billing-mobile-stat.danger {
+  background: rgba(187, 77, 77, 0.08);
+}
+
+.billing-mobile-stat span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-stat strong {
+  font-size: 16px;
+  line-height: 1;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-chip-row {
+  margin-top: 12px;
+}
+
+.billing-clear-chip {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--app-accent-strong);
+  font-size: 12px;
+}
+
+.billing-mobile-list-panel {
+  padding-top: 12px;
+}
+
+.billing-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.billing-mobile-row {
+  border-top: 1px solid var(--app-border-soft);
+  padding: 12px 0 0;
+}
+
+.billing-mobile-row.warning {
+  border-top-color: rgba(198, 138, 24, 0.22);
+}
+
+.billing-mobile-row.danger {
+  border-top-color: rgba(187, 77, 77, 0.22);
+}
+
+.billing-mobile-row.settled {
+  opacity: 0.82;
+}
+
+.billing-mobile-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.billing-mobile-row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.billing-mobile-row-head {
+  min-width: 0;
+  flex: 1;
+}
+
+.billing-mobile-name {
+  border: none;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-summary {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.billing-mobile-amount-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin-top: 8px;
+}
+
+.billing-mobile-balance-value {
+  font-size: 18px;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-amount-line span {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-expanded {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--app-border-soft);
+}
+
+.billing-mobile-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.billing-mobile-extra-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--app-bg-soft);
+}
+
+.billing-mobile-extra-item span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.billing-mobile-extra-item strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--app-text-primary);
+}
+
+.billing-mobile-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-secondary);
+}
+
+.billing-mobile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.billing-mobile-filter-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.mobile-filter-restore {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+
+.billing-expand-enter-active,
+.billing-expand-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.billing-expand-enter-from,
+.billing-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (max-width: 420px) {
+  .billing-mobile-stats,
+  .billing-mobile-extra-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

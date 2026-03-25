@@ -99,18 +99,33 @@ export const useAuthStore = defineStore("auth", {
         throw new Error("invalid login response");
       }
 
-      const meResp = await apiClient.get<UserInfo>("/auth/me", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (!isUserInfo(meResp.data)) {
+      const loginUser = isRecord(tokenResp.data) && isUserInfo(tokenResp.data.user)
+        ? tokenResp.data.user
+        : null;
+      if (!loginUser) {
+        const meResp = await apiClient.get<UserInfo>("/auth/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!isUserInfo(meResp.data)) {
+          this.logout();
+          throw new Error("invalid me response");
+        }
+        this.token = token;
+        this.user = meResp.data;
+        this.ready = true;
+        persistSession(this.token, this.user);
+        return;
+      }
+
+      if (!isUserInfo(loginUser)) {
         this.logout();
-        throw new Error("invalid me response");
+        throw new Error("invalid login user");
       }
 
       this.token = token;
-      this.user = meResp.data;
+      this.user = loginUser;
       this.ready = true;
       persistSession(this.token, this.user);
     },

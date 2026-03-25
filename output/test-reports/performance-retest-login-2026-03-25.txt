@@ -1,0 +1,12 @@
+### Result
+{
+  "ok": true,
+  "dt": 315.5
+}
+### Ran Playwright code
+```js
+await page.evaluate('async () => { const inputs = Array.from(document.querySelectorAll("input")); const set = (el, value) => { el.focus(); el.value = value; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); }; set(inputs[0], "boss"); set(inputs[1], "Daizhang#2026!"); const t0 = performance.now(); const btn = Array.from(document.querySelectorAll("button")).find((item) => (item.textContent || "").includes("进入系统") || (item.textContent || "").includes("登录")); btn && btn.click(); for (let i = 0; i < 120; i += 1) { if (location.pathname === "/leads" && document.body.innerText.includes("新增线索")) { return { ok: true, dt: performance.now() - t0 }; } await new Promise((resolve) => setTimeout(resolve, 25)); } return { ok: false, dt: performance.now() - t0, path: location.pathname }; }');
+```
+### Page
+- Page URL: http://127.0.0.1:32080/leads
+- Page Title: 账航·一帆财税

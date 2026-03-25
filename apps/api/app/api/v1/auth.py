@@ -20,6 +20,20 @@ from app.services.login_security import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def build_user_out(db: Session, user: User) -> UserOut:
+    granted_modules: list[str] = []
+    if user.role == "ACCOUNTANT":
+        for module in ["CUSTOMER", "BILLING"]:
+            if has_module_read_grant(db, user.id, module):
+                granted_modules.append(module)
+    return UserOut.model_validate(
+        {
+            **user.__dict__,
+            "granted_read_modules": granted_modules,
+        }
+    )
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
@@ -67,19 +81,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     db.commit()
 
     token = create_access_token(subject=user.username, role=user.role)
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=token, user=build_user_out(db, user))
 
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    granted_modules: list[str] = []
-    if current_user.role == "ACCOUNTANT":
-        for module in ["CUSTOMER", "BILLING"]:
-            if has_module_read_grant(db, current_user.id, module):
-                granted_modules.append(module)
-    return UserOut.model_validate(
-        {
-            **current_user.__dict__,
-            "granted_read_modules": granted_modules,
-        }
-    )
+    return build_user_out(db, current_user)

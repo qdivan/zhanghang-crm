@@ -1,0 +1,122 @@
+[
+  {
+    "id": "P-D-001",
+    "device": "desktop",
+    "page": "登录页",
+    "scenario": "首屏可用",
+    "threshold_ms": 1500,
+    "actual_ms": 74.26,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-28-326Z.yml"
+  },
+  {
+    "id": "P-D-002",
+    "device": "desktop",
+    "page": "客户开发",
+    "scenario": "登录后首屏可用",
+    "threshold_ms": 1500,
+    "actual_ms": 2292.9,
+    "status": "FAIL",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-32-850Z.yml"
+  },
+  {
+    "id": "P-D-003",
+    "device": "desktop",
+    "page": "客户档案",
+    "scenario": "路由打开客户档案",
+    "threshold_ms": 1500,
+    "actual_ms": 573.3,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-33-423Z.yml"
+  },
+  {
+    "id": "P-D-004",
+    "device": "desktop",
+    "page": "收费明细",
+    "scenario": "路由打开收费明细",
+    "threshold_ms": 1500,
+    "actual_ms": 705.33,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-34-129Z.yml"
+  },
+  {
+    "id": "P-D-005",
+    "device": "desktop",
+    "page": "收费明细",
+    "scenario": "展开往来账(海恩诺)",
+    "threshold_ms": 300,
+    "actual_ms": 2799.29,
+    "status": "FAIL",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-36-923Z.yml"
+  },
+  {
+    "id": "P-D-006",
+    "device": "desktop",
+    "page": "到账核对",
+    "scenario": "路由打开到账核对",
+    "threshold_ms": 1500,
+    "actual_ms": 584.04,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-37-514Z.yml"
+  },
+  {
+    "id": "P-D-007",
+    "device": "desktop",
+    "page": "常用资料",
+    "scenario": "路由打开常用资料",
+    "threshold_ms": 1500,
+    "actual_ms": 452.44,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-37-965Z.yml"
+  },
+  {
+    "id": "P-M-001",
+    "device": "mobile",
+    "page": "登录页",
+    "scenario": "首屏可用",
+    "threshold_ms": 2500,
+    "actual_ms": 79.77,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-40-693Z.yml"
+  },
+  {
+    "id": "P-M-002",
+    "device": "mobile",
+    "page": "客户开发",
+    "scenario": "登录后首屏可用",
+    "threshold_ms": 2500,
+    "actual_ms": 2200.42,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-45-119Z.yml"
+  },
+  {
+    "id": "P-M-003",
+    "device": "mobile",
+    "page": "收费明细",
+    "scenario": "路由打开收费明细",
+    "threshold_ms": 2500,
+    "actual_ms": 533.66,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-45-652Z.yml"
+  },
+  {
+    "id": "P-M-004",
+    "device": "mobile",
+    "page": "客户列表",
+    "scenario": "路由打开客户列表",
+    "threshold_ms": 2500,
+    "actual_ms": 441.46,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-46-094Z.yml"
+  },
+  {
+    "id": "P-M-005",
+    "device": "mobile",
+    "page": "常用资料",
+    "scenario": "路由打开常用资料",
+    "threshold_ms": 2500,
+    "actual_ms": 389.47,
+    "status": "PASS",
+    "evidence": "/Users/shangyifan/Documents/New project/.playwright-cli/page-2026-03-25T02-08-46-484Z.yml"
+  }
+]

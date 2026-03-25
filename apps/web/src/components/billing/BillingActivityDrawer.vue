@@ -17,12 +17,15 @@ const props = defineProps<{
   form: BillingActivityForm;
   loading: boolean;
   rows: BillingActivity[];
+  queueLabel?: string;
+  showNextAction?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:visible": [value: boolean];
   "activity-type-change": [value: unknown];
   submit: [];
+  "submit-next": [];
 }>();
 
 const drawerVisible = computed({
@@ -37,6 +40,13 @@ const { isMobile } = useResponsive();
 
 <template>
   <el-drawer v-model="drawerVisible" :title="drawerTitle" size="min(760px, 92vw)">
+    <div v-if="props.queueLabel" class="mobile-queue-panel">
+      <div>
+        <div class="mobile-queue-kicker">连续催收</div>
+        <div class="mobile-queue-copy">当前处理 {{ props.queueLabel }}，保存后可直接切下一条。</div>
+      </div>
+      <strong>{{ props.queueLabel }}</strong>
+    </div>
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="8">
@@ -109,7 +119,10 @@ const { isMobile } = useResponsive();
       <el-form-item label="备注">
         <el-input v-model="props.form.note" />
       </el-form-item>
-      <el-button type="primary" @click="emit('submit')">保存日志</el-button>
+      <el-space wrap>
+        <el-button type="primary" @click="emit('submit')">保存日志</el-button>
+        <el-button v-if="props.showNextAction" plain @click="emit('submit-next')">保存并下一条</el-button>
+      </el-space>
     </el-form>
 
     <el-divider />

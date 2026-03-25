@@ -13,11 +13,14 @@ import {
 const props = defineProps<{
   visible: boolean;
   form: LeadFollowupForm;
+  queueLabel?: string;
+  showNextAction?: boolean;
 }>();
 
 const emit = defineEmits<{
   "update:visible": [value: boolean];
   submit: [];
+  "submit-next": [];
 }>();
 
 const dialogVisible = computed({
@@ -45,7 +48,14 @@ watch(
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" title="新增开发跟进" width="720px">
+  <el-dialog v-model="dialogVisible" title="新增开发跟进" width="min(720px, 94vw)">
+    <div v-if="props.queueLabel" class="mobile-queue-panel">
+      <div>
+        <div class="mobile-queue-kicker">连续跟进</div>
+        <div class="mobile-queue-copy">当前处理 {{ props.queueLabel }}，保存后可直接切下一条。</div>
+      </div>
+      <strong>{{ props.queueLabel }}</strong>
+    </div>
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="6">
@@ -92,6 +102,7 @@ watch(
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
+      <el-button v-if="props.showNextAction" plain @click="emit('submit-next')">保存并下一条</el-button>
       <el-button type="primary" @click="emit('submit')">保存</el-button>
     </template>
   </el-dialog>

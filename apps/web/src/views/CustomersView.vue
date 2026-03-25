@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { MoreFilled } from "@element-plus/icons-vue";
+import { Filter, MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import BillingDraftRowsEditor from "../components/BillingDraftRowsEditor.vue";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
+import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
+import { useMobileFilterMemory } from "../composables/useMobileFilterMemory";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import type { BillingRecord, BillingCreatePayload, CustomerListItem } from "../types";
 import {
@@ -14,17 +18,39 @@ import {
   prepareBillingDraftsForSubmit,
   validateBillingDraft,
 } from "../utils/billingDraft";
+import { getTemplateLabel } from "./lead/viewMeta";
 
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
 const keyword = ref("");
 const rows = ref<CustomerListItem[]>([]);
+const showMobileFilters = ref(false);
+const expandedCustomerId = ref<number | null>(null);
+const showCustomerRowActionSheet = ref(false);
+const selectedCustomerActionRow = ref<CustomerListItem | null>(null);
+const customerMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.customers", { keyword: "" });
 const canManageGrant = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canCreateBilling = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
+const customerFilterChips = computed(() =>
+  keyword.value ? [{ key: "keyword" as const, label: `关键词：${keyword.value}` }] : [],
+);
+const customerFilterChipLabels = computed(() => customerFilterChips.value.map((item) => item.label));
+const customerRowActionItems = computed(() => {
+  const row = selectedCustomerActionRow.value;
+  if (!row) return [];
+  return [
+    { key: "lead", label: "开发来源", description: "回看这位客户的开发来源与线索详情。" },
+    canCreateBilling.value
+      ? { key: "billing", label: "新增收费", description: "直接给当前客户补收费单。" }
+      : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; description: string }>;
+});
 const showCreateBillingDialog = ref(false);
 const creatingBilling = ref(false);
 const selectedCustomerForBilling = ref<CustomerListItem | null>(null);
@@ -33,11 +59,26 @@ const billingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)])
 function mobileMetrics(row: CustomerListItem) {
   return [
     { label: "收费标准", value: row.source_fee_standard || "-" },
-    { label: "服务项目", value: row.source_main_business || "-" },
     { label: "服务开始", value: row.source_service_start_display || "-" },
     { label: "会计", value: row.accountant_username || "-" },
-    { label: "最后跟进", value: row.source_last_followup_date || "-" },
-  ].filter((item) => item.value !== "-");
+    { label: "最后跟进", value: row.source_last_followup_date || "未记录" },
+  ];
+}
+
+function mobileCustomerFacts(row: CustomerListItem) {
+  return [
+    row.source_area_display ? `地区 ${row.source_area_display}` : "",
+    row.source_template_type ? `来源 ${getTemplateLabel(row.source_template_type)}` : "",
+    row.source_first_billing_period ? `首单 ${row.source_first_billing_period}` : "",
+  ].filter(Boolean);
+}
+
+function mobileCustomerBriefs(row: CustomerListItem) {
+  return [
+    row.source_main_business ? { label: "服务项目", value: row.source_main_business } : null,
+    row.source_service_mode ? { label: "服务方式", value: row.source_service_mode } : null,
+    row.source_intro ? { label: "介绍人", value: row.source_intro } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
 }
 
 async function fetchCustomers() {
@@ -57,19 +98,19 @@ async function fetchCustomers() {
 }
 
 function openCustomerDetail(row: CustomerListItem) {
-  router.push(`/customers/${row.id}`);
+  router.push(`${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${row.id}`);
 }
 
 function openLeadDetail(row: CustomerListItem) {
   router.push({
-    path: `/leads/${row.source_lead_id}`,
+    path: `${isMobileWorkflow.value ? "/m/leads" : "/leads"}/${row.source_lead_id}`,
     query: { from: "customers" },
   });
 }
 
 function openGrantSettings() {
   router.push({
-    path: "/admin/users",
+    path: isMobileWorkflow.value ? "/m/admin/users" : "/admin/users",
     query: { tab: "grants" },
   });
 }
@@ -93,6 +134,39 @@ function handleMobileCommand(command: string, row: CustomerListItem) {
 
 function onMobileMenuCommand(command: { action: string; row: CustomerListItem }) {
   handleMobileCommand(command.action, command.row);
+}
+
+function openCustomerRowActions(row: CustomerListItem) {
+  selectedCustomerActionRow.value = row;
+  showCustomerRowActionSheet.value = true;
+}
+
+function handleCustomerRowActionSelect(action: string) {
+  if (!selectedCustomerActionRow.value) return;
+  handleMobileCommand(action, selectedCustomerActionRow.value);
+}
+
+function resetKeywordAndQuery() {
+  keyword.value = "";
+  customerMobileFilterMemory.clearState();
+  void fetchCustomers();
+}
+
+function toggleExpandedCustomer(customerId: number) {
+  expandedCustomerId.value = expandedCustomerId.value === customerId ? null : customerId;
+}
+
+function restoreSavedCustomerFilters() {
+  customerMobileFilterMemory.restoreSavedState((snapshot) => {
+    keyword.value = snapshot.keyword;
+  });
+}
+
+async function applyCustomerFilters() {
+  if (isMobileWorkflow.value) {
+    customerMobileFilterMemory.saveState({ keyword: keyword.value });
+  }
+  await fetchCustomers();
 }
 
 function handleCreateBillingDialogClosed() {
@@ -123,11 +197,151 @@ async function createBillingRecordForCustomer() {
   }
 }
 
-onMounted(fetchCustomers);
+onMounted(async () => {
+  if (isMobileWorkflow.value) {
+    restoreSavedCustomerFilters();
+  }
+  await fetchCustomers();
+});
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page customer-mobile-page">
+      <section class="mobile-shell-panel">
+        <div class="mobile-toolbar">
+          <div class="mobile-toolbar-main">
+            <el-input
+              v-model="keyword"
+              placeholder="客户 / 联系人 / 电话 / 会计"
+              clearable
+              @keyup.enter="applyCustomerFilters"
+            />
+          </div>
+          <div class="mobile-toolbar-actions">
+            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
+            <el-button v-if="canManageGrant" plain @click="openGrantSettings">授权</el-button>
+          </div>
+        </div>
+        <div v-if="keyword" class="mobile-chip-row customer-mobile-chip-row">
+          <button type="button" class="mobile-chip-button" @click="resetKeywordAndQuery">
+            <span>关键词：{{ keyword }}</span>
+            <span class="mobile-chip-close">移除</span>
+          </button>
+          <button type="button" class="customer-clear-chip" @click="resetKeywordAndQuery">清空</button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel customer-mobile-list-panel">
+        <div class="head">
+          <div>
+            <div class="card-title">客户列表</div>
+            <div class="card-subtitle">先看客户，再直接进档案、补收费或回看来源。</div>
+          </div>
+          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+        </div>
+
+        <div v-loading="loading" class="customer-mobile-list">
+          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配的客户</div>
+          <article v-for="row in rows" :key="row.id" class="customer-mobile-row">
+            <div class="customer-mobile-row-top">
+              <button type="button" class="customer-mobile-name" @click="openCustomerDetail(row)">{{ row.name }}</button>
+              <el-tag size="small" effect="plain">{{ row.accountant_username || "未分配会计" }}</el-tag>
+            </div>
+            <div class="customer-mobile-summary">{{ row.contact_name || "-" }} / {{ row.phone || "-" }}</div>
+            <div class="customer-mobile-meta">
+              {{ [row.source_service_start_display, row.source_fee_standard, row.source_last_followup_date ? `最后跟进 ${row.source_last_followup_date}` : ""].filter(Boolean).join(" · ") || "暂无补充信息" }}
+            </div>
+
+            <transition name="customer-expand">
+              <div v-if="expandedCustomerId === row.id" class="customer-mobile-expanded">
+                <div class="customer-mobile-extra-grid">
+                  <div v-for="item in mobileMetrics(row)" :key="`${row.id}-${item.label}`" class="customer-mobile-extra-item">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+                <div v-if="mobileCustomerFacts(row).length" class="customer-mobile-fact-row">
+                  <span
+                    v-for="fact in mobileCustomerFacts(row)"
+                    :key="`${row.id}-${fact}`"
+                    class="customer-mobile-fact-chip"
+                  >
+                    {{ fact }}
+                  </span>
+                </div>
+                <div v-if="mobileCustomerBriefs(row).length" class="customer-mobile-brief-list">
+                  <div
+                    v-for="item in mobileCustomerBriefs(row)"
+                    :key="`${row.id}-${item.label}`"
+                    class="customer-mobile-brief"
+                  >
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
+            </transition>
+
+            <div class="mobile-action-stack customer-mobile-actions">
+              <div class="mobile-action-main">
+                <el-button size="small" type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
+                <el-button v-if="canCreateBilling" size="small" plain @click="openCreateBillingDialog(row)">
+                  新增收费
+                </el-button>
+                <el-button v-else size="small" plain @click="openLeadDetail(row)">开发来源</el-button>
+              </div>
+              <div class="mobile-action-sub">
+                <button v-if="canCreateBilling" type="button" class="mobile-action-link" @click="openLeadDetail(row)">
+                  开发来源
+                </button>
+                <button type="button" class="mobile-action-link is-muted" @click="toggleExpandedCustomer(row.id)">
+                  {{ expandedCustomerId === row.id ? "收起补充信息" : "展开补充信息" }}
+                </button>
+                <button type="button" class="mobile-action-link" @click="openCustomerRowActions(row)">更多操作</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileFilterSheet
+      v-model="showMobileFilters"
+      title="筛选客户"
+      subtitle="先确定要看的客户范围，再继续维护。"
+      :summary-items="customerFilterChipLabels"
+      empty-summary="当前未设置筛选条件"
+    >
+      <el-form label-position="top" class="customer-mobile-filter-form">
+        <div v-if="customerMobileFilterMemory.hasSavedState.value" class="mobile-filter-restore">
+          <el-button text type="primary" @click="restoreSavedCustomerFilters">恢复上次已应用条件</el-button>
+        </div>
+        <el-form-item label="关键词">
+          <el-input
+            v-model="keyword"
+            placeholder="客户 / 联系人 / 电话 / 会计"
+            clearable
+            @keyup.enter="applyCustomerFilters"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetKeywordAndQuery">重置</el-button>
+        <el-button type="primary" @click="showMobileFilters = false; applyCustomerFilters()">应用筛选</el-button>
+      </template>
+    </MobileFilterSheet>
+
+    <MobileActionSheet
+      v-model="showCustomerRowActionSheet"
+      title="客户操作"
+      :subtitle="selectedCustomerActionRow?.name || ''"
+      :items="customerRowActionItems"
+      @select="handleCustomerRowActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <el-card shadow="never">
       <el-form inline @submit.prevent="fetchCustomers" class="customers-filter-form">
         <el-form-item label="关键词">
@@ -271,7 +485,7 @@ onMounted(fetchCustomers);
   <el-dialog
     v-model="showCreateBillingDialog"
     title="新增收费记录"
-    width="760px"
+    :width="isMobileWorkflow ? '94%' : '760px'"
     @closed="handleCreateBillingDialogClosed"
   >
     <el-form label-position="top">
@@ -296,6 +510,171 @@ onMounted(fetchCustomers);
 </template>
 
 <style scoped>
+.customer-mobile-page {
+  gap: 12px;
+}
+
+.customer-mobile-chip-row {
+  margin-top: 12px;
+}
+
+.customer-clear-chip {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--app-accent-strong);
+  font-size: 12px;
+}
+
+.customer-mobile-list-panel {
+  padding-top: 12px;
+}
+
+.customer-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.customer-mobile-row {
+  border-top: 1px solid var(--app-border-soft);
+  padding-top: 12px;
+}
+
+.customer-mobile-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.customer-mobile-row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customer-mobile-name {
+  border: none;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.customer-mobile-summary {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.customer-mobile-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.customer-mobile-expanded {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--app-border-soft);
+}
+
+.customer-mobile-extra-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.customer-mobile-extra-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--app-bg-soft) 70%, white 30%);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 14px;
+}
+
+.customer-mobile-extra-item span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.customer-mobile-extra-item strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--app-text-primary);
+}
+
+.customer-mobile-fact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.customer-mobile-fact-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--app-bg-soft);
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.customer-mobile-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.customer-mobile-brief {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.customer-mobile-brief span {
+  color: var(--app-text-muted);
+}
+
+.customer-mobile-brief strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  word-break: break-word;
+}
+
+.customer-mobile-actions {
+  margin-top: 12px;
+}
+
+.customer-mobile-filter-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.mobile-filter-restore {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+
+.customer-expand-enter-active,
+.customer-expand-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.customer-expand-enter-from,
+.customer-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 .head {
   display: flex;
   justify-content: space-between;
@@ -315,7 +694,7 @@ onMounted(fetchCustomers);
   color: #6b7280;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .customers-filter-form {
     display: flex;
     flex-wrap: wrap;

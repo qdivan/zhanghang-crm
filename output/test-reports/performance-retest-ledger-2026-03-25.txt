@@ -1,0 +1,12 @@
+### Result
+{
+  "ok": true,
+  "dt": 72.90000000596046
+}
+### Ran Playwright code
+```js
+await page.evaluate('async () => { const btn = Array.from(document.querySelectorAll("button")).find((item) => (item.textContent || "").trim() === "海恩诺"); if (!btn) return { ok: false, reason: "button-not-found" }; const t0 = performance.now(); btn.click(); for (let i = 0; i < 160; i += 1) { const text = document.body.innerText || ""; if (text.includes("客户往来流水") && text.includes("往来账 - 海恩诺")) { return { ok: true, dt: performance.now() - t0 }; } await new Promise((resolve) => setTimeout(resolve, 25)); } return { ok: false, dt: performance.now() - t0, reason: "timeout" }; }');
+```
+### Page
+- Page URL: http://127.0.0.1:32080/billing
+- Page Title: 账航·一帆财税

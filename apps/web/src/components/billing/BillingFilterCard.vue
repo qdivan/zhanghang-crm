@@ -245,7 +245,7 @@ const hasAdvancedValue = computed(() =>
   gap: 8px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .filter-head {
     flex-direction: column;
     align-items: flex-start;

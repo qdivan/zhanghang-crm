@@ -81,7 +81,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
   gap: 8px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .lead-filter-form {
     display: flex;
     flex-wrap: wrap;

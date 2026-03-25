@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import { reactive } from "vue";
 import { useRouter } from "vue-router";
 
+import { getDefaultProtectedPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 
 const router = useRouter();
@@ -29,7 +30,7 @@ async function login() {
   try {
     await auth.login(form.username, form.password);
     ElMessage.success("登录成功");
-    router.push("/leads");
+    router.push(getDefaultProtectedPath());
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "账号或密码错误");
   } finally {
@@ -93,7 +94,7 @@ function openPublicLibrary() {
 <style scoped>
 .login-page {
   min-height: 100vh;
-  background: linear-gradient(180deg, #ffffff 0%, #f6f8f8 100%);
+  background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-bg-soft) 100%);
 }
 
 .login-shell {
@@ -125,11 +126,11 @@ function openPublicLibrary() {
   align-items: center;
   width: fit-content;
   padding: 6px 11px;
-  border: 1px solid #d8e3e6;
-  background: #f6f8f8;
+  border: 1px solid var(--app-border);
+  background: var(--app-bg-soft);
   font-size: 12px;
   font-weight: 600;
-  color: #315c73;
+  color: var(--app-accent-strong);
 }
 
 .login-title {
@@ -137,13 +138,13 @@ function openPublicLibrary() {
   font-size: clamp(32px, 4vw, 46px);
   line-height: 1.04;
   letter-spacing: -0.04em;
-  color: #192531;
+  color: var(--app-text-primary);
 }
 
 .login-copy {
   margin: 0;
   max-width: 480px;
-  color: #61707c;
+  color: var(--app-text-muted);
   font-size: 15px;
   line-height: 1.7;
 }
@@ -157,9 +158,9 @@ function openPublicLibrary() {
 
 .login-scope-pill {
   padding: 8px 11px;
-  border: 1px solid #dde5e7;
-  background: #f5f8f8;
-  color: #22303b;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-muted);
+  color: var(--app-text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -175,9 +176,9 @@ function openPublicLibrary() {
   flex-direction: column;
   justify-content: center;
   padding: 24px;
-  border: 1px solid #dde5e7;
-  background: #ffffff;
-  box-shadow: 0 18px 42px rgba(19, 34, 49, 0.05);
+  border: 1px solid var(--app-border);
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow-soft);
   animation-delay: 80ms;
 }
 
@@ -188,12 +189,12 @@ function openPublicLibrary() {
 .login-panel-title {
   font-size: 26px;
   font-weight: 700;
-  color: #182635;
+  color: var(--app-text-primary);
 }
 
 .login-panel-copy {
   margin-top: 5px;
-  color: #6d7d88;
+  color: var(--app-text-muted);
   line-height: 1.6;
   font-size: 13px;
 }
@@ -203,18 +204,18 @@ function openPublicLibrary() {
 }
 
 .login-form :deep(.el-form-item__label) {
-  color: #52616d;
+  color: var(--app-text-muted);
   font-size: 13px;
 }
 
 .login-form :deep(.el-input__wrapper) {
   min-height: 44px;
   border-radius: 0;
-  box-shadow: 0 0 0 1px #d6e0e3 inset;
+  box-shadow: 0 0 0 1px var(--app-border) inset;
 }
 
 .login-form :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px #5c8872 inset;
+  box-shadow: 0 0 0 1px var(--app-accent-soft) inset;
 }
 
 .login-submit {
@@ -223,7 +224,7 @@ function openPublicLibrary() {
   margin-top: 2px;
   border: none;
   border-radius: 0;
-  background: linear-gradient(90deg, #4d8096 0%, #5e8b76 100%);
+  background: var(--app-gradient);
 }
 
 .login-panel-foot {
@@ -231,13 +232,13 @@ function openPublicLibrary() {
   justify-content: flex-start;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid #edf1f2;
+  border-top: 1px solid var(--app-border-soft);
 }
 
 .login-foot-note {
   font-size: 12px;
   line-height: 1.6;
-  color: #7a8791;
+  color: var(--app-text-muted);
 }
 
 .login-secondary-link {
@@ -246,12 +247,12 @@ function openPublicLibrary() {
   gap: 6px;
   border: none;
   background: transparent;
-  color: #426f87;
+  color: var(--app-accent);
   cursor: pointer;
 }
 
 .login-secondary-link:hover {
-  color: #2c5a73;
+  color: var(--app-accent-strong);
 }
 
 @keyframes fade-up {

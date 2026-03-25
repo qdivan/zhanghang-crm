@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import type { AddressResource } from "../types";
 
 type ResourceForm = {
@@ -17,9 +19,12 @@ type ResourceForm = {
 
 const loading = ref(false);
 const { isMobile } = useResponsive();
+const route = useRoute();
 const rows = ref<AddressResource[]>([]);
 const keyword = ref("");
 const showDialog = ref(false);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
+const dialogTitle = computed(() => (form.id ? "编辑挂靠地址" : "新增挂靠地址"));
 
 const form = reactive<ResourceForm>({
   id: null,
@@ -102,7 +107,66 @@ onMounted(fetchResources);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page mobile-address-page">
+      <section class="mobile-shell-panel">
+        <div class="mobile-address-toolbar">
+          <el-input
+            v-model="keyword"
+            placeholder="分类 / 联系人 / 服务公司 / 说明"
+            clearable
+            @keyup.enter="fetchResources"
+          />
+          <div class="mobile-address-toolbar-actions">
+            <el-button @click="fetchResources">查询</el-button>
+            <el-button type="primary" @click="openCreateDialog">新增地址</el-button>
+          </div>
+        </div>
+        <div v-if="keyword" class="mobile-chip-row mobile-address-chip-row">
+          <button type="button" class="mobile-chip-button" @click="keyword = ''; fetchResources()">
+            <span>关键词：{{ keyword }}</span>
+            <span class="mobile-chip-close">移除</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel">
+        <div class="mobile-address-section-head">
+          <div>
+            <div class="mobile-address-section-title">挂靠地址</div>
+            <div class="mobile-address-section-copy">联系人、服务公司和说明集中在这里。</div>
+          </div>
+          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+        </div>
+
+        <div v-if="!rows.length && !loading" class="mobile-empty-block">当前没有匹配地址资源</div>
+        <div v-else v-loading="loading" class="mobile-address-list">
+          <article v-for="row in rows" :key="row.id" class="mobile-address-row">
+            <div class="mobile-address-row-top">
+              <div>
+                <div class="mobile-address-row-title">{{ row.category || "未分类地址" }}</div>
+                <div class="mobile-address-row-subtitle">{{ row.contact_info || "未填地址 / 联系人" }}</div>
+              </div>
+              <el-button size="small" type="primary" plain @click="openEditDialog(row)">编辑</el-button>
+            </div>
+            <div class="mobile-address-row-grid">
+              <div class="mobile-address-row-item">
+                <span>已服务公司</span>
+                <strong>{{ row.served_companies || "-" }}</strong>
+              </div>
+              <div class="mobile-address-row-item">
+                <span>资源说明</span>
+                <strong>{{ row.description || "-" }}</strong>
+              </div>
+            </div>
+            <div v-if="row.notes" class="mobile-address-row-note">备注 {{ row.notes }}</div>
+          </article>
+        </div>
+      </section>
+    </section>
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <el-card shadow="never">
       <template #header>
         <div class="head">
@@ -173,8 +237,62 @@ onMounted(fetchResources);
     </el-card>
   </el-space>
 
-  <el-dialog v-model="showDialog" :title="form.id ? '编辑挂靠地址' : '新增挂靠地址'" :width="isMobile ? '94%' : '760px'">
-    <el-form label-position="top">
+  <el-dialog
+    v-model="showDialog"
+    :title="isMobileWorkflow ? '' : dialogTitle"
+    :width="isMobile ? '94%' : '760px'"
+    :fullscreen="isMobileWorkflow"
+    :show-close="!isMobileWorkflow"
+    :class="{ 'mobile-address-dialog': isMobileWorkflow }"
+  >
+    <template v-if="isMobileWorkflow">
+      <div class="mobile-form-dialog">
+        <div class="mobile-form-dialog-head">
+          <div>
+            <div class="mobile-form-dialog-eyebrow">挂靠地址</div>
+            <div class="mobile-form-dialog-title">{{ form.id ? "编辑地址资源" : "新增地址资源" }}</div>
+            <div class="mobile-form-dialog-copy">先记联系人和服务公司，再补充说明。</div>
+          </div>
+          <el-button text @click="showDialog = false">关闭</el-button>
+        </div>
+
+        <el-form label-position="top" class="mobile-form-dialog-form">
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">基础信息</div>
+            <el-form-item label="分类 / 区域">
+              <el-input v-model="form.category" />
+            </el-form-item>
+            <el-form-item label="挂靠地址 / 联系人">
+              <el-input v-model="form.contact_info" />
+            </el-form-item>
+          </section>
+
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">服务范围</div>
+            <div class="mobile-form-section-copy">多个公司名可用顿号、逗号或换行分隔。</div>
+            <el-form-item label="已服务公司">
+              <el-input v-model="form.served_companies" type="textarea" :rows="4" />
+            </el-form-item>
+          </section>
+
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">资源说明</div>
+            <el-form-item label="资源说明">
+              <el-input v-model="form.description" type="textarea" :rows="6" />
+            </el-form-item>
+          </section>
+
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">补充备注</div>
+            <el-form-item label="备注">
+              <el-input v-model="form.notes" type="textarea" :rows="5" />
+            </el-form-item>
+          </section>
+        </el-form>
+      </div>
+    </template>
+
+    <el-form v-else label-position="top">
       <el-row :gutter="12">
         <el-col :xs="24" :sm="8">
           <el-form-item label="分类/区域">
@@ -198,8 +316,10 @@ onMounted(fetchResources);
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="showDialog = false">取消</el-button>
-      <el-button type="primary" @click="submitForm">保存</el-button>
+      <div class="mobile-form-dialog-footer" :class="{ mobile: isMobileWorkflow }">
+        <el-button @click="showDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitForm">保存</el-button>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -222,10 +342,185 @@ onMounted(fetchResources);
   font-size: 13px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .resource-filter-form {
     display: flex;
     flex-wrap: wrap;
   }
+}
+
+.mobile-address-page {
+  gap: 12px;
+}
+
+.mobile-address-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-address-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mobile-address-toolbar-actions :deep(.el-button) {
+  flex: 1;
+}
+
+.mobile-address-chip-row {
+  margin-top: 10px;
+}
+
+.mobile-address-section-head,
+.mobile-address-row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-address-section-title,
+.mobile-address-row-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-address-section-copy,
+.mobile-address-row-subtitle,
+.mobile-address-row-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.mobile-address-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-address-row {
+  padding: 12px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.mobile-address-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mobile-address-row-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-address-row-item span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.mobile-address-row-item strong {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--app-text-primary);
+}
+
+.mobile-address-row-note {
+  margin-top: 8px;
+}
+
+:deep(.mobile-address-dialog .el-dialog__header) {
+  display: none;
+}
+
+:deep(.mobile-address-dialog .el-dialog__body) {
+  padding: 0;
+}
+
+:deep(.mobile-address-dialog .el-dialog__footer) {
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.mobile-form-dialog {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 78px);
+  background:
+    radial-gradient(circle at top right, rgba(77, 128, 150, 0.12), transparent 34%),
+    var(--app-bg);
+}
+
+.mobile-form-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(18px, env(safe-area-inset-top)) 16px 14px;
+  border-bottom: 1px solid var(--app-border-soft);
+  background: rgba(250, 252, 252, 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.mobile-form-dialog-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.mobile-form-dialog-title {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-form-dialog-copy,
+.mobile-form-section-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.mobile-form-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 24px;
+}
+
+.mobile-form-section {
+  padding: 14px;
+  border: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.mobile-form-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-form-section :deep(.el-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+.mobile-form-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mobile-form-dialog-footer.mobile :deep(.el-button) {
+  flex: 1;
 }
 </style>

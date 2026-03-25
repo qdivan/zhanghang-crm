@@ -301,7 +301,7 @@ onMounted(fetchDashboardData);
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }

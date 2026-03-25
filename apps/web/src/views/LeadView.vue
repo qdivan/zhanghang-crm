@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { Filter, MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
+import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
 import LeadConvertBillingDialog from "../components/leads/LeadConvertBillingDialog.vue";
 import LeadConvertDialog from "../components/leads/LeadConvertDialog.vue";
 import LeadCreateDialog from "../components/leads/LeadCreateDialog.vue";
@@ -13,6 +16,8 @@ import LeadGuideDialog from "../components/leads/LeadGuideDialog.vue";
 import LeadHistoryDrawer from "../components/leads/LeadHistoryDrawer.vue";
 import LeadOverviewCard from "../components/leads/LeadOverviewCard.vue";
 import LeadRedevelopDialog from "../components/leads/LeadRedevelopDialog.vue";
+import { useMobileFilterMemory } from "../composables/useMobileFilterMemory";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import type { BillingCreatePayload, BillingRecord, LeadItem } from "../types";
 import {
@@ -37,7 +42,16 @@ import {
   searchLeadCustomers,
   type LeadCustomerSearchItem,
 } from "./lead/customerSearch";
-import { getDefaultReminderValueForGrade, sortLeadRows } from "./lead/viewMeta";
+import {
+  getDefaultReminderValueForGrade,
+  getLeadAreaText,
+  getLeadContactText,
+  getLeadStartText,
+  getStatusLabel,
+  getTemplateLabel,
+  sortLeadRows,
+  statusTagType,
+} from "./lead/viewMeta";
 
 type FollowupItem = {
   id: number;
@@ -58,6 +72,7 @@ type UserLite = {
 };
 
 const auth = useAuthStore();
+const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
 const rows = ref<LeadItem[]>([]);
@@ -82,14 +97,85 @@ const redevelopCustomerOptions = ref<LeadCustomerSearchItem[]>([]);
 const redevelopForm = reactive<LeadRedevelopForm>(createLeadRedevelopForm());
 const convertForm = reactive<LeadConvertForm>(createLeadConvertForm());
 const convertBillingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)]);
+const showMobileFilters = ref(false);
+const expandedLeadId = ref<number | null>(null);
+const showLeadPageActionSheet = ref(false);
+const showLeadRowActionSheet = ref(false);
+const selectedLeadActionRow = ref<LeadItem | null>(null);
+const leadRouteQueueHandling = ref(false);
 
 const filters = reactive(createLeadFilters());
+const leadMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.leads", createLeadFilters());
 const leadForm = reactive<LeadCreateForm>(createLeadForm());
 const followupForm = reactive<LeadFollowupForm>(createLeadFollowupForm(todayInBrowserTimeZone()));
 
 const canConvert = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
+const leadFilterChips = computed(() =>
+  [
+    filters.keyword ? { key: "keyword", label: `关键词：${filters.keyword}` } : null,
+    filters.status ? { key: "status", label: `状态：${getStatusLabel(filters.status as LeadItem["status"])}` } : null,
+    filters.template_type
+      ? { key: "template_type", label: `模板：${getTemplateLabel(filters.template_type as LeadItem["template_type"])}` }
+      : null,
+  ].filter(Boolean) as Array<{ key: "keyword" | "status" | "template_type"; label: string }>,
+);
+const activeFilterChips = computed(() => leadFilterChips.value.map((item) => item.label));
+const mobileFollowupQueueLabel = computed(() => {
+  const currentIndex = rows.value.findIndex((item) => item.id === followupForm.lead_id);
+  if (currentIndex < 0) return "";
+  return `${currentIndex + 1} / ${rows.value.length}`;
+});
+const hasNextFollowupLead = computed(() => {
+  const currentIndex = rows.value.findIndex((item) => item.id === followupForm.lead_id);
+  return currentIndex >= 0 && currentIndex < rows.value.length - 1;
+});
+const leadQuickFilters = computed(() => [
+  { key: "all" as const, label: "全部", active: !filters.status && !filters.template_type },
+  { key: "following" as const, label: "跟进中", active: filters.status === "FOLLOWING" && !filters.template_type },
+  { key: "new" as const, label: "新线索", active: filters.status === "NEW" && !filters.template_type },
+  { key: "redevelop" as const, label: "老客二开", active: !filters.status && filters.template_type === "REDEVELOP" },
+]);
+const leadPageActionItems = computed(() => [
+  { key: "redevelop", label: "老客二次开发", description: "快速基于老客户补一条二开线索。" },
+  { key: "guide", label: "流程说明", description: "查看开发流程和字段使用说明。" },
+  { key: "import", label: "导入 Excel", description: "保留导入入口，后续继续接入。", disabled: true },
+]);
+const leadRowActionItems = computed(() => {
+  const row = selectedLeadActionRow.value;
+  if (!row) return [];
+  return [
+    { key: "detail", label: "查看详情", description: "进入完整线索详情页。" },
+    { key: "history", label: "跟进历史", description: "查看这条线索的全部跟进记录。" },
+    row.customer_id
+      ? { key: "customer", label: "客户档案", description: "跳转到已转化的客户档案。" }
+      : {
+          key: "convert",
+          label: "转化成交",
+          description: canConvert.value ? "将这条线索转为客户并分配会计。" : "当前账号没有转化权限。",
+          disabled: !canConvert.value || row.status === "CONVERTED",
+        },
+    row.status === "CONVERTED"
+      ? {
+          key: "revoke",
+          label: "撤销转化",
+          description: canConvert.value ? "撤回已转化的客户档案。" : "当前账号没有撤销权限。",
+          danger: true,
+          disabled: !canConvert.value,
+        }
+      : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
+});
+
+function currentLeadFilterSnapshot() {
+  return {
+    keyword: filters.keyword,
+    status: filters.status,
+    template_type: filters.template_type,
+  };
+}
 
 async function fetchLeads() {
   loading.value = true;
@@ -155,6 +241,11 @@ async function fetchAccountants() {
   } catch (error) {
     ElMessage.error("获取会计列表失败");
   }
+}
+
+async function ensureAccountantsLoaded() {
+  if (!canConvert.value || accountantOptions.value.length) return;
+  await fetchAccountants();
 }
 
 function resetRedevelopForm() {
@@ -227,23 +318,74 @@ function openFollowupDialog(lead: LeadItem) {
   showFollowupDialog.value = true;
 }
 
-async function submitFollowup() {
+function getNextFollowupLeadId(currentLeadId: number) {
+  const currentIndex = rows.value.findIndex((item) => item.id === currentLeadId);
+  if (currentIndex < 0 || currentIndex >= rows.value.length - 1) return null;
+  return rows.value[currentIndex + 1]?.id ?? null;
+}
+
+function startLeadFollowupQueue() {
+  const firstLead = rows.value[0];
+  if (!firstLead) {
+    ElMessage.warning("当前没有可连续跟进的线索");
+    return;
+  }
+  openFollowupDialog(firstLead);
+}
+
+async function handleLeadRouteQueue() {
+  if (leadRouteQueueHandling.value || !isMobileWorkflow.value) return;
+  const queue = String(route.query.queue || "").trim();
+  if (queue !== "followup") return;
+
+  leadRouteQueueHandling.value = true;
+  try {
+    Object.assign(filters, createLeadFilters(), {
+      status: "FOLLOWING",
+      template_type: "",
+    });
+    await fetchLeads();
+
+    const nextQuery = { ...route.query };
+    delete nextQuery.queue;
+    await router.replace({ path: route.path, query: nextQuery });
+
+    if (!rows.value.length) {
+      ElMessage.warning("当前没有可连续跟进的线索");
+      return;
+    }
+    startLeadFollowupQueue();
+  } finally {
+    leadRouteQueueHandling.value = false;
+  }
+}
+
+async function submitFollowup(mode: "close" | "next" = "close") {
   if (!followupForm.lead_id || !followupForm.feedback.trim()) {
     ElMessage.warning("请填写跟进反馈");
     return;
   }
 
+  const nextLeadId = mode === "next" ? getNextFollowupLeadId(followupForm.lead_id) : null;
   try {
     await apiClient.post(`/leads/${followupForm.lead_id}/followups`, followupForm);
-    ElMessage.success("开发跟进已保存");
-    showFollowupDialog.value = false;
     await fetchLeads();
+    if (mode === "next" && nextLeadId && isMobileWorkflow.value) {
+      const nextLead = rows.value.find((item) => item.id === nextLeadId);
+      if (nextLead) {
+        ElMessage.success("开发跟进已保存，已切到下一条");
+        openFollowupDialog(nextLead);
+        return;
+      }
+    }
+    ElMessage.success(mode === "next" ? "开发跟进已保存，已到最后一条" : "开发跟进已保存");
+    showFollowupDialog.value = false;
   } catch (error) {
     ElMessage.error("保存跟进失败");
   }
 }
 
-function openConvertDialog(lead: LeadItem) {
+async function openConvertDialog(lead: LeadItem) {
   if (!canConvert.value) {
     ElMessage.warning("当前角色没有转化权限");
     return;
@@ -252,6 +394,7 @@ function openConvertDialog(lead: LeadItem) {
     ElMessage.warning("该线索已转化");
     return;
   }
+  await ensureAccountantsLoaded();
   convertTargetLeadName.value = lead.name;
   const preferred = accountantOptions.value.find((item) => item.id === lead.owner_id);
   Object.assign(convertForm, createLeadConvertForm(), {
@@ -315,7 +458,7 @@ async function submitConvert() {
   const customer = await performConvert();
   if (!customer) return;
   ElMessage.success("已转化为客户");
-  router.push(`/customers/${customer.id}?from=leads`);
+  router.push(`${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${customer.id}?from=leads`);
 }
 
 async function submitConvertAndAddBilling() {
@@ -341,7 +484,7 @@ async function submitConvertBilling() {
     const resp = await apiClient.post<BillingRecord[]>("/billing-records/batch", { records: payload });
     showConvertBillingDialog.value = false;
     ElMessage.success(`已完成转化并创建 ${resp.data.length} 条收费记录`);
-    router.push("/billing");
+    router.push(isMobileWorkflow.value ? "/m/billing" : "/billing");
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "收费信息保存失败");
   } finally {
@@ -376,15 +519,15 @@ async function revokeConvert(lead: LeadItem) {
 }
 
 function openLeadDetail(lead: LeadItem) {
-  router.push(`/leads/${lead.id}`);
+  router.push(`${isMobileWorkflow.value ? "/m/leads" : "/leads"}/${lead.id}`);
 }
 
 function openCompanyPage(lead: LeadItem) {
   if (lead.status === "CONVERTED" && lead.customer_id) {
-    router.push(`/customers/${lead.customer_id}?from=leads`);
+    router.push(`${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${lead.customer_id}?from=leads`);
     return;
   }
-  router.push(`/leads/${lead.id}`);
+  router.push(`${isMobileWorkflow.value ? "/m/leads" : "/leads"}/${lead.id}`);
 }
 
 function openCustomerArchive(lead: LeadItem) {
@@ -392,7 +535,7 @@ function openCustomerArchive(lead: LeadItem) {
     ElMessage.warning("该线索尚未转化");
     return;
   }
-  router.push(`/customers/${lead.customer_id}?from=leads`);
+  router.push(`${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${lead.customer_id}?from=leads`);
 }
 
 function openCreateLeadDialog() {
@@ -406,6 +549,131 @@ function resetLeadForm() {
 
 function notifyImportTodo() {
   ElMessage.info("已完成字段建模，下一步接 Excel 导入");
+}
+
+function resetFiltersAndQuery() {
+  Object.assign(filters, createLeadFilters());
+  leadMobileFilterMemory.clearState();
+  void fetchLeads();
+}
+
+function removeLeadFilterChip(key: "keyword" | "status" | "template_type") {
+  if (key === "keyword") filters.keyword = "";
+  if (key === "status") filters.status = "";
+  if (key === "template_type") filters.template_type = "";
+  void applyLeadFilters();
+}
+
+function toggleLeadExpanded(leadId: number) {
+  expandedLeadId.value = expandedLeadId.value === leadId ? null : leadId;
+}
+
+function mobileLeadMeta(row: LeadItem): string {
+  return [
+    getLeadAreaText(row) || "",
+    getLeadStartText(row) || "",
+    row.next_reminder_at ? `下次 ${row.next_reminder_at}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function mobileLeadSignals(row: LeadItem) {
+  return [
+    { label: "电话", value: row.phone || "-" },
+    { label: "等级", value: row.grade || "-" },
+    { label: "最后跟进", value: row.last_followup_date || "未记录" },
+    { label: "提醒频率", value: row.reminder_value || "未设置" },
+  ];
+}
+
+function mobileLeadFacts(row: LeadItem) {
+  return [
+    row.source ? `来源 ${row.source}` : "",
+    getLeadAreaText(row) !== "-" ? `地区 ${getLeadAreaText(row)}` : "",
+    getLeadStartText(row) !== "-" ? `起始 ${getLeadStartText(row)}` : "",
+  ].filter(Boolean);
+}
+
+function mobileLeadBriefs(row: LeadItem) {
+  return [
+    row.main_business ? { label: "主营/需求", value: row.main_business } : null,
+    row.intro ? { label: "介绍人", value: row.intro } : null,
+    row.notes ? { label: "备注", value: row.notes } : null,
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+}
+
+function restoreSavedLeadFilters() {
+  leadMobileFilterMemory.restoreSavedState((snapshot) => {
+    Object.assign(filters, createLeadFilters(), snapshot);
+  });
+}
+
+async function applyLeadFilters() {
+  if (isMobileWorkflow.value) {
+    leadMobileFilterMemory.saveState(currentLeadFilterSnapshot());
+  }
+  await fetchLeads();
+}
+
+async function applyLeadQuickFilter(mode: "all" | "following" | "new" | "redevelop") {
+  if (mode === "all") {
+    filters.status = "";
+    filters.template_type = "";
+  }
+  if (mode === "following") {
+    filters.status = "FOLLOWING";
+    filters.template_type = "";
+  }
+  if (mode === "new") {
+    filters.status = "NEW";
+    filters.template_type = "";
+  }
+  if (mode === "redevelop") {
+    filters.status = "";
+    filters.template_type = "REDEVELOP";
+  }
+  await applyLeadFilters();
+}
+
+function handlePageCommand(command: string) {
+  if (command === "redevelop") openRedevelopDialog();
+  if (command === "guide") showGuideDialog.value = true;
+  if (command === "import") notifyImportTodo();
+}
+
+function handleMobileMenuCommand(command: string, row: LeadItem) {
+  if (command === "detail") openLeadDetail(row);
+  if (command === "history") void openHistoryDrawer(row);
+  if (command === "customer") openCustomerArchive(row);
+  if (command === "convert") void openConvertDialog(row);
+  if (command === "revoke") void revokeConvert(row);
+}
+
+function canQuickConvertLead(row: LeadItem) {
+  return canConvert.value && row.status !== "CONVERTED";
+}
+
+function leadQuickActionLabel(row: LeadItem) {
+  return canQuickConvertLead(row) ? "转化" : "历史";
+}
+
+function handleLeadQuickAction(row: LeadItem) {
+  if (canQuickConvertLead(row)) {
+    void openConvertDialog(row);
+    return;
+  }
+  void openHistoryDrawer(row);
+}
+
+function openLeadRowActions(row: LeadItem) {
+  selectedLeadActionRow.value = row;
+  showLeadRowActionSheet.value = true;
+}
+
+function handleLeadRowActionSelect(action: string) {
+  if (!selectedLeadActionRow.value) return;
+  handleMobileMenuCommand(action, selectedLeadActionRow.value);
 }
 
 async function openHistoryDrawer(lead: LeadItem) {
@@ -424,13 +692,204 @@ async function openHistoryDrawer(lead: LeadItem) {
 }
 
 onMounted(async () => {
-  await fetchLeads();
-  await fetchAccountants();
+  if (isMobileWorkflow.value) {
+    restoreSavedLeadFilters();
+  }
+  await Promise.all([fetchLeads(), fetchAccountants()]);
+  await handleLeadRouteQueue();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    void handleLeadRouteQueue();
+  },
+);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page lead-mobile-page">
+      <section class="mobile-shell-panel">
+        <div class="mobile-toolbar">
+          <div class="mobile-toolbar-main">
+            <el-input
+              v-model="filters.keyword"
+              placeholder="客户 / 联系人 / 电话"
+              clearable
+              @keyup.enter="applyLeadFilters"
+            />
+          </div>
+          <div class="mobile-toolbar-actions">
+            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
+            <el-button type="primary" @click="openCreateLeadDialog">新增线索</el-button>
+            <el-button plain @click="showLeadPageActionSheet = true">
+              操作
+              <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        <div class="mobile-filter-presets">
+          <button
+            v-for="item in leadQuickFilters"
+            :key="item.key"
+            type="button"
+            class="mobile-filter-preset"
+            :class="{ active: item.active }"
+            @click="applyLeadQuickFilter(item.key)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+        <div v-if="activeFilterChips.length" class="mobile-chip-row lead-mobile-chip-row">
+          <button
+            v-for="chip in leadFilterChips"
+            :key="chip.key"
+            type="button"
+            class="mobile-chip-button"
+            @click="removeLeadFilterChip(chip.key)"
+          >
+            <span>{{ chip.label }}</span>
+            <span class="mobile-chip-close">移除</span>
+          </button>
+          <button type="button" class="lead-clear-chip" @click="resetFiltersAndQuery">清空</button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel lead-mobile-list-panel">
+        <div v-if="rows.length" class="mobile-queue-strip">
+          <div class="mobile-queue-main">
+            <div class="mobile-queue-kicker">连续跟进</div>
+            <div class="mobile-queue-copy">按当前筛选顺序处理 {{ rows.length }} 条线索。</div>
+          </div>
+          <el-button size="small" plain @click="startLeadFollowupQueue">从首条开始</el-button>
+        </div>
+        <div class="lead-mobile-head">
+          <div>
+            <div class="lead-mobile-title">客户开发</div>
+            <div class="lead-mobile-copy">先看状态和提醒，再直接跟进或转化。</div>
+          </div>
+          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+        </div>
+
+        <div v-loading="loading" class="lead-mobile-list">
+          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配的线索</div>
+          <article v-for="row in rows" :key="row.id" class="lead-mobile-row">
+            <div class="lead-mobile-row-top">
+              <button type="button" class="lead-mobile-name" @click="openCompanyPage(row)">{{ row.name }}</button>
+              <div class="lead-mobile-tags">
+                <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
+                <el-tag size="small" :type="statusTagType(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
+              </div>
+            </div>
+            <div class="lead-mobile-summary">{{ getLeadContactText(row) || "未填写联系人" }}</div>
+            <div class="lead-mobile-meta">{{ mobileLeadMeta(row) || "暂无提醒信息" }}</div>
+
+            <transition name="lead-expand">
+              <div v-if="expandedLeadId === row.id" class="lead-mobile-expanded">
+                <div class="lead-mobile-signal-grid">
+                  <div v-for="item in mobileLeadSignals(row)" :key="`${row.id}-${item.label}`" class="lead-mobile-signal">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+                <div v-if="mobileLeadFacts(row).length" class="lead-mobile-fact-row">
+                  <span v-for="fact in mobileLeadFacts(row)" :key="`${row.id}-${fact}`" class="lead-mobile-fact-chip">
+                    {{ fact }}
+                  </span>
+                </div>
+                <div v-if="mobileLeadBriefs(row).length" class="lead-mobile-brief-list">
+                  <div
+                    v-for="item in mobileLeadBriefs(row)"
+                    :key="`${row.id}-${item.label}`"
+                    class="lead-mobile-brief"
+                  >
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
+            </transition>
+
+            <div class="mobile-action-stack lead-mobile-actions">
+              <div class="mobile-action-main">
+                <el-button size="small" type="primary" @click="openFollowupDialog(row)">跟进</el-button>
+                <el-button size="small" plain @click="handleLeadQuickAction(row)">
+                  {{ leadQuickActionLabel(row) }}
+                </el-button>
+              </div>
+              <div class="mobile-action-sub">
+                <button type="button" class="mobile-action-link is-muted" @click="toggleLeadExpanded(row.id)">
+                  {{ expandedLeadId === row.id ? "收起补充信息" : "展开补充信息" }}
+                </button>
+                <button type="button" class="mobile-action-link" @click="openLeadDetail(row)">查看详情</button>
+                <button type="button" class="mobile-action-link" @click="openLeadRowActions(row)">更多操作</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileFilterSheet
+      v-model="showMobileFilters"
+      title="筛选线索"
+      subtitle="先缩小范围，再回列表连续处理。"
+      :summary-items="activeFilterChips"
+      empty-summary="当前未设置筛选条件"
+    >
+      <el-form label-position="top" class="lead-mobile-filter-form">
+        <div v-if="leadMobileFilterMemory.hasSavedState.value" class="mobile-filter-restore">
+          <el-button text type="primary" @click="restoreSavedLeadFilters">恢复上次已应用条件</el-button>
+        </div>
+        <el-form-item label="关键词">
+          <el-input
+            v-model="filters.keyword"
+            placeholder="客户 / 联系人 / 电话"
+            clearable
+            @keyup.enter="applyLeadFilters"
+          />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="filters.status" placeholder="全部" clearable>
+            <el-option label="新线索" value="NEW" />
+            <el-option label="跟进中" value="FOLLOWING" />
+            <el-option label="已转化" value="CONVERTED" />
+            <el-option label="已丢失" value="LOST" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模板">
+          <el-select v-model="filters.template_type" placeholder="全部" clearable>
+            <el-option label="客户跟进模板" value="FOLLOWUP" />
+            <el-option label="客户转化模板" value="CONVERSION" />
+            <el-option label="老客二开模板" value="REDEVELOP" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetFiltersAndQuery">重置</el-button>
+        <el-button type="primary" @click="showMobileFilters = false; applyLeadFilters()">应用筛选</el-button>
+      </template>
+    </MobileFilterSheet>
+
+    <MobileActionSheet
+      v-model="showLeadPageActionSheet"
+      title="页面操作"
+      subtitle="这些都是低频入口，统一收在这里。"
+      :items="leadPageActionItems"
+      @select="handlePageCommand"
+    />
+
+    <MobileActionSheet
+      v-model="showLeadRowActionSheet"
+      title="线索操作"
+      :subtitle="selectedLeadActionRow?.name || ''"
+      :items="leadRowActionItems"
+      @select="handleLeadRowActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <LeadFilterCard
       :filters="filters"
       @query="fetchLeads"
@@ -468,7 +927,10 @@ onMounted(async () => {
   <LeadFollowupDialog
     v-model:visible="showFollowupDialog"
     :form="followupForm"
-    @submit="submitFollowup"
+    :queue-label="isMobileWorkflow ? mobileFollowupQueueLabel : ''"
+    :show-next-action="isMobileWorkflow && hasNextFollowupLead"
+    @submit="submitFollowup()"
+    @submit-next="submitFollowup('next')"
   />
 
   <LeadConvertDialog
@@ -498,3 +960,194 @@ onMounted(async () => {
     :rows="historyRows"
   />
 </template>
+
+<style scoped>
+.lead-mobile-page {
+  gap: 12px;
+}
+
+.lead-mobile-chip-row {
+  margin-top: 12px;
+}
+
+.lead-clear-chip {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--app-accent-strong);
+  font-size: 12px;
+}
+
+.lead-mobile-list-panel {
+  padding-top: 12px;
+}
+
+.lead-mobile-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lead-mobile-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.lead-mobile-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.lead-mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lead-mobile-row {
+  border-top: 1px solid var(--app-border-soft);
+  padding-top: 12px;
+}
+
+.lead-mobile-row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.lead-mobile-row-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lead-mobile-name {
+  border: none;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.lead-mobile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lead-mobile-summary {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.lead-mobile-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.lead-mobile-expanded {
+  margin-top: 10px;
+  padding: 10px 0 0;
+  border-top: 1px dashed var(--app-border-soft);
+}
+
+.lead-mobile-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lead-mobile-signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--app-bg-soft) 70%, white 30%);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 14px;
+}
+
+.lead-mobile-signal span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.lead-mobile-signal strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--app-text-primary);
+}
+
+.lead-mobile-fact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.lead-mobile-fact-chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--app-bg-soft);
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.lead-mobile-brief-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lead-mobile-brief {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lead-mobile-brief span {
+  color: var(--app-text-muted);
+}
+
+.lead-mobile-brief strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--app-text-secondary);
+  word-break: break-word;
+}
+
+.lead-mobile-actions {
+  margin-top: 12px;
+}
+
+.lead-mobile-filter-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.mobile-filter-restore {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 6px;
+}
+
+.lead-expand-enter-active,
+.lead-expand-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.lead-expand-enter-from,
+.lead-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+</style>

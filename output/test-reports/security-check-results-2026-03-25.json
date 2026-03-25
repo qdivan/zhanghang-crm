@@ -1,0 +1,100 @@
+[
+  {
+    "id": "S-001",
+    "description": "未登录访问 /leads",
+    "expected": "401/403 拒绝",
+    "actual": "401",
+    "passed": true
+  },
+  {
+    "id": "S-002",
+    "description": "无效 token 访问 /leads",
+    "expected": "401/403 拒绝",
+    "actual": "401",
+    "passed": true
+  },
+  {
+    "id": "S-003",
+    "description": "错误密码登录",
+    "expected": "401 且错误信息不泄漏敏感字段",
+    "actual": "status=401, body={\"detail\":\"账号或密码错误\"}",
+    "passed": true
+  },
+  {
+    "id": "S-004",
+    "description": "同一 IP 连续错误密码后锁定",
+    "expected": "锁定后返回 429",
+    "actual": "429",
+    "passed": true
+  },
+  {
+    "id": "S-005",
+    "description": "不同 IP 不受上一条锁定影响",
+    "expected": "200 登录成功",
+    "actual": "200",
+    "passed": true
+  },
+  {
+    "id": "S-006",
+    "description": "admin 账号可登录",
+    "expected": "200 登录成功",
+    "actual": "200",
+    "passed": true
+  },
+  {
+    "id": "S-007",
+    "description": "会计访问 /users",
+    "expected": "403 拒绝",
+    "actual": "403",
+    "passed": true
+  },
+  {
+    "id": "S-008",
+    "description": "会计默认访问到账核对接口",
+    "expected": "403 拒绝",
+    "actual": "403",
+    "passed": true
+  },
+  {
+    "id": "S-009",
+    "description": "部门经理访问到账核对接口",
+    "expected": "200 成功",
+    "actual": "200",
+    "passed": true
+  },
+  {
+    "id": "S-010",
+    "description": "部门经理访问 /users 的受限范围",
+    "expected": "只返回直属下属会计",
+    "actual": "status=200, count=3",
+    "passed": true
+  },
+  {
+    "id": "S-011",
+    "description": "公开资料接口边界",
+    "expected": "仅返回 PUBLIC 资料",
+    "actual": "count=2, visibilities=['PUBLIC']",
+    "passed": true
+  },
+  {
+    "id": "S-012",
+    "description": "非法 customer id",
+    "expected": "404/422，不能 500",
+    "actual": "404",
+    "passed": true
+  },
+  {
+    "id": "S-013",
+    "description": "会计直接新增收费单",
+    "expected": "403 拒绝",
+    "actual": "403",
+    "passed": true
+  },
+  {
+    "id": "S-014",
+    "description": "管理员访问 /users",
+    "expected": "200 成功",
+    "actual": "200",
+    "passed": true
+  }
+]

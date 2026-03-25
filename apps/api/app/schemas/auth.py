@@ -12,6 +12,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: Optional["UserOut"] = None
 
 
 class UserOut(BaseModel):
@@ -28,3 +29,6 @@ class UserOut(BaseModel):
     created_at: datetime
     last_login_at: Optional[datetime] = None
     granted_read_modules: list[str] = []
+
+
+TokenResponse.model_rebuild()

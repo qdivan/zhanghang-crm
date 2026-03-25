@@ -423,7 +423,7 @@ onMounted(fetchPublicItems);
   font-size: 13px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .public-library-shell {
     width: calc(100vw - 24px);
     padding: 16px 0 28px;

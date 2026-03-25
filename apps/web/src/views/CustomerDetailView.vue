@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ArrowDown, ArrowLeft } from "@element-plus/icons-vue";
+import { ArrowDown, ArrowLeft, MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
 import type {
   CustomerDetail,
@@ -31,8 +33,10 @@ const detail = ref<CustomerDetail | null>(null);
 const showTimelineDialog = ref(false);
 const showEditDialog = ref(false);
 const showCompleteDialog = ref(false);
+const showMobileSecondaryActionSheet = ref(false);
 const detailCollapse = ref<string[]>([]);
 const completingTimelineId = ref<number | null>(null);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const canWriteCustomer = computed(() => {
   if (!detail.value || auth.user?.role !== "ACCOUNTANT") return true;
@@ -44,12 +48,12 @@ const backTarget = computed(() => {
   if (from === "leads") {
     return {
       label: "返回客户开发",
-      path: "/leads",
+      path: isMobileWorkflow.value ? "/m/leads" : "/leads",
     };
   }
   return {
     label: "返回客户列表",
-    path: "/customers",
+    path: isMobileWorkflow.value ? "/m/customers" : "/customers",
   };
 });
 
@@ -61,6 +65,55 @@ const displayContactLine = computed(() => {
   if (!detail.value) return "-";
   return [detail.value.contact_name, detail.value.phone].filter(Boolean).join(" / ") || "-";
 });
+const customerHeroCopy = computed(() => {
+  if (!detail.value) return "成单后的客户信息、时间线和补充事项统一在这里维护。";
+  return `会计 ${detail.value.accountant_username || "-"} · ${templateLabel(detail.value.lead.template_type)}`;
+});
+const customerFocusMeta = computed(() => {
+  if (!detail.value) return [];
+  return [
+    `客户ID ${detail.value.id}`,
+    detail.value.lead.next_reminder_at
+      ? `提醒 ${detail.value.lead.next_reminder_at}`
+      : `最后跟进 ${displayText(detail.value.lead.last_followup_date)}`,
+  ];
+});
+const customerSignalFacts = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "会计", value: detail.value.accountant_username || "-" },
+    { label: "等级", value: displayText(detail.value.lead.grade) },
+    { label: "服务开始", value: displayServiceStart.value },
+    { label: "收费标准", value: displayText(detail.value.lead.fee_standard) },
+  ];
+});
+const customerSummaryRows = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "对接人", value: displayContactLine.value },
+    { label: "国家 / 地区", value: displayCountry.value },
+    { label: "服务方式", value: displayText(detail.value.lead.service_mode) },
+    { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
+    { label: "下次提醒", value: displayText(detail.value.lead.next_reminder_at) },
+    { label: "主营产品", value: displayText(detail.value.lead.main_business), multiline: true },
+    { label: "介绍人", value: displayText(detail.value.lead.intro) },
+    { label: "备注", value: displayText(detail.value.lead.notes), multiline: true },
+  ];
+});
+const mobileSecondaryActionItems = computed(() => [
+  {
+    key: "lead",
+    label: "查看开发来源",
+    description: "回看客户是从哪条线索转化而来。",
+    disabled: !detail.value,
+  },
+  {
+    key: "hk-company",
+    label: "套用香港公司模板",
+    description: canWriteCustomer.value ? "给当前客户生成常用香港公司提醒事项。" : "当前账号没有这位客户的写权限。",
+    disabled: !detail.value || !canWriteCustomer.value || templateApplying.value,
+  },
+]);
 
 function displayText(value: string | null | undefined) {
   const raw = (value || "").trim();
@@ -278,6 +331,14 @@ async function applyCustomerTemplate(command: string) {
   }
 }
 
+function handleMobileSecondaryActionSelect(command: string) {
+  if (command === "lead") {
+    openLeadDetail();
+    return;
+  }
+  void applyCustomerTemplate(command);
+}
+
 function openCompleteDialog(item: CustomerTimelineEntry) {
   if (!detail.value || !canCompleteTimeline(item)) return;
   completingTimelineId.value = item.source_id ?? null;
@@ -315,7 +376,7 @@ async function submitCompleteTimeline() {
 function openLeadDetail() {
   if (!detail.value) return;
   router.push({
-    path: `/leads/${detail.value.source_lead_id}`,
+    path: `${isMobileWorkflow.value ? "/m/leads" : "/leads"}/${detail.value.source_lead_id}`,
     query: { from: `customer:${detail.value.id}` },
   });
 }
@@ -390,7 +451,114 @@ onMounted(fetchDetail);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="10">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page customer-detail-mobile-page">
+      <section class="mobile-shell-panel">
+        <div class="customer-detail-mobile-hero">
+          <div>
+            <div class="customer-detail-mobile-eyebrow">客户档案</div>
+            <div class="customer-detail-mobile-title">{{ detail?.name || "客户档案" }}</div>
+            <div class="customer-detail-mobile-copy">{{ customerHeroCopy }}</div>
+          </div>
+          <div class="customer-detail-mobile-primary-actions">
+            <el-button type="primary" :disabled="!detail || !canWriteCustomer" @click="openTimelineDialog">
+              新增记录
+            </el-button>
+            <el-button plain :disabled="!detail || !canWriteCustomer" @click="openEditDialog">编辑档案</el-button>
+          </div>
+        </div>
+        <div v-if="detail" class="customer-detail-mobile-focus-strip">
+          <div class="customer-detail-mobile-focus-main">
+            <span>当前维护人</span>
+            <strong>{{ detail.accountant_username || "未分配" }}</strong>
+          </div>
+          <div class="customer-detail-mobile-focus-meta">
+            <span v-for="item in customerFocusMeta" :key="item">{{ item }}</span>
+          </div>
+        </div>
+        <div v-if="detail" class="customer-detail-mobile-signal-grid">
+          <article v-for="item in customerSignalFacts" :key="item.label" class="customer-detail-mobile-signal">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </article>
+        </div>
+        <div class="customer-detail-mobile-secondary-actions">
+          <el-button size="small" plain @click="showMobileSecondaryActionSheet = true">
+            更多操作
+            <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+          </el-button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel" v-loading="loading">
+        <div class="customer-detail-mobile-section-title">客户信息</div>
+        <el-empty v-if="!detail" description="未找到客户" />
+        <template v-else>
+          <div class="customer-detail-mobile-stack">
+            <div
+              v-for="item in customerSummaryRows"
+              :key="item.label"
+              class="customer-detail-mobile-row"
+              :class="{ multiline: item.multiline }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+        </template>
+      </section>
+
+      <section class="mobile-shell-panel">
+        <div class="customer-detail-mobile-section-head">
+          <div class="customer-detail-mobile-section-title">客户时间线</div>
+          <el-tag size="small" type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
+        </div>
+        <div v-if="!(detail?.timeline.length ?? 0)" class="mobile-empty-block">还没有客户时间线记录</div>
+        <div v-else class="customer-detail-mobile-timeline">
+          <article
+            v-for="item in detail?.timeline ?? []"
+            :key="`${item.source_type}-${item.source_id ?? item.occurred_at}`"
+            class="customer-detail-mobile-entry"
+          >
+            <div class="customer-detail-mobile-entry-head">
+              <div>
+                <strong>{{ item.title }}</strong>
+                <div class="customer-detail-mobile-entry-copy">{{ timelineTypeLabel(item.source_type) }} · {{ item.actor_username || "系统" }}</div>
+              </div>
+              <div class="customer-detail-mobile-entry-side">
+                <el-tag size="small" :type="timelineTypeTag(item.source_type)" effect="plain">
+                  {{ item.occurred_at }}
+                </el-tag>
+                <el-button v-if="canCompleteTimeline(item)" size="small" type="primary" plain @click="openCompleteDialog(item)">
+                  办结
+                </el-button>
+              </div>
+            </div>
+            <div class="customer-detail-mobile-entry-body">{{ item.content || "-" }}</div>
+            <div class="customer-detail-mobile-entry-meta">
+              <span>状态 {{ timelineStatusLabel(item.status) }}</span>
+              <span v-if="item.reminder_at">提醒 {{ item.reminder_at }}</span>
+              <span v-if="item.completed_at">办结 {{ item.completed_at }}</span>
+              <span v-if="item.result">结果 {{ item.result }}</span>
+              <span v-if="item.amount !== null">金额 {{ item.amount }}</span>
+              <span v-if="item.note">{{ item.note }}</span>
+              <span v-if="item.extra">{{ item.extra }}</span>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileActionSheet
+      v-model="showMobileSecondaryActionSheet"
+      title="客户更多操作"
+      :subtitle="detail?.name || ''"
+      :items="mobileSecondaryActionItems"
+      @select="handleMobileSecondaryActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="10">
     <section class="customer-topbar">
       <el-button :icon="ArrowLeft" size="small" @click="goBack">{{ backTarget.label }}</el-button>
       <div class="customer-topbar-actions">
@@ -865,6 +1033,222 @@ onMounted(fetchDetail);
 </template>
 
 <style scoped>
+.customer-detail-mobile-page {
+  gap: 12px;
+}
+
+.customer-detail-mobile-hero,
+.customer-detail-mobile-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-detail-mobile-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-title,
+.customer-detail-mobile-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.customer-detail-mobile-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-primary-actions,
+.customer-detail-mobile-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customer-detail-mobile-primary-actions {
+  justify-content: flex-end;
+}
+
+.customer-detail-mobile-secondary-actions {
+  margin-top: 12px;
+}
+
+.customer-detail-mobile-focus-strip {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(77, 128, 150, 0.18);
+  background:
+    linear-gradient(135deg, rgba(77, 128, 150, 0.14), rgba(255, 255, 255, 0.96)),
+    var(--app-bg-soft);
+}
+
+.customer-detail-mobile-focus-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.customer-detail-mobile-focus-main span,
+.customer-detail-mobile-signal span,
+.customer-detail-mobile-row span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-focus-main strong {
+  font-size: 28px;
+  line-height: 0.95;
+  color: var(--app-text-primary);
+}
+
+.customer-detail-mobile-focus-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.customer-detail-mobile-signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.customer-detail-mobile-signal strong,
+.customer-detail-mobile-row strong {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--app-text-primary);
+}
+
+.customer-detail-mobile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.customer-detail-mobile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.customer-detail-mobile-row.multiline strong {
+  line-height: 1.6;
+}
+
+.customer-detail-mobile-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.customer-detail-mobile-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.customer-detail-mobile-entry {
+  border-top: 1px solid var(--app-border-soft);
+  padding-top: 12px;
+}
+
+.customer-detail-mobile-entry:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.customer-detail-mobile-entry-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customer-detail-mobile-entry-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.customer-detail-mobile-entry-head strong {
+  font-size: 14px;
+  color: var(--app-text-primary);
+}
+
+.customer-detail-mobile-entry-copy,
+.customer-detail-mobile-entry-meta {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-entry-body {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--app-text-secondary);
+}
+
+.customer-detail-mobile-entry-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+@media (max-width: 768px) {
+  .customer-detail-mobile-hero {
+    flex-direction: column;
+  }
+
+  .customer-detail-mobile-primary-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .customer-detail-mobile-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .customer-detail-mobile-signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-detail-mobile-entry-head {
+    flex-direction: column;
+  }
+
+  .customer-detail-mobile-entry-side {
+    width: 100%;
+    align-items: flex-start;
+  }
+}
+
 .customer-topbar {
   display: flex;
   align-items: center;
@@ -1036,7 +1420,7 @@ onMounted(fetchDetail);
   color: #6b7280;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .head {
     flex-direction: column;
     align-items: flex-start;

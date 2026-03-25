@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ArrowLeft } from "@element-plus/icons-vue";
+import { ArrowLeft, MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import type { LeadItem } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
 import { buildNextReminderDate, getDefaultReminderValueForGrade, leadGradeOptions, leadReminderOptions } from "./lead/viewMeta";
@@ -31,12 +33,14 @@ const followupLoading = ref(false);
 const lead = ref<LeadItem | null>(null);
 const followups = ref<FollowupItem[]>([]);
 const showFollowupDialog = ref(false);
+const showMobileSecondaryActionSheet = ref(false);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 const backTarget = computed(() => {
   const from = String(route.query.from || "");
   if (from === "customers") {
     return {
       label: "返回客户列表",
-      to: "/customers",
+      to: isMobileWorkflow.value ? "/m/customers" : "/customers",
     };
   }
   if (from.startsWith("customer:")) {
@@ -44,15 +48,93 @@ const backTarget = computed(() => {
     if (customerId) {
       return {
         label: "返回客户档案",
-        to: `/customers/${customerId}`,
+        to: `${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${customerId}`,
       };
     }
   }
   return {
     label: "返回客户开发",
-    to: "/leads",
+    to: isMobileWorkflow.value ? "/m/leads" : "/leads",
   };
 });
+
+const leadAreaLabel = computed(() => (lead.value?.template_type === "FOLLOWUP" ? "国家" : "地区"));
+const leadAreaValue = computed(() => {
+  if (!lead.value) return "-";
+  return lead.value.template_type === "FOLLOWUP" ? (lead.value.country || "-") : (lead.value.region || "-");
+});
+const leadStartLabel = computed(() => (lead.value?.template_type === "FOLLOWUP" ? "服务开始" : "联络开始"));
+const leadStartValue = computed(() => {
+  if (!lead.value) return "-";
+  return lead.value.template_type === "FOLLOWUP"
+    ? (lead.value.service_start_text || "-")
+    : (lead.value.contact_start_date || "-");
+});
+const leadContactLine = computed(() => {
+  if (!lead.value) return "-";
+  if (lead.value.template_type === "FOLLOWUP") {
+    return [lead.value.contact_name, lead.value.contact_wechat].filter(Boolean).join(" / ") || "-";
+  }
+  return lead.value.contact_wechat
+    ? `${lead.value.contact_name} / ${lead.value.contact_wechat}`
+    : (lead.value.contact_name || "-");
+});
+const leadHeroCopy = computed(() => {
+  if (!lead.value) return "线索摘要、提醒和跟进记录都在同一页内查看。";
+  return `${statusLabel(lead.value.status)} · ${leadContactLine.value}`;
+});
+const leadFocusMeta = computed(() => {
+  if (!lead.value) return [];
+  return [
+    lead.value.phone ? `电话 ${lead.value.phone}` : "电话 -",
+    lead.value.next_reminder_at ? `提醒 ${lead.value.next_reminder_at}` : `提醒值 ${lead.value.reminder_value || "-"}`,
+  ];
+});
+const leadSignalFacts = computed(() => {
+  if (!lead.value) return [];
+  return [
+    { label: "等级", value: lead.value.grade || "-" },
+    { label: leadAreaLabel.value, value: leadAreaValue.value },
+    { label: leadStartLabel.value, value: leadStartValue.value },
+    { label: "提醒值", value: lead.value.reminder_value || "-" },
+  ];
+});
+const leadSummaryRows = computed(() => {
+  if (!lead.value) return [];
+  return [
+    { label: "联系人", value: leadContactLine.value },
+    { label: "下次提醒", value: lead.value.next_reminder_at || "-" },
+    { label: "主营", value: lead.value.main_business || "-", multiline: true },
+    { label: "介绍人", value: lead.value.intro || "-" },
+    { label: "备注", value: lead.value.notes || "-", multiline: true },
+  ];
+});
+const mobileSecondaryActionItems = computed(() =>
+  [
+    lead.value?.customer_id
+      ? {
+          key: "customer",
+          label: "客户档案",
+          description: "跳转到这条线索已转化的客户档案。",
+        }
+      : null,
+    lead.value?.phone
+      ? {
+          key: "copy-phone",
+          label: "复制电话",
+          description: "把联系电话复制到剪贴板。",
+        }
+      : null,
+    lead.value?.contact_wechat
+      ? {
+          key: "copy-wechat",
+          label: "复制微信",
+          description: "把微信号复制到剪贴板。",
+        }
+      : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; description: string }>,
+);
+const hasMobileSecondaryActions = computed(() => mobileSecondaryActionItems.value.length > 0);
 
 const followupForm = reactive({
   followup_at: todayInBrowserTimeZone(),
@@ -132,6 +214,60 @@ function backToLeads() {
   router.push(backTarget.value.to);
 }
 
+function openCustomerArchive() {
+  if (!lead.value?.customer_id) return;
+  router.push({
+    path: `${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${lead.value.customer_id}`,
+    query: { from: "leads" },
+  });
+}
+
+async function copyText(label: string, value: string | null | undefined) {
+  const text = (value || "").trim();
+  if (!text) {
+    ElMessage.warning(`当前没有${label}`);
+    return;
+  }
+
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else if (typeof document !== "undefined") {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = (document as Document & { execCommand?: (command: string) => boolean }).execCommand?.("copy");
+      document.body.removeChild(textarea);
+      if (!copied) {
+        throw new Error("copy failed");
+      }
+    } else {
+      throw new Error("clipboard unavailable");
+    }
+    ElMessage.success(`${label}已复制`);
+  } catch (error) {
+    ElMessage.error(`复制${label}失败`);
+  }
+}
+
+async function handleMobileSecondaryActionSelect(action: string) {
+  if (action === "customer") {
+    openCustomerArchive();
+    return;
+  }
+  if (action === "copy-phone") {
+    await copyText("电话", lead.value?.phone);
+    return;
+  }
+  if (action === "copy-wechat") {
+    await copyText("微信", lead.value?.contact_wechat);
+  }
+}
+
 function syncReminderFromGrade() {
   const reminderValue = getDefaultReminderValueForGrade(followupForm.grade);
   if (reminderValue) {
@@ -164,7 +300,92 @@ onMounted(fetchLeadDetail);
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page lead-detail-mobile-page">
+      <section class="mobile-shell-panel">
+        <div class="lead-detail-mobile-hero">
+          <div>
+            <div class="lead-detail-mobile-eyebrow">{{ lead ? templateLabel(lead.template_type) : "开发详情" }}</div>
+            <div class="lead-detail-mobile-title">{{ lead?.name || "开发详情" }}</div>
+            <div class="lead-detail-mobile-copy">{{ leadHeroCopy }}</div>
+          </div>
+          <div class="lead-detail-mobile-hero-actions">
+            <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增开发跟进</el-button>
+            <el-button v-if="hasMobileSecondaryActions" plain @click="showMobileSecondaryActionSheet = true">
+              更多操作
+              <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+            </el-button>
+          </div>
+        </div>
+        <div v-if="lead" class="lead-detail-mobile-focus-strip">
+          <div class="lead-detail-mobile-focus-main">
+            <span>当前状态</span>
+            <strong>{{ statusLabel(lead.status) }}</strong>
+          </div>
+          <div class="lead-detail-mobile-focus-meta">
+            <span v-for="item in leadFocusMeta" :key="item">{{ item }}</span>
+          </div>
+        </div>
+        <div v-if="lead" class="lead-detail-mobile-signal-grid">
+          <article v-for="item in leadSignalFacts" :key="item.label" class="lead-detail-mobile-signal">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel" v-loading="loading">
+        <div class="lead-detail-mobile-section-title">线索信息</div>
+        <el-empty v-if="!lead" description="未找到线索" />
+        <template v-else>
+          <div class="lead-detail-mobile-stack">
+            <div
+              v-for="item in leadSummaryRows"
+              :key="item.label"
+              class="lead-detail-mobile-row"
+              :class="{ multiline: item.multiline }"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+        </template>
+      </section>
+
+      <section class="mobile-shell-panel">
+        <div class="lead-detail-mobile-section-head">
+          <div class="lead-detail-mobile-section-title">开发跟进记录</div>
+          <el-tag size="small" type="success" effect="plain">{{ followups.length }} 条</el-tag>
+        </div>
+        <div v-if="!followups.length" class="mobile-empty-block">还没有开发跟进记录</div>
+        <div v-else class="lead-detail-mobile-timeline">
+          <article v-for="item in followups" :key="item.id" class="lead-detail-mobile-entry">
+            <div class="lead-detail-mobile-entry-head">
+              <div>
+                <strong>{{ item.followup_at }}</strong>
+                <div class="lead-detail-mobile-entry-copy">记录人 {{ item.created_by_username || "-" }}</div>
+              </div>
+              <el-tag size="small" effect="plain" :type="item.next_reminder_at ? 'warning' : 'info'">
+                {{ item.next_reminder_at || "无提醒" }}
+              </el-tag>
+            </div>
+            <div class="lead-detail-mobile-entry-body">{{ item.feedback || "-" }}</div>
+            <div v-if="item.notes" class="lead-detail-mobile-entry-meta">备注 {{ item.notes }}</div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileActionSheet
+      v-model="showMobileSecondaryActionSheet"
+      title="线索更多操作"
+      :subtitle="lead?.name || ''"
+      :items="mobileSecondaryActionItems"
+      @select="handleMobileSecondaryActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <el-card shadow="never">
       <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="backToLeads">{{ backTarget.label }}</el-button>
@@ -381,6 +602,179 @@ onMounted(fetchLeadDetail);
 </template>
 
 <style scoped>
+.lead-detail-mobile-page {
+  gap: 12px;
+}
+
+.lead-detail-mobile-hero,
+.lead-detail-mobile-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lead-detail-mobile-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.lead-detail-mobile-title,
+.lead-detail-mobile-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.lead-detail-mobile-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.lead-detail-mobile-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lead-detail-mobile-focus-strip {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(77, 128, 150, 0.18);
+  background:
+    linear-gradient(135deg, rgba(77, 128, 150, 0.14), rgba(255, 255, 255, 0.96)),
+    var(--app-bg-soft);
+}
+
+.lead-detail-mobile-focus-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lead-detail-mobile-focus-main span,
+.lead-detail-mobile-signal span,
+.lead-detail-mobile-row span {
+  font-size: 11px;
+  color: var(--app-text-muted);
+}
+
+.lead-detail-mobile-focus-main strong {
+  font-size: 28px;
+  line-height: 0.95;
+  color: var(--app-text-primary);
+}
+
+.lead-detail-mobile-focus-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.lead-detail-mobile-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lead-detail-mobile-signal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.lead-detail-mobile-signal strong,
+.lead-detail-mobile-row strong {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--app-text-primary);
+}
+
+.lead-detail-mobile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.lead-detail-mobile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.lead-detail-mobile-row.multiline strong {
+  line-height: 1.6;
+}
+
+.lead-detail-mobile-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.lead-detail-mobile-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.lead-detail-mobile-entry {
+  border-top: 1px solid var(--app-border-soft);
+  padding-top: 12px;
+}
+
+.lead-detail-mobile-entry:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.lead-detail-mobile-entry-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lead-detail-mobile-entry-head strong {
+  font-size: 14px;
+  color: var(--app-text-primary);
+}
+
+.lead-detail-mobile-entry-head span,
+.lead-detail-mobile-entry-copy,
+.lead-detail-mobile-entry-meta {
+  font-size: 12px;
+  color: var(--app-text-muted);
+}
+
+.lead-detail-mobile-entry-body {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--app-text-secondary);
+}
+
+.lead-detail-mobile-entry-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
 .head {
   display: flex;
   justify-content: space-between;
@@ -388,7 +782,20 @@ onMounted(fetchLeadDetail);
   gap: 12px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
+  .lead-detail-mobile-hero {
+    flex-direction: column;
+  }
+
+  .lead-detail-mobile-hero-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .lead-detail-mobile-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .head {
     flex-direction: column;
     align-items: flex-start;
@@ -427,6 +834,12 @@ onMounted(fetchLeadDetail);
     line-height: 1.6;
     color: #111827;
     word-break: break-word;
+  }
+}
+
+@media (max-width: 420px) {
+  .lead-detail-mobile-signal-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

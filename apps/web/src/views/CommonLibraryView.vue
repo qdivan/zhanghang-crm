@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { Delete, Edit, Plus } from "@element-plus/icons-vue";
+import { Delete, Edit, Filter, MoreFilled, Plus } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
+import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
+import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
 import { useResponsive } from "../composables/useResponsive";
+import { isMobileAppPath } from "../mobile/config";
 import type { CommonLibraryItem, CommonLibraryModuleType, CommonLibraryVisibility } from "../types";
 
 type LibraryForm = {
@@ -33,17 +37,22 @@ type ModuleMeta = {
 };
 
 const { isMobile } = useResponsive();
+const route = useRoute();
 const loading = ref(false);
 const rows = ref<CommonLibraryItem[]>([]);
 const keyword = ref("");
 const activeTab = ref<CommonLibraryModuleType>("TEMPLATE");
 const visibilityFilter = ref<LibraryVisibilityFilter>("ALL");
 const showDialog = ref(false);
+const showMobileFilters = ref(false);
+const showLibraryActionSheet = ref(false);
+const selectedLibraryRow = ref<CommonLibraryItem | null>(null);
+const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   TEMPLATE: {
     label: "常用模板",
-    helper: "保存可以直接复制给客户的资料、话术和通知模板。",
+    helper: "沉淀可直接发给客户的模板和话术。",
     categoryLabel: "模板分类",
     titleLabel: "模板标题",
     contentLabel: "模板内容",
@@ -53,7 +62,7 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   },
   DIRECTORY: {
     label: "通讯录模板",
-    helper: "整理税局、审批局、人社局、银行等常用联系方式。",
+    helper: "沉淀税局、银行等常用联系人。",
     categoryLabel: "机构分类",
     titleLabel: "单位/联系人",
     contentLabel: "补充说明",
@@ -63,7 +72,7 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   },
   EXTENSION_A: {
     label: "扩展模块1",
-    helper: "预留给后续新增的常用语、资料清单或标准说明。",
+    helper: "预留模块，可先放常用语或资料清单。",
     categoryLabel: "分类",
     titleLabel: "标题",
     contentLabel: "内容",
@@ -73,7 +82,7 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   },
   EXTENSION_B: {
     label: "扩展模块2",
-    helper: "预留给后续扩展用途，当前可先作为常用语库使用。",
+    helper: "预留模块，可先放说明和常用语。",
     categoryLabel: "分类",
     titleLabel: "标题",
     contentLabel: "内容",
@@ -83,7 +92,7 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   },
   EXTENSION_C: {
     label: "扩展模块3",
-    helper: "预留模块，后续可以改成新的资料板块。",
+    helper: "预留模块，后续按需改造。",
     categoryLabel: "分类",
     titleLabel: "标题",
     contentLabel: "内容",
@@ -95,6 +104,22 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
 
 const activeMeta = computed(() => moduleMetaMap[activeTab.value]);
 const dialogTitle = computed(() => (form.id ? `编辑${activeMeta.value.label}` : `新增${activeMeta.value.label}`));
+const libraryFilterChips = computed(() =>
+  [
+    keyword.value ? { key: "keyword" as const, label: `关键词：${keyword.value}` } : null,
+    visibilityFilter.value !== "ALL"
+      ? { key: "visibility" as const, label: visibilityLabel(visibilityFilter.value as CommonLibraryVisibility) }
+      : null,
+  ].filter(Boolean) as Array<{ key: "keyword" | "visibility"; label: string }>,
+);
+const activeFilterChips = computed(() => libraryFilterChips.value.map((item) => item.label));
+const libraryRowActionItems = computed(() => {
+  if (!selectedLibraryRow.value) return [];
+  return [
+    { key: "edit", label: "编辑资料", description: "修改标题、内容和资料范围。" },
+    { key: "delete", label: "删除资料", description: "删除当前资料条目。", danger: true },
+  ];
+});
 
 const form = reactive<LibraryForm>({
   id: null,
@@ -156,6 +181,11 @@ function openEditDialog(row: CommonLibraryItem) {
   showDialog.value = true;
 }
 
+function openLibraryRowActions(row: CommonLibraryItem) {
+  selectedLibraryRow.value = row;
+  showLibraryActionSheet.value = true;
+}
+
 async function submitForm() {
   const payload = {
     module_type: form.module_type,
@@ -202,6 +232,17 @@ async function removeItem(row: CommonLibraryItem) {
   }
 }
 
+async function handleLibraryActionSelect(action: string) {
+  if (!selectedLibraryRow.value) return;
+  if (action === "edit") {
+    openEditDialog(selectedLibraryRow.value);
+    return;
+  }
+  if (action === "delete") {
+    await removeItem(selectedLibraryRow.value);
+  }
+}
+
 function primaryContent(row: CommonLibraryItem) {
   if (row.module_type === "DIRECTORY") {
     return [row.phone, row.address].filter(Boolean).join(" / ") || row.content || "-";
@@ -224,8 +265,26 @@ watch(activeTab, () => {
 });
 
 watch(visibilityFilter, () => {
+  if (isMobileWorkflow.value) return;
   fetchItems();
 });
+
+function applyMobileFilters() {
+  showMobileFilters.value = false;
+  fetchItems();
+}
+
+function resetMobileFilters() {
+  keyword.value = "";
+  visibilityFilter.value = "ALL";
+  applyMobileFilters();
+}
+
+function removeLibraryFilterChip(key: "keyword" | "visibility") {
+  if (key === "keyword") keyword.value = "";
+  if (key === "visibility") visibilityFilter.value = "ALL";
+  fetchItems();
+}
 
 onMounted(() => {
   resetForm();
@@ -234,7 +293,118 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-space direction="vertical" fill :size="12">
+  <template v-if="isMobileWorkflow">
+    <section class="mobile-page mobile-library-page">
+      <section class="mobile-shell-panel">
+        <div class="mobile-filter-presets mobile-library-tabs">
+          <button
+            v-for="(meta, key) in moduleMetaMap"
+            :key="key"
+            type="button"
+            class="mobile-filter-preset"
+            :class="{ active: activeTab === key }"
+            @click="activeTab = key as CommonLibraryModuleType"
+          >
+            <span>{{ meta.label }}</span>
+            <strong>{{ key === activeTab ? rows.length : "" }}</strong>
+          </button>
+        </div>
+        <div class="mobile-library-helper">{{ activeMeta.helper }}</div>
+        <div class="mobile-library-toolbar">
+          <el-input
+            v-model="keyword"
+            clearable
+            placeholder="分类 / 标题 / 电话 / 地址"
+            @keyup.enter="fetchItems"
+          />
+          <div class="mobile-library-toolbar-actions">
+            <el-button plain :icon="Filter" @click="showMobileFilters = true">筛选</el-button>
+            <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增</el-button>
+          </div>
+        </div>
+        <div v-if="activeFilterChips.length" class="mobile-chip-row mobile-library-chip-row">
+          <button
+            v-for="chip in libraryFilterChips"
+            :key="chip.key"
+            type="button"
+            class="mobile-chip-button"
+            @click="removeLibraryFilterChip(chip.key)"
+          >
+            <span>{{ chip.label }}</span>
+            <span class="mobile-chip-close">移除</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="mobile-shell-panel">
+        <div class="mobile-library-section-head">
+          <div>
+            <div class="mobile-library-section-title">{{ activeMeta.label }}</div>
+            <div class="mobile-library-section-copy">先筛范围，再处理资料。</div>
+          </div>
+          <el-tag type="info" effect="plain">{{ rows.length }} 条</el-tag>
+        </div>
+
+        <div v-loading="loading" class="mobile-library-list">
+          <div v-if="!rows.length" class="mobile-empty-block">当前没有匹配资料</div>
+          <article v-for="row in rows" :key="row.id" class="mobile-library-row">
+            <div class="mobile-library-row-top">
+              <div>
+                <div class="mobile-library-row-title">{{ row.title || row.category || activeMeta.label }}</div>
+                <div class="mobile-library-row-subtitle">{{ row.category || "未分类" }} · {{ visibilityLabel(row.visibility) }}</div>
+              </div>
+              <el-button size="small" plain @click="openLibraryRowActions(row)">
+                更多
+                <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+              </el-button>
+            </div>
+            <div class="mobile-library-row-body">{{ primaryContent(row) }}</div>
+            <div v-if="row.notes" class="mobile-library-row-note">备注 {{ row.notes }}</div>
+          </article>
+        </div>
+      </section>
+    </section>
+
+    <MobileFilterSheet
+      v-model="showMobileFilters"
+      title="筛选资料"
+      subtitle="先缩小范围，再看列表。"
+      :summary-items="activeFilterChips"
+      empty-summary="当前未设置筛选条件"
+    >
+      <el-form label-position="top" class="mobile-library-filter-form">
+        <el-form-item label="关键词">
+          <el-input
+            v-model="keyword"
+            clearable
+            placeholder="分类 / 标题 / 内容 / 电话 / 地址"
+            @keyup.enter="applyMobileFilters"
+          />
+        </el-form-item>
+        <el-form-item label="资料范围">
+          <el-radio-group v-model="visibilityFilter" class="mobile-library-radio-group">
+            <el-radio-button label="ALL">全部</el-radio-button>
+            <el-radio-button label="INTERNAL">内部资料</el-radio-button>
+            <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resetMobileFilters">重置</el-button>
+        <el-button type="primary" @click="applyMobileFilters">应用筛选</el-button>
+      </template>
+    </MobileFilterSheet>
+
+    <MobileActionSheet
+      v-model="showLibraryActionSheet"
+      title="资料操作"
+      :subtitle="selectedLibraryRow?.title || selectedLibraryRow?.category || ''"
+      :items="libraryRowActionItems"
+      @select="handleLibraryActionSelect"
+    />
+  </template>
+
+  <el-space v-else direction="vertical" fill :size="12">
     <el-card shadow="never">
       <template #header>
         <div class="page-head">
@@ -327,8 +497,75 @@ onMounted(() => {
     </el-card>
   </el-space>
 
-  <el-dialog v-model="showDialog" :title="dialogTitle" :width="isMobile ? '94%' : '760px'">
-    <el-form label-position="top">
+  <el-dialog
+    v-model="showDialog"
+    :title="isMobileWorkflow ? '' : dialogTitle"
+    :width="isMobile ? '94%' : '760px'"
+    :fullscreen="isMobileWorkflow"
+    :show-close="!isMobileWorkflow"
+    :class="{ 'mobile-library-dialog': isMobileWorkflow }"
+  >
+    <template v-if="isMobileWorkflow">
+      <div class="mobile-form-dialog">
+        <div class="mobile-form-dialog-head">
+          <div>
+            <div class="mobile-form-dialog-eyebrow">{{ activeMeta.label }}</div>
+            <div class="mobile-form-dialog-title">{{ form.id ? "编辑资料" : "新增资料" }}</div>
+            <div class="mobile-form-dialog-copy">{{ activeMeta.helper }}</div>
+          </div>
+          <el-button text @click="showDialog = false">关闭</el-button>
+        </div>
+
+        <el-form label-position="top" class="mobile-form-dialog-form">
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">资料范围</div>
+            <div class="mobile-form-section-copy">先确认是否允许公开，再填内容。</div>
+            <el-form-item label="资料范围">
+              <el-radio-group v-model="form.visibility" class="mobile-form-radio-group">
+                <el-radio-button label="INTERNAL">内部资料</el-radio-button>
+                <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+          </section>
+
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">基础信息</div>
+            <el-form-item :label="activeMeta.categoryLabel">
+              <el-input v-model="form.category" />
+            </el-form-item>
+            <el-form-item :label="activeMeta.titleLabel">
+              <el-input v-model="form.title" />
+            </el-form-item>
+          </section>
+
+          <section v-if="activeMeta.showPhone || activeMeta.showAddress" class="mobile-form-section">
+            <div class="mobile-form-section-title">联系方式</div>
+            <el-form-item v-if="activeMeta.showPhone" label="电话">
+              <el-input v-model="form.phone" />
+            </el-form-item>
+            <el-form-item v-if="activeMeta.showAddress" label="地址">
+              <el-input v-model="form.address" />
+            </el-form-item>
+          </section>
+
+          <section v-if="activeMeta.showContent" class="mobile-form-section">
+            <div class="mobile-form-section-title">{{ activeMeta.contentLabel }}</div>
+            <el-form-item :label="activeMeta.contentLabel">
+              <el-input v-model="form.content" type="textarea" :rows="8" />
+            </el-form-item>
+          </section>
+
+          <section class="mobile-form-section">
+            <div class="mobile-form-section-title">补充说明</div>
+            <el-form-item label="备注">
+              <el-input v-model="form.notes" type="textarea" :rows="5" />
+            </el-form-item>
+          </section>
+        </el-form>
+      </div>
+    </template>
+
+    <el-form v-else label-position="top">
       <el-row :gutter="12">
         <el-col :xs="24" :sm="12">
           <el-form-item label="资料范围">
@@ -375,8 +612,10 @@ onMounted(() => {
       </el-form-item>
     </el-form>
     <template #footer>
-      <el-button @click="showDialog = false">取消</el-button>
-      <el-button type="primary" @click="submitForm">保存</el-button>
+      <div class="mobile-form-dialog-footer" :class="{ mobile: isMobileWorkflow }">
+        <el-button @click="showDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitForm">保存</el-button>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -409,10 +648,187 @@ onMounted(() => {
   gap: 8px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .filter-form {
     display: flex;
     flex-wrap: wrap;
   }
+}
+
+.mobile-library-page {
+  gap: 12px;
+}
+
+.mobile-library-tabs {
+  margin-bottom: 10px;
+}
+
+.mobile-library-helper,
+.mobile-library-section-copy,
+.mobile-library-row-subtitle,
+.mobile-library-row-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.mobile-library-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-library-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mobile-library-toolbar-actions :deep(.el-button) {
+  flex: 1;
+}
+
+.mobile-library-chip-row {
+  margin-top: 10px;
+}
+
+.mobile-library-section-head,
+.mobile-library-row-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-library-section-title,
+.mobile-library-row-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-library-row {
+  padding: 12px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-bg-soft);
+}
+
+.mobile-library-row-body {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--app-text-primary);
+}
+
+.mobile-library-row-note {
+  margin-top: 8px;
+}
+
+.mobile-library-filter-form :deep(.el-form-item) {
+  margin-bottom: 16px;
+}
+
+.mobile-library-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+:deep(.mobile-library-dialog .el-dialog__header) {
+  display: none;
+}
+
+:deep(.mobile-library-dialog .el-dialog__body) {
+  padding: 0;
+}
+
+:deep(.mobile-library-dialog .el-dialog__footer) {
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.mobile-form-dialog {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 78px);
+  background:
+    radial-gradient(circle at top right, rgba(77, 128, 150, 0.12), transparent 34%),
+    var(--app-bg);
+}
+
+.mobile-form-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: max(18px, env(safe-area-inset-top)) 16px 14px;
+  border-bottom: 1px solid var(--app-border-soft);
+  background: rgba(250, 252, 252, 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.mobile-form-dialog-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.mobile-form-dialog-title {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-form-dialog-copy,
+.mobile-form-section-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.mobile-form-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 24px;
+}
+
+.mobile-form-section {
+  padding: 14px;
+  border: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--app-shadow-soft);
+}
+
+.mobile-form-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.mobile-form-section :deep(.el-form-item:last-child) {
+  margin-bottom: 0;
+}
+
+.mobile-form-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.mobile-form-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.mobile-form-dialog-footer.mobile :deep(.el-button) {
+  flex: 1;
 }
 </style>

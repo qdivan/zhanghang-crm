@@ -230,7 +230,7 @@ const summaryCards = computed(() => [
   gap: 6px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .summary-stat {
     padding: 10px 12px;
   }

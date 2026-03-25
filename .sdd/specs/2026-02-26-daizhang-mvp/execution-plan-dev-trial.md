@@ -69,5 +69,5 @@
 ## 当前状态
 - Dev 真实试运行计划：`IN_PROGRESS`
 - 当前阻塞项：`无`
-- 最新进展：`2026-03-25 已完成 Day 0 基线 smoke、Day 1 桌面端托管巡检（manager/admin）、Day 1 移动端托管巡检（boss/accountant），并生成人工试运行数据基线快照。`
-- 下一步：`进入真实人工试运行，并持续把问题记入反馈日志；如出现 P0/P1，立即冻结新增需求先修缺陷。老板/会计每日执行清单见 output/test-reports/dev-trial-daily-checklist.md。`
+- 最新进展：`2026-03-25 已完成 Day 0 基线 smoke、Day 1 桌面端托管巡检（manager/admin）、Day 1 移动端托管巡检（boss/accountant）、人工试运行数据基线快照、安全性/性能专项测试，以及 Day 2 托管巡检（health + 快照刷新 + boss/accountant/manager/admin 登录 smoke）。`
+- 下一步：`进入真实人工试运行，并持续把问题记入反馈日志；如出现 P0/P1，立即冻结新增需求先修缺陷。老板/会计每日执行清单见 output/test-reports/dev-trial-daily-checklist.md，交接说明见 output/test-reports/dev-trial-handoff-2026-03-25.md。`

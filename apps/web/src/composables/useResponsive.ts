@@ -1,13 +1,13 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 
-const MOBILE_BREAKPOINT_QUERY = "(max-width: 900px)";
+import { HANDSET_MEDIA_QUERY } from "../mobile/config";
 
 export function useResponsive() {
   const isMobile = ref(false);
 
   function syncViewport() {
     if (typeof window === "undefined") return;
-    isMobile.value = window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches;
+    isMobile.value = window.matchMedia(HANDSET_MEDIA_QUERY).matches;
   }
 
   onMounted(() => {

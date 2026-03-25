@@ -272,7 +272,7 @@ const userTagText = computed(() => {
   overflow-x: visible;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .topbar {
     padding: 8px;
     align-items: flex-start;

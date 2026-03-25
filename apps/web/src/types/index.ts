@@ -309,6 +309,7 @@ export interface CommonLibraryItem {
 export interface TokenResponse {
   access_token: string;
   token_type: "bearer";
+  user?: UserInfo;
 }
 
 export interface BillingRecord {
