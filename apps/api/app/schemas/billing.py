@@ -287,9 +287,11 @@ class BillingLedgerOut(BaseModel):
     customer_name: str
     date_from: Optional[date]
     date_to: Optional[date]
+    opening_balance: float
     receivable_total: float
     received_total: float
     balance: float
+    closing_balance: float
     monthly_summaries: list[BillingLedgerMonthlySummaryOut]
     entries: list[BillingLedgerEntryOut]
 
@@ -306,8 +308,9 @@ class BillingReceiptAccountEntryOut(BaseModel):
     receipt_account: str
     customer_name: str
     summary: str
-    received_amount: float
-    cumulative_received: float
+    debit_amount: float
+    credit_amount: float
+    balance: float
     actor_username: str
     payment_id: Optional[int] = None
     billing_record_id: Optional[int] = None
@@ -317,7 +320,35 @@ class BillingReceiptAccountLedgerOut(BaseModel):
     receipt_account: Optional[str]
     date_from: Optional[date]
     date_to: Optional[date]
+    opening_debit: float
+    opening_credit: float
+    opening_balance: float
     total_received: float
     payment_count: int
     account_summaries: list[BillingReceiptAccountSummaryOut]
     entries: list[BillingReceiptAccountEntryOut]
+
+
+class BillingCustomerSummaryOut(BaseModel):
+    customer_id: int
+    customer_name: str
+    customer_contact_name: str
+    opening_arrears: float
+    period_receivable: float
+    period_received: float
+    ending_outstanding: float
+    overdue_count: int
+    latest_activity_at: Optional[date]
+    latest_activity_content: str
+
+
+class BillingSummaryOut(BaseModel):
+    total_records: int
+    total_fee: float
+    total_monthly_fee: float
+    payment_method_distribution: list[dict[str, object]]
+    status_distribution: list[dict[str, object]]
+    receipt_account_distribution: list[dict[str, object]]
+    summary_date_from: Optional[date]
+    summary_date_to: Optional[date]
+    customer_summaries: list[BillingCustomerSummaryOut]

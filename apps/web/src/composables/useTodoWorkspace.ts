@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import { mapPathForCurrentViewport } from "../mobile/config";
+import { useAuthStore } from "../stores/auth";
 import type { SystemTodoItem, TodoCreatePayload, TodoItem } from "../types";
 
 export function priorityLabel(priority: string): string {
@@ -24,6 +25,7 @@ export function formatTodoDate(dateText: string | null | undefined): string {
 
 export function useTodoWorkspace() {
   const router = useRouter();
+  const auth = useAuthStore();
 
   const activeTab = ref<"today" | "all" | "system">("today");
   const loading = ref(false);
@@ -54,6 +56,7 @@ export function useTodoWorkspace() {
   });
   const openManualCount = computed(() => manualCounts.value.open);
   const doneManualCount = computed(() => manualCounts.value.done);
+  const canDeleteTodos = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 
   async function fetchAllTodos() {
     const resp = await apiClient.get<TodoItem[]>("/todos", {
@@ -171,58 +174,44 @@ export function useTodoWorkspace() {
   }
 
   async function clearCompletedTodos() {
+    if (!canDeleteTodos.value) {
+      ElMessage.warning("只有老板和管理员可以删除待办");
+      return;
+    }
     const doneRows = allRows.value.filter((item) => item.status === "DONE");
     if (!doneRows.length) {
       ElMessage.warning("当前没有已完成待办");
       return;
     }
-
-    try {
-      await ElMessageBox.confirm(`确认清理 ${doneRows.length} 条已完成待办吗？`, "清理已完成", {
-        type: "warning",
-        confirmButtonText: "确认清理",
-        cancelButtonText: "取消",
-      });
-    } catch {
-      return;
-    }
-
-    bulkActionLoading.value = "clear_done";
-    try {
-      const results = await Promise.allSettled(doneRows.map((row) => apiClient.delete(`/todos/${row.id}`)));
-      const successCount = results.filter((item) => item.status === "fulfilled").length;
-      const failedCount = doneRows.length - successCount;
-      await refreshAll();
-      if (failedCount === 0) {
-        ElMessage.success(`已清理 ${successCount} 条已完成待办`);
-        return;
-      }
-      if (successCount > 0) {
-        ElMessage.warning(`已清理 ${successCount} 条，另有 ${failedCount} 条失败`);
-        return;
-      }
-      ElMessage.error("清理已完成待办失败");
-    } catch (error) {
-      ElMessage.error("清理已完成待办失败");
-    } finally {
-      bulkActionLoading.value = null;
-    }
+    ElMessage.info("已完成待办请逐条删除。删除时需要输入待办名称确认。");
   }
 
   async function removeTodo(row: TodoItem) {
+    if (!canDeleteTodos.value) {
+      ElMessage.warning("只有老板和管理员可以删除待办");
+      return;
+    }
+    const expectedName = (row.title || "").trim() || `待办#${row.id}`;
     try {
-      await ElMessageBox.confirm(`确认删除待办“${row.title}”吗？`, "删除待办", {
+      const result = (await ElMessageBox.prompt(`请输入“${expectedName}”确认删除这条待办。`, "删除待办", {
         type: "warning",
         confirmButtonText: "删除",
         cancelButtonText: "取消",
-      });
+        inputPlaceholder: expectedName,
+      })) as { value: string };
+      if ((result.value || "").trim() !== expectedName) {
+        ElMessage.warning("输入名称不一致，已取消删除");
+        return;
+      }
     } catch {
       return;
     }
 
     actionLoadingTodoId.value = row.id;
     try {
-      await apiClient.delete(`/todos/${row.id}`);
+      await apiClient.delete(`/todos/${row.id}`, {
+        params: { confirm_name: expectedName },
+      });
       await refreshAll();
       ElMessage.success("待办已删除");
     } catch (error) {
@@ -249,6 +238,7 @@ export function useTodoWorkspace() {
     createForm,
     openManualCount,
     doneManualCount,
+    canDeleteTodos,
     refreshAll,
     createTodo,
     toggleTodoDone,

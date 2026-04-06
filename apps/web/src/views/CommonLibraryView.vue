@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Delete, Edit, Filter, MoreFilled, Plus } from "@element-plus/icons-vue";
+import { Filter, MoreFilled, Plus } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
@@ -9,6 +9,7 @@ import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
 import MobileFilterSheet from "../components/mobile/MobileFilterSheet.vue";
 import { useResponsive } from "../composables/useResponsive";
 import { isMobileAppPath } from "../mobile/config";
+import { useAuthStore } from "../stores/auth";
 import type { CommonLibraryItem, CommonLibraryModuleType, CommonLibraryVisibility } from "../types";
 
 type LibraryForm = {
@@ -36,34 +37,39 @@ type ModuleMeta = {
   showAddress: boolean;
 };
 
+const UNCATEGORIZED_CATEGORY = "__UNCATEGORIZED__";
+
 const { isMobile } = useResponsive();
 const route = useRoute();
+const auth = useAuthStore();
 const loading = ref(false);
 const libraryHydrated = ref(false);
 const rows = ref<CommonLibraryItem[]>([]);
 const keyword = ref("");
 const activeTab = ref<CommonLibraryModuleType>("TEMPLATE");
+const selectedCategory = ref("");
 const visibilityFilter = ref<LibraryVisibilityFilter>("ALL");
 const showDialog = ref(false);
 const showMobileFilters = ref(false);
 const showLibraryActionSheet = ref(false);
 const selectedLibraryRow = ref<CommonLibraryItem | null>(null);
+const desktopSelectedRowId = ref<number | null>(null);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
   TEMPLATE: {
-    label: "常用模板",
-    helper: "沉淀可直接发给客户的模板和话术。",
-    categoryLabel: "模板分类",
-    titleLabel: "模板标题",
-    contentLabel: "模板内容",
+    label: "常用资料",
+    helper: "先按分类沉淀常用话术、资料和发送给客户的固定文本。",
+    categoryLabel: "资料分类",
+    titleLabel: "资料标题",
+    contentLabel: "资料内容",
     showContent: true,
     showPhone: false,
     showAddress: false,
   },
   DIRECTORY: {
-    label: "通讯录模板",
-    helper: "沉淀税局、银行等常用联系人。",
+    label: "通讯录",
+    helper: "按机构分类维护税局、审批局、人社局、银行等常用电话。",
     categoryLabel: "机构分类",
     titleLabel: "单位/联系人",
     contentLabel: "补充说明",
@@ -104,6 +110,73 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
 };
 
 const activeMeta = computed(() => moduleMetaMap[activeTab.value]);
+const visibleModuleKeys = computed<CommonLibraryModuleType[]>(() => ["TEMPLATE", "DIRECTORY", "EXTENSION_A", "EXTENSION_B"]);
+const canDelete = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const categoryOptions = computed(() => {
+  const unique = new Set<string>();
+  rows.value.forEach((item) => {
+    const token = (item.category || "").trim();
+    if (token) unique.add(token);
+  });
+  return Array.from(unique).sort((left, right) => left.localeCompare(right, "zh-CN"));
+});
+const categoryWorkspaceOptions = computed(() => {
+  const counts = new Map<string, number>();
+  let uncategorizedCount = 0;
+  rows.value.forEach((item) => {
+    const token = (item.category || "").trim();
+    if (token) {
+      counts.set(token, (counts.get(token) || 0) + 1);
+    } else {
+      uncategorizedCount += 1;
+    }
+  });
+
+  const items = Array.from(counts.entries())
+    .sort((left, right) => left[0].localeCompare(right[0], "zh-CN"))
+    .map(([label, count]) => ({
+      key: label,
+      label,
+      count,
+    }));
+
+  if (uncategorizedCount) {
+    items.push({
+      key: UNCATEGORIZED_CATEGORY,
+      label: "未分类",
+      count: uncategorizedCount,
+    });
+  }
+
+  return [{ key: "", label: "全部分类", count: rows.value.length }, ...items];
+});
+const visibleRows = computed(() => {
+  if (!selectedCategory.value) return rows.value;
+  if (selectedCategory.value === UNCATEGORIZED_CATEGORY) {
+    return rows.value.filter((item) => !(item.category || "").trim());
+  }
+  return rows.value.filter((item) => (item.category || "").trim() === selectedCategory.value);
+});
+const selectedCategoryLabel = computed(() => {
+  if (!selectedCategory.value) return "全部分类";
+  if (selectedCategory.value === UNCATEGORIZED_CATEGORY) return "未分类";
+  return selectedCategory.value;
+});
+const selectedCategoryHelper = computed(() => {
+  if (!selectedCategory.value) {
+    return `当前展示 ${activeMeta.value.label} 的全部条目，可以先从左侧分类切进去再处理。`;
+  }
+  if (selectedCategory.value === UNCATEGORIZED_CATEGORY) {
+    return "这些条目还没归类，适合先整理分类，再让同事更快复用。";
+  }
+  return `当前只看“${selectedCategory.value}”分类，适合集中维护这一组资料。`;
+});
+const internalCount = computed(() => rows.value.filter((item) => item.visibility === "INTERNAL").length);
+const publicCount = computed(() => rows.value.filter((item) => item.visibility === "PUBLIC").length);
+const activeWorkspaceRow = computed(() => {
+  if (!visibleRows.value.length) return null;
+  return visibleRows.value.find((item) => item.id === desktopSelectedRowId.value) || visibleRows.value[0] || null;
+});
 const dialogTitle = computed(() => (form.id ? `编辑${activeMeta.value.label}` : `新增${activeMeta.value.label}`));
 const libraryFilterChips = computed(() =>
   [
@@ -116,11 +189,11 @@ const libraryFilterChips = computed(() =>
 const activeFilterChips = computed(() => libraryFilterChips.value.map((item) => item.label));
 const showLibraryInitialSkeleton = computed(() => !libraryHydrated.value);
 const libraryRowActionItems = computed(() => {
-  if (!selectedLibraryRow.value) return [];
-  return [
+  const items = [
     { key: "edit", label: "编辑资料", description: "修改标题、内容和资料范围。" },
-    { key: "delete", label: "删除资料", description: "删除当前资料条目。", danger: true },
-  ];
+    canDelete.value ? { key: "delete", label: "删除资料", description: "删除当前资料条目。", danger: true } : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; description: string; danger?: boolean }>;
+  return selectedLibraryRow.value ? items : [];
 });
 
 const form = reactive<LibraryForm>({
@@ -166,8 +239,9 @@ async function fetchItems() {
   }
 }
 
-function openCreateDialog() {
+function openCreateDialog(category?: string) {
   resetForm();
+  form.category = category ?? (selectedCategory.value === UNCATEGORIZED_CATEGORY ? "" : selectedCategory.value);
   showDialog.value = true;
 }
 
@@ -216,22 +290,38 @@ async function submitForm() {
 }
 
 async function removeItem(row: CommonLibraryItem) {
+  if (!canDelete.value) {
+    ElMessage.warning("只有老板和管理员可以删除资料");
+    return;
+  }
+  const expectedName = row.title || row.category || "该条资料";
   try {
-    await ElMessageBox.confirm(`确认删除“${row.title || row.category || "该条资料"}”？`, "删除确认", {
-      type: "warning",
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-    });
+    const result = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这条资料。`,
+      "删除确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
+      },
+    )) as { value: string };
+    if ((result.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
   } catch {
     return;
   }
 
   try {
-    await apiClient.delete(`/common-library-items/${row.id}`);
+    await apiClient.delete(`/common-library-items/${row.id}`, {
+      params: { confirm_name: expectedName },
+    });
     ElMessage.success("已删除");
     await fetchItems();
-  } catch {
-    ElMessage.error("删除失败");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || "删除失败");
   }
 }
 
@@ -253,6 +343,20 @@ function primaryContent(row: CommonLibraryItem) {
   return row.content || row.notes || "-";
 }
 
+function workspacePreviewContent(row: CommonLibraryItem) {
+  if (row.module_type === "DIRECTORY") {
+    return row.content || row.notes || "这条通讯录还没有补充说明。";
+  }
+  return row.content || row.notes || "这条资料还没有正文内容。";
+}
+
+function workspaceListHint(row: CommonLibraryItem) {
+  if (row.module_type === "DIRECTORY") {
+    return [row.phone, row.address].filter(Boolean).join(" · ") || "补充电话或地址后会显示在这里。";
+  }
+  return row.content || row.notes || "还没有填写内容。";
+}
+
 function visibilityLabel(value: CommonLibraryVisibility) {
   return value === "PUBLIC" ? "可公开到官网" : "内部资料";
 }
@@ -263,8 +367,35 @@ function visibilityTagType(value: CommonLibraryVisibility): "success" | "info" {
 
 watch(activeTab, () => {
   keyword.value = "";
+  selectedCategory.value = "";
   resetForm();
   fetchItems();
+});
+
+watch(rows, () => {
+  if (
+    selectedCategory.value &&
+    selectedCategory.value !== UNCATEGORIZED_CATEGORY &&
+    !rows.value.some((item) => (item.category || "").trim() === selectedCategory.value)
+  ) {
+    selectedCategory.value = "";
+  }
+  if (
+    selectedCategory.value === UNCATEGORIZED_CATEGORY &&
+    rows.value.every((item) => (item.category || "").trim())
+  ) {
+    selectedCategory.value = "";
+  }
+});
+
+watch(visibleRows, (items) => {
+  if (!items.length) {
+    desktopSelectedRowId.value = null;
+    return;
+  }
+  if (!items.some((item) => item.id === desktopSelectedRowId.value)) {
+    desktopSelectedRowId.value = items[0].id;
+  }
 });
 
 watch(visibilityFilter, () => {
@@ -301,15 +432,15 @@ onMounted(() => {
       <section class="mobile-shell-panel">
         <div class="mobile-filter-presets mobile-library-tabs">
           <button
-            v-for="(meta, key) in moduleMetaMap"
+            v-for="key in visibleModuleKeys"
             :key="key"
             type="button"
             class="mobile-filter-preset"
             :class="{ active: activeTab === key }"
-            @click="activeTab = key as CommonLibraryModuleType"
+            @click="activeTab = key"
           >
-            <span>{{ meta.label }}</span>
-            <strong>{{ key === activeTab ? rows.length : "" }}</strong>
+            <span>{{ moduleMetaMap[key].label }}</span>
+            <strong>{{ key === activeTab ? visibleRows.length : "" }}</strong>
           </button>
         </div>
         <div class="mobile-library-helper">{{ activeMeta.helper }}</div>
@@ -348,7 +479,7 @@ onMounted(() => {
             <div class="mobile-library-section-copy">先筛范围，再处理资料。</div>
           </div>
           <div v-if="showLibraryInitialSkeleton" class="mobile-skeleton-chip mobile-library-count-skeleton"></div>
-          <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
+          <el-tag v-else class="mobile-count-tag" effect="plain">{{ visibleRows.length }} 条</el-tag>
         </div>
 
         <div v-loading="loading && libraryHydrated" class="mobile-library-list">
@@ -372,13 +503,13 @@ onMounted(() => {
               <div class="mobile-skeleton-line is-md"></div>
             </article>
           </template>
-          <div v-else-if="!rows.length" class="mobile-empty-block">
+          <div v-else-if="!visibleRows.length" class="mobile-empty-block">
             <div class="mobile-empty-kicker">{{ activeMeta.label }}</div>
             <div class="mobile-empty-title">当前没有匹配资料</div>
             <div class="mobile-empty-copy">换个分类、关键词或范围，再继续定位要用的资料。</div>
           </div>
           <template v-else>
-            <article v-for="row in rows" :key="row.id" class="mobile-library-row">
+            <article v-for="row in visibleRows" :key="row.id" class="mobile-library-row">
               <div class="mobile-library-row-top">
                 <div>
                   <div class="mobile-library-row-title">{{ row.title || row.category || activeMeta.label }}</div>
@@ -415,9 +546,9 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="资料范围">
           <el-radio-group v-model="visibilityFilter" class="mobile-library-radio-group">
-            <el-radio-button label="ALL">全部</el-radio-button>
-            <el-radio-button label="INTERNAL">内部资料</el-radio-button>
-            <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
+            <el-radio-button value="ALL">全部</el-radio-button>
+            <el-radio-button value="INTERNAL">内部资料</el-radio-button>
+            <el-radio-button value="PUBLIC">可公开到官网</el-radio-button>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -437,95 +568,222 @@ onMounted(() => {
   </template>
 
   <el-space v-else direction="vertical" fill :size="12">
-    <el-card shadow="never">
+    <el-card shadow="never" class="library-workspace-card">
       <template #header>
         <div class="page-head">
           <div>
             <div class="page-title">常用资料</div>
-            <div class="page-desc">常用模板、通讯录、办事方法统一沉淀，并区分内部资料与可公开到官网的内容。</div>
+            <div class="page-desc">常用资料、通讯录和扩展模块统一沉淀，并区分内部资料与可公开到官网的内容。</div>
           </div>
-          <el-tag type="info" effect="plain">{{ rows.length }} 条</el-tag>
+          <el-tag type="info" effect="plain">{{ visibleRows.length }} 条</el-tag>
         </div>
       </template>
 
       <el-tabs v-model="activeTab" class="module-tabs">
         <el-tab-pane
-          v-for="(meta, key) in moduleMetaMap"
+          v-for="key in visibleModuleKeys"
           :key="key"
-          :label="meta.label"
+          :label="moduleMetaMap[key].label"
           :name="key"
         >
-          <div class="tab-helper">{{ meta.helper }}</div>
+          <div class="tab-helper">{{ moduleMetaMap[key].helper }}</div>
         </el-tab-pane>
       </el-tabs>
 
-      <el-form inline class="filter-form" @submit.prevent="fetchItems">
-        <el-form-item label="关键词">
-          <el-input
-            v-model="keyword"
-            clearable
-            placeholder="分类/标题/内容/电话/地址"
-            @keyup.enter="fetchItems"
-          />
-        </el-form-item>
-        <el-form-item label="资料范围">
-          <el-radio-group v-model="visibilityFilter">
-            <el-radio-button label="ALL">全部</el-radio-button>
-            <el-radio-button label="INTERNAL">内部资料</el-radio-button>
-            <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="fetchItems">查询</el-button>
-          <el-button type="primary" :icon="Plus" @click="openCreateDialog">新增</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+      <div class="library-workspace">
+        <aside class="library-sidebar">
+          <section class="library-sidebar-panel">
+            <div class="library-sidebar-title">分类工作台</div>
+            <div class="library-sidebar-copy">先按分类聚焦，再在右侧处理条目，日常查资料会更快。</div>
+            <div class="library-sidebar-metrics">
+              <article class="library-sidebar-metric">
+                <span>全部条目</span>
+                <strong>{{ rows.length }}</strong>
+              </article>
+              <article class="library-sidebar-metric">
+                <span>内部资料</span>
+                <strong>{{ internalCount }}</strong>
+              </article>
+              <article class="library-sidebar-metric">
+                <span>可公开</span>
+                <strong>{{ publicCount }}</strong>
+              </article>
+            </div>
+          </section>
 
-    <el-card shadow="never">
-      <div v-if="isMobile" v-loading="loading" class="mobile-record-list">
-        <div v-for="row in rows" :key="row.id" class="mobile-record-card">
-          <div class="mobile-record-head">
-            <div class="mobile-record-main">
-              <div class="mobile-record-title">{{ row.title || row.category || activeMeta.label }}</div>
-              <div class="mobile-record-subtitle">{{ row.category || "未分类" }} · {{ visibilityLabel(row.visibility) }}</div>
+          <section class="library-sidebar-panel">
+            <div class="library-sidebar-section-head">
+              <div>
+                <div class="library-sidebar-title">{{ activeMeta.categoryLabel }}</div>
+                <div class="library-sidebar-copy">点左侧分类后，右侧只看这一类内容。</div>
+              </div>
+              <el-tag size="small" effect="plain">{{ categoryWorkspaceOptions.length - 1 }} 类</el-tag>
             </div>
-            <div class="mobile-actions">
-              <el-button size="small" plain @click="openEditDialog(row)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="removeItem(row)">删除</el-button>
+            <div class="library-category-list">
+              <button
+                v-for="item in categoryWorkspaceOptions"
+                :key="`library-category-workspace-${item.key || 'all'}`"
+                type="button"
+                class="library-category-button"
+                :class="{ active: selectedCategory === item.key }"
+                @click="selectedCategory = item.key"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.count }}</strong>
+              </button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="library-main-panel">
+          <div class="library-main-toolbar">
+            <el-form class="library-filter-form" @submit.prevent="fetchItems">
+              <div class="library-filter-grid">
+                <el-form-item label="关键词">
+                  <el-input
+                    v-model="keyword"
+                    clearable
+                    placeholder="分类/标题/内容/电话/地址"
+                    @keyup.enter="fetchItems"
+                  />
+                </el-form-item>
+                <el-form-item label="资料范围">
+                  <el-radio-group v-model="visibilityFilter">
+                    <el-radio-button value="ALL">全部</el-radio-button>
+                    <el-radio-button value="INTERNAL">内部资料</el-radio-button>
+                    <el-radio-button value="PUBLIC">可公开到官网</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+                <el-form-item label="分类切换">
+                  <el-select
+                    v-model="selectedCategory"
+                    clearable
+                    filterable
+                    placeholder="全部分类"
+                    class="library-category-select"
+                  >
+                    <el-option label="全部分类" value="" />
+                    <el-option label="未分类" :value="UNCATEGORIZED_CATEGORY" />
+                    <el-option
+                      v-for="item in categoryOptions"
+                      :key="`library-category-${item}`"
+                      :label="item"
+                      :value="item"
+                    />
+                  </el-select>
+                </el-form-item>
+              </div>
+            </el-form>
+            <div class="library-toolbar-actions">
+              <el-button @click="fetchItems">查询</el-button>
+              <el-button type="primary" :icon="Plus" @click="openCreateDialog()">新增</el-button>
             </div>
           </div>
-          <div class="mobile-metric">
-            <div class="mobile-metric-label">主要内容</div>
-            <div class="mobile-metric-value">{{ primaryContent(row) }}</div>
+
+          <div class="library-main-head">
+            <div>
+              <div class="library-main-title">{{ selectedCategoryLabel }}</div>
+              <div class="library-main-copy">{{ selectedCategoryHelper }}</div>
+            </div>
+            <div class="library-main-head-actions">
+              <el-tag type="info" effect="plain">{{ visibleRows.length }} 条</el-tag>
+              <el-button size="small" plain :icon="Plus" @click="openCreateDialog()">
+                当前分类新增
+              </el-button>
+            </div>
           </div>
-          <div v-if="row.notes" class="mobile-record-note">备注：{{ row.notes }}</div>
-        </div>
+
+          <div v-loading="loading" class="library-workbench">
+            <div v-if="!visibleRows.length" class="library-empty-state">
+              <div class="library-empty-kicker">{{ activeMeta.label }}</div>
+              <div class="library-empty-title">当前分类还没有内容</div>
+              <div class="library-empty-copy">可以先新增一条，或回到左侧切换其他分类继续查看。</div>
+            </div>
+            <template v-else>
+              <section class="library-entry-list-panel">
+                <div class="library-entry-list-head">
+                  <div>
+                    <div class="library-entry-list-title">条目列表</div>
+                    <div class="library-entry-list-copy">左侧定分类，右侧先选条目，再看详情或直接编辑。</div>
+                  </div>
+                  <el-tag effect="plain">{{ visibleRows.length }}</el-tag>
+                </div>
+                <div class="library-entry-list">
+                  <button
+                    v-for="row in visibleRows"
+                    :key="row.id"
+                    type="button"
+                    class="library-entry-button"
+                    :class="{ active: activeWorkspaceRow?.id === row.id }"
+                    @click="desktopSelectedRowId = row.id"
+                  >
+                    <div class="library-entry-button-head">
+                      <div class="library-entry-button-title">{{ row.title || row.category || activeMeta.label }}</div>
+                      <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
+                        {{ visibilityLabel(row.visibility) }}
+                      </el-tag>
+                    </div>
+                    <div class="library-entry-button-meta">
+                      <span>{{ row.category || "未分类" }}</span>
+                      <span v-if="row.module_type === 'DIRECTORY' && row.phone">{{ row.phone }}</span>
+                    </div>
+                    <div class="library-entry-button-copy">{{ workspaceListHint(row) }}</div>
+                  </button>
+                </div>
+              </section>
+
+              <section v-if="activeWorkspaceRow" class="library-preview-panel">
+                <div class="library-preview-head">
+                  <div class="library-preview-main">
+                    <div class="library-preview-title">{{ activeWorkspaceRow.title || activeMeta.label }}</div>
+                    <div class="library-preview-meta">
+                      <span>{{ activeWorkspaceRow.category || "未分类" }}</span>
+                      <el-tag size="small" :type="visibilityTagType(activeWorkspaceRow.visibility)" effect="plain">
+                        {{ visibilityLabel(activeWorkspaceRow.visibility) }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div class="library-preview-actions">
+                    <el-button size="small" plain @click="openEditDialog(activeWorkspaceRow)">编辑</el-button>
+                    <el-button
+                      v-if="canDelete"
+                      size="small"
+                      type="danger"
+                      plain
+                      @click="removeItem(activeWorkspaceRow)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
+                </div>
+
+                <div class="library-preview-body">
+                  <section class="library-preview-section">
+                    <div class="library-preview-section-label">{{ activeMeta.contentLabel }}</div>
+                    <div class="library-preview-richtext">{{ workspacePreviewContent(activeWorkspaceRow) }}</div>
+                  </section>
+
+                  <section v-if="activeWorkspaceRow.module_type === 'DIRECTORY'" class="library-preview-directory-grid">
+                    <article class="library-preview-directory-card">
+                      <span>电话</span>
+                      <strong>{{ activeWorkspaceRow.phone || "-" }}</strong>
+                    </article>
+                    <article class="library-preview-directory-card">
+                      <span>地址</span>
+                      <strong>{{ activeWorkspaceRow.address || "-" }}</strong>
+                    </article>
+                  </section>
+
+                  <section v-if="activeWorkspaceRow.notes" class="library-preview-section secondary">
+                    <div class="library-preview-section-label">备注</div>
+                    <div class="library-preview-note">{{ activeWorkspaceRow.notes }}</div>
+                  </section>
+                </div>
+              </section>
+            </template>
+          </div>
+        </section>
       </div>
-
-      <el-table v-else v-loading="loading" :data="rows" stripe border>
-        <el-table-column label="范围" width="130">
-          <template #default="{ row }">
-            <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
-              {{ visibilityLabel(row.visibility) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="category" label="分类" width="140" />
-        <el-table-column prop="title" :label="activeMeta.titleLabel" min-width="180" show-overflow-tooltip />
-        <el-table-column label="主要内容" min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ primaryContent(row) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="notes" label="备注" min-width="180" show-overflow-tooltip />
-        <el-table-column label="操作" width="120">
-          <template #default="{ row }">
-            <el-button link type="primary" :icon="Edit" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="danger" :icon="Delete" @click="removeItem(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
     </el-card>
   </el-space>
 
@@ -554,8 +812,8 @@ onMounted(() => {
             <div class="mobile-form-section-copy">先确认是否允许公开，再填内容。</div>
             <el-form-item label="资料范围">
               <el-radio-group v-model="form.visibility" class="mobile-form-radio-group">
-                <el-radio-button label="INTERNAL">内部资料</el-radio-button>
-                <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
+                <el-radio-button value="INTERNAL">内部资料</el-radio-button>
+                <el-radio-button value="PUBLIC">可公开到官网</el-radio-button>
               </el-radio-group>
             </el-form-item>
           </section>
@@ -602,8 +860,8 @@ onMounted(() => {
         <el-col :xs="24" :sm="12">
           <el-form-item label="资料范围">
             <el-radio-group v-model="form.visibility">
-              <el-radio-button label="INTERNAL">内部资料</el-radio-button>
-              <el-radio-button label="PUBLIC">可公开到官网</el-radio-button>
+              <el-radio-button value="INTERNAL">内部资料</el-radio-button>
+              <el-radio-button value="PUBLIC">可公开到官网</el-radio-button>
             </el-radio-group>
           </el-form-item>
         </el-col>
@@ -671,8 +929,385 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.filter-form {
+.library-workspace-card {
+  border-color: #dfe6e8;
+}
+
+.library-workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
   margin-top: 8px;
+}
+
+.library-sidebar,
+.library-main-panel {
+  min-width: 0;
+}
+
+.library-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.library-sidebar-panel,
+.library-main-toolbar,
+.library-main-head,
+.library-item-card,
+.library-empty-state {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.library-sidebar-panel,
+.library-main-toolbar,
+.library-main-head,
+.library-empty-state {
+  padding: 14px;
+}
+
+.library-sidebar-title,
+.library-main-title,
+.library-item-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.library-sidebar-copy,
+.library-main-copy,
+.library-item-card-note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.library-sidebar-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.library-sidebar-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.library-sidebar-metric span,
+.library-category-button span,
+.library-directory-meta-item span {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.library-sidebar-metric strong,
+.library-category-button strong,
+.library-directory-meta-item strong {
+  font-size: 13px;
+  color: #111827;
+}
+
+.library-sidebar-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.library-category-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.library-category-button:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.library-category-button.active {
+  border-color: #8fb2be;
+  background: rgba(143, 178, 190, 0.12);
+}
+
+.library-main-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.library-main-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.library-filter-form {
+  flex: 1;
+}
+
+.library-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.library-filter-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.library-filter-form :deep(.el-select__wrapper),
+.library-filter-form :deep(.el-input__wrapper) {
+  min-width: 200px;
+}
+
+.library-category-select {
+  width: 100%;
+}
+
+.library-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.library-main-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-main-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.library-workbench {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.35fr);
+  gap: 12px;
+}
+
+.library-entry-list-panel,
+.library-preview-panel {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.library-entry-list-head,
+.library-preview-head,
+.library-preview-meta,
+.library-preview-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.library-entry-list-head,
+.library-preview-head {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.library-entry-list-title,
+.library-preview-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.library-entry-list-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+.library-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.library-entry-button {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.library-entry-button:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.library-entry-button.active {
+  border-color: #8fb2be;
+  background: rgba(143, 178, 190, 0.12);
+}
+
+.library-entry-button-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-entry-button-title,
+.library-preview-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.library-entry-button-meta,
+.library-preview-meta {
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.library-entry-button-copy {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #4b5563;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.library-preview-main {
+  min-width: 0;
+}
+
+.library-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.library-preview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.library-preview-section.secondary {
+  background: #fdfefe;
+}
+
+.library-preview-section-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.library-preview-richtext,
+.library-preview-note {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #1f2937;
+  white-space: pre-wrap;
+}
+
+.library-preview-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.library-preview-directory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.library-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+}
+
+.library-empty-kicker {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.library-empty-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.library-empty-copy {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #4b5563;
 }
 
 .mobile-actions {
@@ -681,9 +1316,26 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .filter-form {
-    display: flex;
-    flex-wrap: wrap;
+  .library-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .library-sidebar-metrics,
+  .library-filter-grid,
+  .library-preview-directory-grid,
+  .library-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .library-main-toolbar,
+  .library-entry-list-head,
+  .library-preview-head,
+  .library-main-head,
+  .library-toolbar-actions,
+  .library-main-head-actions,
+  .library-preview-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 

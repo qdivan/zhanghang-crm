@@ -37,6 +37,7 @@ export type BillingExecutionForm = {
 };
 
 export type BillingSplitPaymentForm = {
+  customer_id: number | null;
   occurred_at: string;
   amount: number;
   strategy: "DUE_DATE_ASC" | "SERIAL_ASC" | "AMOUNT_DESC";
@@ -107,6 +108,7 @@ export function createBillingActivityForm(today: string): BillingActivityForm {
 
 export function createBillingSplitPaymentForm(today: string): BillingSplitPaymentForm {
   return {
+    customer_id: null,
     occurred_at: today,
     amount: 0,
     strategy: "DUE_DATE_ASC",

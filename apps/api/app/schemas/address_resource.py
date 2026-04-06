@@ -35,6 +35,25 @@ class AddressResourceUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class AddressResourceCompanyCreate(BaseModel):
+    customer_id: Optional[int] = Field(default=None, gt=0)
+    company_name: str = Field(default="", max_length=200)
+    notes: str = ""
+
+
+class AddressResourceCompanyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    address_resource_id: int
+    customer_id: Optional[int]
+    customer_name: str
+    company_name: str
+    notes: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class AddressResourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +61,8 @@ class AddressResourceOut(BaseModel):
     category: str
     contact_info: str
     served_companies: str
+    served_company_count: int
+    company_items: list[AddressResourceCompanyOut]
     description: str
     next_action: str
     notes: str

@@ -76,7 +76,13 @@ class User(Base):
         return self.manager.username
 
 
-class Lead(Base):
+class SoftDeleteMixin:
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    deleted_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+
+
+class Lead(SoftDeleteMixin, Base):
     __tablename__ = "leads"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -126,7 +132,7 @@ class Lead(Base):
 
     @property
     def customer_id(self) -> Optional[int]:
-        if self.customer is None:
+        if self.customer is None or self.customer.is_deleted:
             return self.related_customer_id
         return self.customer.id
 
@@ -153,7 +159,7 @@ class LeadFollowup(Base):
         return self.creator.username
 
 
-class Customer(Base):
+class Customer(SoftDeleteMixin, Base):
     __tablename__ = "customers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -162,6 +168,7 @@ class Customer(Base):
     phone: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
     assigned_accountant_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    source_customer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     source_lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -202,7 +209,7 @@ class CustomerTimelineEvent(Base):
         return self.actor.username
 
 
-class AddressResource(Base):
+class AddressResource(SoftDeleteMixin, Base):
     __tablename__ = "address_resources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -218,9 +225,38 @@ class AddressResource(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+    company_items: Mapped[list["AddressResourceCompany"]] = relationship(
+        back_populates="address_resource",
+        cascade="all, delete-orphan",
+    )
 
 
-class CommonLibraryItem(Base):
+class AddressResourceCompany(SoftDeleteMixin, Base):
+    __tablename__ = "address_resource_companies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    address_resource_id: Mapped[int] = mapped_column(ForeignKey("address_resources.id"), index=True)
+    customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    company_name: Mapped[str] = mapped_column(String(200), default="", index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    address_resource: Mapped["AddressResource"] = relationship(back_populates="company_items")
+    customer: Mapped[Optional["Customer"]] = relationship()
+
+    @property
+    def customer_name(self) -> str:
+        if self.customer is None:
+            return ""
+        return self.customer.name or ""
+
+
+class CommonLibraryItem(SoftDeleteMixin, Base):
     __tablename__ = "common_library_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -240,7 +276,7 @@ class CommonLibraryItem(Base):
     )
 
 
-class BillingRecord(Base):
+class BillingRecord(SoftDeleteMixin, Base):
     __tablename__ = "billing_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -484,7 +520,7 @@ class BillingAssignment(Base):
         return self.assignee.role
 
 
-class TodoItem(Base):
+class TodoItem(SoftDeleteMixin, Base):
     __tablename__ = "todo_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

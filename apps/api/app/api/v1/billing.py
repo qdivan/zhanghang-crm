@@ -1,8 +1,8 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import exists, func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_roles
@@ -23,6 +23,7 @@ from app.schemas.billing import (
     BillingAssignmentCreate,
     BillingAssignmentOut,
     BillingAssignmentUpdate,
+    BillingCustomerSummaryOut,
     BillingExecutionLogCreate,
     BillingExecutionLogOut,
     BillingPaymentAllocationOut,
@@ -41,12 +42,14 @@ from app.schemas.billing import (
     BillingRecordCreate,
     BillingRecordOut,
     BillingRenewRequest,
+    BillingSummaryOut,
     BillingTerminateRequest,
     BillingRecordUpdate,
 )
 from app.services.audit import write_operation_log
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
+from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/billing-records", tags=["billing-records"])
 
@@ -108,6 +111,13 @@ def _month_end_date_text(month_text: str) -> str:
     else:
         next_month = date(year, month + 1, 1)
     return (next_month - next_month.resolution).isoformat()
+
+
+def _month_start_date_text(month_text: str) -> str:
+    normalized = _normalize_month(month_text)
+    if not normalized:
+        return ""
+    return f"{normalized}-01"
 
 
 def _shift_date_text(date_text: str, years: int) -> str:
@@ -234,26 +244,45 @@ def _apply_billing_business_defaults(record: BillingRecord) -> None:
             record.due_month = record.collection_start_date or date.today().isoformat()
         return
 
-    if not record.collection_start_date and record.period_start_month:
-        record.collection_start_date = f"{record.period_start_month}-01"
-    if record.period_start_month and not record.period_end_month and not record.due_month:
-        record.period_end_month = _shift_month(record.period_start_month, 11)
-        record.due_month = _month_end_date_text(record.period_end_month)
-    if record.collection_start_date and not record.due_month:
-        service_start = date.fromisoformat(record.collection_start_date)
-        if record.amount_basis == "MONTHLY":
-            record.due_month = _format_date(_subtract_days(_add_months_clamped(service_start, 1), 1))
-        else:
-            record.due_month = _format_date(_subtract_days(_add_years_clamped(service_start, 1), 1))
-    if not record.collection_start_date and record.due_month:
-        record.collection_start_date = f"{record.due_month[:7]}-01"
     if not record.period_start_month and record.collection_start_date:
         record.period_start_month = record.collection_start_date[:7]
     if not record.period_end_month and record.due_month:
         record.period_end_month = record.due_month[:7]
+    if not record.period_start_month and record.period_end_month:
+        record.period_start_month = _shift_month(record.period_end_month, -11)
+    if record.period_start_month and not record.period_end_month:
+        record.period_end_month = _shift_month(record.period_start_month, 11)
+    if not record.collection_start_date and record.period_start_month:
+        record.collection_start_date = _month_start_date_text(record.period_start_month)
+    elif record.collection_start_date and record.period_start_month and record.collection_start_date[:7] != record.period_start_month:
+        record.collection_start_date = _month_start_date_text(record.period_start_month)
+    if not record.due_month and record.period_end_month:
+        record.due_month = _month_end_date_text(record.period_end_month)
+    elif record.due_month and record.period_end_month and record.due_month[:7] != record.period_end_month:
+        record.due_month = _month_end_date_text(record.period_end_month)
 
 
 def _ensure_valid_record_dates(record: BillingRecord) -> None:
+    if record.charge_mode == "PERIODIC":
+        start_month = _normalize_month(record.period_start_month)
+        end_month = _normalize_month(record.period_end_month)
+        if not start_month:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写开始月份")
+        if not end_month:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写结束月份")
+        if end_month < start_month:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="结束月份不能早于开始月份")
+
+        service_start = _parse_due_month(record.collection_start_date)
+        due_date = _parse_due_month(record.due_month)
+        if service_start is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="系统未生成开始日期，请重新选择开始月份")
+        if due_date is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="系统未生成到期日期，请重新选择结束月份")
+        if due_date < service_start:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="到期日期不能早于服务开始日期")
+        return
+
     service_start = _parse_due_month(record.collection_start_date)
     due_date = _parse_due_month(record.due_month)
     if service_start is None:
@@ -284,9 +313,12 @@ def _refresh_record_amounts(record: BillingRecord) -> None:
 
 
 def _apply_accountant_scope(stmt, db: Session, current_user: User, has_billing_read_grant: bool):
+    stmt = stmt.where(active_filter(BillingRecord))
     if current_user.role == "MANAGER":
         managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(BillingRecord.customer.has(Customer.assigned_accountant_id.in_(managed_ids)))
+        return stmt.where(
+            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids)))
+        )
     if current_user.role != "ACCOUNTANT" or has_billing_read_grant:
         return stmt
     assignment_visible_expr = exists(
@@ -298,7 +330,7 @@ def _apply_accountant_scope(stmt, db: Session, current_user: User, has_billing_r
     )
     return stmt.where(
         or_(
-            BillingRecord.customer.has(Customer.assigned_accountant_id == current_user.id),
+            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id)),
             assignment_visible_expr,
         )
     )
@@ -404,12 +436,6 @@ def _record_matches_filters(
             return False
 
     return True
-    return stmt.where(
-        or_(
-            BillingRecord.customer.has(Customer.assigned_accountant_id == current_user.id),
-            assignment_visible_expr,
-        )
-    )
 
 
 def _has_active_assignment(db: Session, record_id: int, user_id: int) -> bool:
@@ -438,6 +464,7 @@ def _ensure_billing_access(record: BillingRecord, db: Session, current_user: Use
     own_customer = db.execute(
         select(Customer.id).where(
             Customer.id == record.customer_id,
+            active_filter(Customer),
             Customer.assigned_accountant_id == current_user.id,
         )
     ).scalar_one_or_none()
@@ -458,6 +485,7 @@ def _ensure_execution_log_write_access(record: BillingRecord, db: Session, curre
         own_customer = db.execute(
             select(Customer.id).where(
                 Customer.id == record.customer_id,
+                active_filter(Customer),
                 Customer.assigned_accountant_id.in_(managed_ids),
             )
         ).scalar_one_or_none()
@@ -467,6 +495,7 @@ def _ensure_execution_log_write_access(record: BillingRecord, db: Session, curre
     own_customer = db.execute(
         select(Customer.id).where(
             Customer.id == record.customer_id,
+            active_filter(Customer),
             Customer.assigned_accountant_id == current_user.id,
         )
     ).scalar_one_or_none()
@@ -478,7 +507,7 @@ def _ensure_execution_log_write_access(record: BillingRecord, db: Session, curre
 
 
 def _get_record_or_404(db: Session, record_id: int) -> BillingRecord:
-    record = db.execute(select(BillingRecord).where(BillingRecord.id == record_id)).scalar_one_or_none()
+    record = db.execute(select(BillingRecord).where(BillingRecord.id == record_id, active_filter(BillingRecord))).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing record not found")
     return record
@@ -533,6 +562,7 @@ def _ensure_customer_billing_read_access(customer: Customer, db: Session, curren
         .join(BillingRecord, BillingAssignment.billing_record_id == BillingRecord.id)
         .where(
             BillingRecord.customer_id == customer.id,
+            active_filter(BillingRecord),
             BillingAssignment.assignee_user_id == current_user.id,
             BillingAssignment.is_active.is_(True),
         )
@@ -550,7 +580,7 @@ def _outstanding_records_by_strategy(
 ) -> list[BillingRecord]:
     records = db.execute(
         select(BillingRecord)
-        .where(BillingRecord.customer_id == customer_id)
+        .where(BillingRecord.customer_id == customer_id, active_filter(BillingRecord))
         .order_by(BillingRecord.id.asc())
     ).scalars().all()
     outstanding_records = [item for item in records if float(item.outstanding_amount or 0) > 0]
@@ -567,6 +597,15 @@ def _outstanding_records_by_strategy(
             )
         )
     return outstanding_records
+
+
+def _default_summary_date_window(
+    requested_date_from: Optional[date],
+    requested_date_to: Optional[date],
+) -> tuple[date, date]:
+    resolved_date_to = requested_date_to or date.today()
+    resolved_date_from = requested_date_from or date(resolved_date_to.year - 1, 1, 1)
+    return resolved_date_from, resolved_date_to
 
 
 @router.get("", response_model=list[BillingRecordOut])
@@ -593,7 +632,7 @@ def list_billing_records(
             BillingRecord.customer_name.ilike(key),
             BillingRecord.note.ilike(key),
             BillingRecord.summary.ilike(key),
-            BillingRecord.customer.has(Customer.contact_name.ilike(key)),
+            BillingRecord.customer.has(and_(active_filter(Customer), Customer.contact_name.ilike(key))),
         ]
         if raw_key.isdigit():
             conditions.append(BillingRecord.serial_no == int(raw_key))
@@ -621,7 +660,9 @@ def list_billing_records(
     if contact_name:
         contact_key = contact_name.strip()
         if contact_key:
-            stmt = stmt.where(BillingRecord.customer.has(Customer.contact_name.ilike(f"%{contact_key}%")))
+            stmt = stmt.where(
+                BillingRecord.customer.has(and_(active_filter(Customer), Customer.contact_name.ilike(f"%{contact_key}%")))
+            )
     if payment_method:
         stmt = stmt.where(BillingRecord.payment_method == payment_method)
     return db.execute(stmt).scalars().all()
@@ -638,7 +679,7 @@ def create_billing_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id)).scalar_one_or_none()
+    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id, active_filter(Customer))).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
     _ensure_customer_billing_write_access(customer, db, current_user)
@@ -678,7 +719,7 @@ def create_billing_records_batch(
     created_records: list[BillingRecord] = []
 
     for item in payload.records:
-        customer = db.execute(select(Customer).where(Customer.id == item.customer_id)).scalar_one_or_none()
+        customer = db.execute(select(Customer).where(Customer.id == item.customer_id, active_filter(Customer))).scalar_one_or_none()
         if customer is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
         _ensure_customer_billing_write_access(customer, db, current_user)
@@ -719,7 +760,9 @@ def update_billing_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    record = db.execute(select(BillingRecord).where(BillingRecord.id == record_id)).scalar_one_or_none()
+    record = db.execute(
+        select(BillingRecord).where(BillingRecord.id == record_id, active_filter(BillingRecord))
+    ).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing record not found")
     _ensure_billing_access(record, db, current_user, for_write=True)
@@ -729,7 +772,7 @@ def update_billing_record(
     _apply_billing_business_defaults(record)
     _ensure_valid_record_dates(record)
     if payload.customer_id is not None:
-        customer = db.execute(select(Customer).where(Customer.id == payload.customer_id)).scalar_one_or_none()
+        customer = db.execute(select(Customer).where(Customer.id == payload.customer_id, active_filter(Customer))).scalar_one_or_none()
         if customer is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
         _ensure_customer_billing_write_access(customer, db, current_user)
@@ -750,6 +793,58 @@ def update_billing_record(
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.delete(
+    "/{record_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_billing_record(
+    record_id: int,
+    confirm_name: str = Query(default=""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    record = _get_record_or_404(db, record_id)
+    summary_text = (record.summary or "").strip() or (record.charge_category or "").strip() or f"收费单#{record.serial_no or record.id}"
+    customer_text = (record.customer_name or "").strip() or "未命名客户"
+    expected_name = f"{customer_text} · {summary_text}"
+    if (confirm_name or "").strip() != expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
+
+    allocation_count = (
+        db.execute(
+            select(func.count(BillingPaymentAllocation.id)).where(BillingPaymentAllocation.billing_record_id == record.id)
+        ).scalar()
+        or 0
+    )
+    payment_activity_count = (
+        db.execute(
+            select(func.count(BillingActivity.id)).where(
+                BillingActivity.billing_record_id == record.id,
+                BillingActivity.activity_type == "PAYMENT",
+            )
+        ).scalar()
+        or 0
+    )
+    if allocation_count > 0 or payment_activity_count > 0 or float(record.received_amount or 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="当前收费单已有收款核销记录，不能删除",
+        )
+
+    mark_deleted(record, current_user.id)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="BILLING_RECORD_DELETED",
+        entity_type="BILLING",
+        entity_id=record.id,
+        detail=f"serial_no={record.serial_no},name={expected_name}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -893,7 +988,7 @@ def suggest_billing_payment_allocations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id)).scalar_one_or_none()
+    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id, active_filter(Customer))).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
     _ensure_customer_billing_write_access(customer, db, current_user)
@@ -935,7 +1030,7 @@ def create_billing_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id)).scalar_one_or_none()
+    customer = db.execute(select(Customer).where(Customer.id == payload.customer_id, active_filter(Customer))).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
     _ensure_customer_billing_write_access(customer, db, current_user)
@@ -954,6 +1049,7 @@ def create_billing_payment(
     target_records = db.execute(
         select(BillingRecord).where(
             BillingRecord.customer_id == customer.id,
+            active_filter(BillingRecord),
             BillingRecord.id.in_(list(allocation_map.keys())),
         )
     ).scalars().all()
@@ -1052,7 +1148,7 @@ def get_customer_billing_ledger(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
+    customer = db.execute(select(Customer).where(Customer.id == customer_id, active_filter(Customer))).scalar_one_or_none()
     if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
     _ensure_customer_billing_read_access(customer, db, current_user)
@@ -1068,18 +1164,26 @@ def get_customer_billing_ledger(
         return True
 
     records = db.execute(
-        select(BillingRecord).where(BillingRecord.customer_id == customer.id).order_by(BillingRecord.id.asc())
+        select(BillingRecord)
+        .where(BillingRecord.customer_id == customer.id, active_filter(BillingRecord))
+        .order_by(BillingRecord.id.asc())
     ).scalars().all()
     record_map = {item.id: item for item in records}
 
     raw_entries: list[tuple[date, int, int, BillingLedgerEntryOut]] = []
+    opening_balance = 0.0
     receivable_total = 0.0
     received_total = 0.0
 
     for record in records:
         receivable_date = _parse_due_month(record.due_month) or record.created_at.date()
         receivable_amount = float(record.total_fee or 0)
-        if receivable_amount > 0 and _in_range(receivable_date):
+        if receivable_amount <= 0:
+            continue
+        if date_from and receivable_date < date_from:
+            opening_balance += receivable_amount
+            continue
+        if _in_range(receivable_date):
             raw_entries.append(
                 (
                     receivable_date,
@@ -1104,6 +1208,9 @@ def get_customer_billing_ledger(
         .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
     ).scalars().all()
     for payment in payment_rows:
+        if date_from and payment.occurred_at < date_from:
+            opening_balance -= float(payment.amount or 0)
+            continue
         if not _in_range(payment.occurred_at):
             continue
         receipt_account = _normalize_receipt_account(payment.receipt_account)
@@ -1130,6 +1237,7 @@ def get_customer_billing_ledger(
         .options(selectinload(BillingActivity.billing_record))
         .join(BillingRecord, BillingActivity.billing_record_id == BillingRecord.id)
         .where(
+            active_filter(BillingRecord),
             BillingRecord.customer_id == customer.id,
             BillingActivity.activity_type == "PAYMENT",
             BillingActivity.amount > 0,
@@ -1138,6 +1246,9 @@ def get_customer_billing_ledger(
         .order_by(BillingActivity.occurred_at.asc(), BillingActivity.id.asc())
     ).scalars().all()
     for activity in direct_payment_rows:
+        if date_from and activity.occurred_at < date_from:
+            opening_balance -= float(activity.amount or 0)
+            continue
         if not _in_range(activity.occurred_at):
             continue
         record = record_map.get(activity.billing_record_id) or activity.billing_record
@@ -1164,19 +1275,19 @@ def get_customer_billing_ledger(
 
     raw_entries.sort(key=lambda item: (item[0], item[1], item[2]))
 
-    balance = 0.0
+    running_balance = float(opening_balance)
     entries: list[BillingLedgerEntryOut] = []
     for _, _, _, item in raw_entries:
         receivable_total += float(item.receivable_amount or 0)
         received_total += float(item.received_amount or 0)
-        balance += float(item.receivable_amount or 0) - float(item.received_amount or 0)
+        running_balance += float(item.receivable_amount or 0) - float(item.received_amount or 0)
         entries.append(
             BillingLedgerEntryOut(
                 occurred_at=item.occurred_at,
                 summary=item.summary,
                 receivable_amount=float(item.receivable_amount),
                 received_amount=float(item.received_amount),
-                balance=float(balance),
+                balance=float(running_balance),
                 source_type=item.source_type,
                 billing_record_id=item.billing_record_id,
                 receipt_account=item.receipt_account,
@@ -1214,9 +1325,11 @@ def get_customer_billing_ledger(
         customer_name=customer.name,
         date_from=date_from,
         date_to=date_to,
+        opening_balance=float(opening_balance),
         receivable_total=float(receivable_total),
         received_total=float(received_total),
-        balance=float(balance),
+        balance=float(running_balance),
+        closing_balance=float(running_balance),
         monthly_summaries=monthly_summaries,
         entries=entries,
     )
@@ -1248,10 +1361,12 @@ def get_receipt_account_ledger(
         return True
 
     raw_events: list[tuple[date, int, int, BillingReceiptAccountEntryOut]] = []
+    opening_debit = 0.0
 
     payment_rows = db.execute(
         select(BillingPayment, Customer, User.username)
         .join(Customer, BillingPayment.customer_id == Customer.id)
+        .where(active_filter(Customer))
         .outerjoin(User, BillingPayment.created_by_user_id == User.id)
         .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
     ).all()
@@ -1260,6 +1375,9 @@ def get_receipt_account_ledger(
             continue
         account_name = _normalize_receipt_account(payment.receipt_account)
         if normalized_account and account_name != normalized_account:
+            continue
+        if date_from and payment.occurred_at < date_from:
+            opening_debit += float(payment.amount or 0)
             continue
         if not _in_range(payment.occurred_at):
             continue
@@ -1273,8 +1391,9 @@ def get_receipt_account_ledger(
                     receipt_account=account_name,
                     customer_name=customer.name,
                     summary=(payment.note or "").strip() or "统一收款入账",
-                    received_amount=float(payment.amount or 0),
-                    cumulative_received=0.0,
+                    debit_amount=float(payment.amount or 0),
+                    credit_amount=0.0,
+                    balance=0.0,
                     actor_username=username or "",
                     payment_id=payment.id,
                     billing_record_id=None,
@@ -1286,12 +1405,9 @@ def get_receipt_account_ledger(
         select(BillingActivity, BillingRecord, Customer, User.username)
         .join(BillingRecord, BillingActivity.billing_record_id == BillingRecord.id)
         .join(Customer, BillingRecord.customer_id == Customer.id)
+        .where(active_filter(BillingRecord), active_filter(Customer))
         .outerjoin(User, BillingActivity.actor_id == User.id)
-        .where(
-            BillingActivity.activity_type == "PAYMENT",
-            BillingActivity.amount > 0,
-            BillingActivity.payment_id.is_(None),
-        )
+        .where(BillingActivity.activity_type == "PAYMENT", BillingActivity.amount > 0, BillingActivity.payment_id.is_(None))
         .order_by(BillingActivity.occurred_at.asc(), BillingActivity.id.asc())
     ).all()
     for activity, record, customer, username in direct_payment_rows:
@@ -1299,6 +1415,9 @@ def get_receipt_account_ledger(
             continue
         account_name = _normalize_receipt_account(activity.receipt_account)
         if normalized_account and account_name != normalized_account:
+            continue
+        if date_from and activity.occurred_at < date_from:
+            opening_debit += float(activity.amount or 0)
             continue
         if not _in_range(activity.occurred_at):
             continue
@@ -1312,8 +1431,9 @@ def get_receipt_account_ledger(
                     receipt_account=account_name,
                     customer_name=customer.name,
                     summary=_build_payment_summary(record, activity.content, account_name),
-                    received_amount=float(activity.amount or 0),
-                    cumulative_received=0.0,
+                    debit_amount=float(activity.amount or 0),
+                    credit_amount=0.0,
+                    balance=0.0,
                     actor_username=username or "",
                     payment_id=None,
                     billing_record_id=record.id,
@@ -1323,19 +1443,22 @@ def get_receipt_account_ledger(
 
     raw_events.sort(key=lambda item: (item[0], item[1], item[2]))
 
-    cumulative = 0.0
+    running_balance = float(opening_debit)
     entries: list[BillingReceiptAccountEntryOut] = []
     account_buckets: dict[str, dict[str, object]] = {}
     for _, _, _, item in raw_events:
-        cumulative += float(item.received_amount or 0)
+        debit_amount = float(item.debit_amount or 0)
+        credit_amount = float(item.credit_amount or 0)
+        running_balance += debit_amount - credit_amount
         entries.append(
             BillingReceiptAccountEntryOut(
                 occurred_at=item.occurred_at,
                 receipt_account=item.receipt_account,
                 customer_name=item.customer_name,
                 summary=item.summary,
-                received_amount=float(item.received_amount),
-                cumulative_received=float(cumulative),
+                debit_amount=debit_amount,
+                credit_amount=credit_amount,
+                balance=float(running_balance),
                 actor_username=item.actor_username,
                 payment_id=item.payment_id,
                 billing_record_id=item.billing_record_id,
@@ -1346,7 +1469,7 @@ def get_receipt_account_ledger(
             {"payment_count": 0, "total_received": 0.0, "last_received_at": None},
         )
         bucket["payment_count"] = int(bucket["payment_count"]) + 1
-        bucket["total_received"] = float(bucket["total_received"]) + float(item.received_amount or 0)
+        bucket["total_received"] = float(bucket["total_received"]) + debit_amount
         bucket["last_received_at"] = item.occurred_at
 
     account_summaries = [
@@ -1366,25 +1489,32 @@ def get_receipt_account_ledger(
         receipt_account=normalized_account or None,
         date_from=date_from,
         date_to=date_to,
-        total_received=float(sum(item.received_amount for item in entries)),
+        opening_debit=float(opening_debit),
+        opening_credit=0.0,
+        opening_balance=float(opening_debit),
+        total_received=float(sum(item.debit_amount for item in entries)),
         payment_count=len(entries),
         account_summaries=account_summaries,
         entries=entries,
     )
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=BillingSummaryOut)
 def billing_summary(
     keyword: Optional[str] = Query(default=None),
     customer_id: Optional[int] = Query(default=None),
     receipt_account: Optional[str] = Query(default=None),
     billing_month: Optional[str] = Query(default=None),
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
     contact_name: Optional[str] = Query(default=None),
     payment_method: Optional[str] = Query(default=None),
     status_value: Optional[str] = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="date_from must be <= date_to")
     has_billing_read_grant = False
     if current_user.role == "ACCOUNTANT":
         has_billing_read_grant = has_module_read_grant(db, current_user.id, "BILLING")
@@ -1423,6 +1553,65 @@ def billing_summary(
         method_name = _normalize_payment_method(record.payment_method)
         payment_method_buckets[method_name] = payment_method_buckets.get(method_name, 0) + 1
         status_buckets[record.status] = status_buckets.get(record.status, 0) + 1
+
+    summary_date_from, summary_date_to = _default_summary_date_window(date_from, date_to)
+
+    customer_summary_map: dict[int, dict[str, object]] = {}
+    today_value = date.today()
+    for record in filtered_records:
+        if record.customer_id is None:
+            continue
+        customer_obj = record.customer
+        bucket = customer_summary_map.setdefault(
+            record.customer_id,
+            {
+                "customer_id": record.customer_id,
+                "customer_name": record.customer_name,
+                "customer_contact_name": customer_obj.contact_name if customer_obj is not None else "",
+                "opening_arrears": 0.0,
+                "period_receivable": 0.0,
+                "period_received": 0.0,
+                "ending_outstanding": 0.0,
+                "overdue_count": 0,
+                "latest_activity_at": None,
+                "latest_activity_content": "",
+            },
+        )
+
+        receivable_date = _parse_due_month(record.due_month) or record.created_at.date()
+        receivable_amount = float(record.total_fee or 0)
+        if receivable_date < summary_date_from:
+            bucket["opening_arrears"] = float(bucket["opening_arrears"]) + receivable_amount
+        elif summary_date_from <= receivable_date <= summary_date_to:
+            bucket["period_receivable"] = float(bucket["period_receivable"]) + receivable_amount
+
+        due_date = _parse_due_month(record.due_month)
+        if due_date is not None and due_date < today_value and float(record.outstanding_amount or 0) > 0:
+            bucket["overdue_count"] = int(bucket["overdue_count"]) + 1
+
+        for activity in record.activities:
+            if activity.activity_type != "PAYMENT" or float(activity.amount or 0) <= 0:
+                continue
+            amount_value = float(activity.amount or 0)
+            if activity.occurred_at < summary_date_from:
+                bucket["opening_arrears"] = float(bucket["opening_arrears"]) - amount_value
+            elif summary_date_from <= activity.occurred_at <= summary_date_to:
+                bucket["period_received"] = float(bucket["period_received"]) + amount_value
+
+            latest_at = bucket["latest_activity_at"]
+            if latest_at is None or activity.occurred_at >= latest_at:
+                bucket["latest_activity_at"] = activity.occurred_at
+                bucket["latest_activity_content"] = (
+                    (activity.content or "").strip()
+                    or (activity.note or "").strip()
+                    or _build_payment_summary(record, "", _normalize_receipt_account(activity.receipt_account))
+                )
+
+        bucket["ending_outstanding"] = (
+            float(bucket["opening_arrears"])
+            + float(bucket["period_receivable"])
+            - float(bucket["period_received"])
+        )
 
     receipt_account_distribution: list[dict[str, object]] = []
     if current_user.role in {"OWNER", "ADMIN", "MANAGER"}:
@@ -1477,6 +1666,29 @@ def billing_summary(
             for key, value in sorted(status_buckets.items(), key=lambda item: (-item[1], item[0]))
         ],
         "receipt_account_distribution": receipt_account_distribution,
+        "summary_date_from": summary_date_from,
+        "summary_date_to": summary_date_to,
+        "customer_summaries": [
+            BillingCustomerSummaryOut(
+                customer_id=int(values["customer_id"]),
+                customer_name=str(values["customer_name"]),
+                customer_contact_name=str(values["customer_contact_name"]),
+                opening_arrears=float(values["opening_arrears"]),
+                period_receivable=float(values["period_receivable"]),
+                period_received=float(values["period_received"]),
+                ending_outstanding=float(values["ending_outstanding"]),
+                overdue_count=int(values["overdue_count"]),
+                latest_activity_at=values["latest_activity_at"],
+                latest_activity_content=str(values["latest_activity_content"]),
+            )
+            for _, values in sorted(
+                customer_summary_map.items(),
+                key=lambda item: (
+                    -float(item[1]["ending_outstanding"]),
+                    str(item[1]["customer_name"]),
+                ),
+            )
+        ],
     }
 
 

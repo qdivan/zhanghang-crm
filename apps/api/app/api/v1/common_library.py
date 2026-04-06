@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models import CommonLibraryItem, User
 from app.schemas.common_library import (
@@ -14,6 +14,7 @@ from app.schemas.common_library import (
     CommonLibraryItemUpdate,
 )
 from app.services.audit import write_operation_log
+from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/common-library-items", tags=["common-library-items"])
 
@@ -27,7 +28,11 @@ def list_common_library_items(
     current_user: User = Depends(get_current_user),
 ):
     del current_user
-    stmt = select(CommonLibraryItem).order_by(CommonLibraryItem.updated_at.desc(), CommonLibraryItem.id.desc())
+    stmt = (
+        select(CommonLibraryItem)
+        .where(active_filter(CommonLibraryItem))
+        .order_by(CommonLibraryItem.updated_at.desc(), CommonLibraryItem.id.desc())
+    )
     if module_type:
         stmt = stmt.where(CommonLibraryItem.module_type == module_type)
     if visibility:
@@ -55,7 +60,7 @@ def list_public_common_library_items(
 ):
     stmt = (
         select(CommonLibraryItem)
-        .where(CommonLibraryItem.visibility == "PUBLIC")
+        .where(CommonLibraryItem.visibility == "PUBLIC", active_filter(CommonLibraryItem))
         .order_by(CommonLibraryItem.updated_at.desc(), CommonLibraryItem.id.desc())
     )
     if module_type:
@@ -110,7 +115,9 @@ def update_common_library_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = db.execute(select(CommonLibraryItem).where(CommonLibraryItem.id == item_id)).scalar_one_or_none()
+    item = db.execute(
+        select(CommonLibraryItem).where(CommonLibraryItem.id == item_id, active_filter(CommonLibraryItem))
+    ).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="常用资料不存在")
 
@@ -144,15 +151,20 @@ def update_common_library_item(
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_common_library_item(
     item_id: int,
+    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles("OWNER", "ADMIN")),
 ):
-    item = db.execute(select(CommonLibraryItem).where(CommonLibraryItem.id == item_id)).scalar_one_or_none()
+    item = db.execute(
+        select(CommonLibraryItem).where(CommonLibraryItem.id == item_id, active_filter(CommonLibraryItem))
+    ).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="常用资料不存在")
 
     title = item.title or item.category
-    db.delete(item)
+    if (confirm_name or "").strip() != title:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
+    mark_deleted(item, current_user.id)
     write_operation_log(
         db,
         actor_id=current_user.id,

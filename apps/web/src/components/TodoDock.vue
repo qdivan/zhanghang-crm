@@ -20,6 +20,7 @@ const {
   systemRows,
   createForm,
   openManualCount,
+  canDeleteTodos,
   refreshAll,
   createTodo,
   toggleTodoDone,
@@ -111,6 +112,7 @@ watch(isMobile, (value) => {
                           撤销今日
                         </el-button>
                         <el-button
+                          v-if="canDeleteTodos"
                           link
                           type="danger"
                           :icon="Delete"
@@ -161,6 +163,7 @@ watch(isMobile, (value) => {
                           {{ row.is_in_today ? "撤销今日" : "加入今日" }}
                         </el-button>
                         <el-button
+                          v-if="canDeleteTodos"
                           link
                           type="danger"
                           :icon="Delete"

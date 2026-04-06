@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Filter, MoreFilled } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -34,6 +34,7 @@ const showCustomerRowActionSheet = ref(false);
 const selectedCustomerActionRow = ref<CustomerListItem | null>(null);
 const customerMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.customers", { keyword: "" });
 const canManageGrant = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canDeleteCustomer = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canCreateBilling = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
@@ -50,6 +51,9 @@ const customerRowActionItems = computed(() => {
     { key: "lead", label: "开发来源", description: "回看这位客户的开发来源与线索详情。" },
     canCreateBilling.value
       ? { key: "billing", label: "新增收费", description: "直接给当前客户补收费单。" }
+      : null,
+    canDeleteCustomer.value
+      ? { key: "delete", label: "删除客户", description: "删除前需要输入客户名称确认。", danger: true }
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; description: string }>;
 });
@@ -129,10 +133,43 @@ function openCreateBillingDialog(row: CustomerListItem) {
   showCreateBillingDialog.value = true;
 }
 
+async function removeCustomer(row: CustomerListItem) {
+  if (!canDeleteCustomer.value) {
+    ElMessage.warning("只有老板和管理员可以删除客户");
+    return;
+  }
+  const expectedName = (row.name || "").trim() || (row.contact_name || "").trim() || `客户#${row.id}`;
+  try {
+    const result = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这位客户。`,
+      "删除客户",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
+      },
+    )) as { value: string };
+    if ((result.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
+    await apiClient.delete(`/customers/${row.id}`, {
+      params: { confirm_name: expectedName },
+    });
+    ElMessage.success("客户已删除");
+    await fetchCustomers();
+  } catch (error: any) {
+    if (error === "cancel" || error?.message === "cancel") return;
+    ElMessage.error(error?.response?.data?.detail ?? "删除客户失败");
+  }
+}
+
 function handleMobileCommand(command: string, row: CustomerListItem) {
   if (command === "detail") openCustomerDetail(row);
   if (command === "billing") openCreateBillingDialog(row);
   if (command === "lead") openLeadDetail(row);
+  if (command === "delete") void removeCustomer(row);
 }
 
 function onMobileMenuCommand(command: { action: string; row: CustomerListItem }) {
@@ -465,6 +502,7 @@ onMounted(async () => {
                 <el-dropdown-menu>
                   <el-dropdown-item :command="{ action: 'lead', row }">开发来源</el-dropdown-item>
                   <el-dropdown-item v-if="canCreateBilling" :command="{ action: 'billing', row }">新增收费</el-dropdown-item>
+                  <el-dropdown-item v-if="canDeleteCustomer" :command="{ action: 'delete', row }">删除客户</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -531,6 +569,7 @@ onMounted(async () => {
                 新增收费
               </el-button>
               <el-button link @click="openLeadDetail(row)">开发来源</el-button>
+              <el-button v-if="canDeleteCustomer" link type="danger" @click="removeCustomer(row)">删除</el-button>
             </el-space>
           </template>
         </el-table-column>
@@ -552,7 +591,7 @@ onMounted(async () => {
         />
       </el-form-item>
       <el-text type="info" size="small">
-        同一客户可以连续增行多个收费项目，统一保存。常规新单只需填写收费类别、金额、服务开始日期、到期日期。
+        同一客户可以连续增行多个收费项目，统一保存。按期项目填写开始月份即可默认生成 12 个月合同；按次项目再填写实际日期。
       </el-text>
     </el-form>
     <BillingDraftRowsEditor v-model="billingRows" title-prefix="收费明细" />

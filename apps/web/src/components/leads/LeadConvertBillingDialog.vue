@@ -37,7 +37,7 @@ const dialogTitle = computed(() => `添加收费信息 - ${props.customerName}`)
         <el-input :model-value="props.customerName" disabled />
       </el-form-item>
       <el-text type="info" size="small">
-        同一客户可以连续增行多个收费项目，统一保存。常规新单只需填写收费类别、金额、服务开始日期、到期日期。
+        同一客户可以连续增行多个收费项目，统一保存。按期项目填写开始月份即可默认生成 12 个月合同；按次项目再填写实际日期。
       </el-text>
     </el-form>
     <BillingDraftRowsEditor v-model="rowsModel" title-prefix="收费明细" />

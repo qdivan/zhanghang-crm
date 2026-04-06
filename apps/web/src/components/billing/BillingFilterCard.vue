@@ -221,6 +221,7 @@ const hasAdvancedValue = computed(() =>
 .billing-filter-form :deep(.el-select__wrapper),
 .billing-filter-form :deep(.el-date-editor.el-input__wrapper) {
   min-height: 34px;
+  min-width: 180px;
 }
 
 .label-with-help {

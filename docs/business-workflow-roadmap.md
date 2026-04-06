@@ -1,5 +1,7 @@
 # 业务流程改造路线图（确认稿 v2）
 
+> 2026-04-06 调整：多租户暂缓，不纳入当前路线图；备份架构已单独收口，见 [backup-architecture.md](/Users/shangyifan/Documents/New%20project/docs/backup-architecture.md)。
+
 ## 1. 需求总览（已合并你这几轮补充）
 
 1. 新客线索成交后，立即进入收费录入。

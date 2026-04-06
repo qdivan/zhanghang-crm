@@ -52,24 +52,29 @@ const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_n
         <el-button :loading="props.loading" @click="emit('query')">查询</el-button>
       </el-form-item>
       <el-form-item>
-        <el-button v-if="props.hasDateFilter" text @click="emit('reset')">查看全部</el-button>
+          <el-button v-if="props.hasDateFilter" text @click="emit('reset')">重置到汇总范围</el-button>
       </el-form-item>
     </el-form>
 
     <el-row :gutter="12" class="ledger-stats">
-      <el-col :span="8">
+      <el-col :span="6">
+        <el-card shadow="never">
+          <el-statistic title="期初余额" :value="props.data?.opening_balance ?? 0" />
+        </el-card>
+      </el-col>
+      <el-col :span="6">
         <el-card shadow="never">
           <el-statistic title="应收合计" :value="props.data?.receivable_total ?? 0" />
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="6">
         <el-card shadow="never">
           <el-statistic title="实收合计" :value="props.data?.received_total ?? 0" />
         </el-card>
       </el-col>
-      <el-col :span="8">
+      <el-col :span="6">
         <el-card shadow="never">
-          <el-statistic title="余额" :value="props.data?.balance ?? 0" />
+          <el-statistic title="期末余额" :value="props.data?.closing_balance ?? props.data?.balance ?? 0" />
         </el-card>
       </el-col>
     </el-row>

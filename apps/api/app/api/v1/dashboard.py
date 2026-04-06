@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user
@@ -11,6 +11,7 @@ from app.models import BillingRecord, Customer, CustomerTimelineEvent, Lead, Tod
 from app.schemas.dashboard import DashboardSummaryOut, SystemTodoOut
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
+from app.services.soft_delete import active_filter
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -47,12 +48,13 @@ def _parse_due_month(value: str) -> Optional[date]:
 
 
 def _apply_lead_scope(stmt, db: Session, current_user: User):
+    stmt = stmt.where(active_filter(Lead))
     if current_user.role == "MANAGER":
         managed_ids = get_manager_subordinate_ids(db, current_user.id)
         return stmt.where(
             or_(
                 Lead.owner_id.in_(managed_ids),
-                Lead.customer.has(Customer.assigned_accountant_id.in_(managed_ids)),
+                Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids))),
             )
         )
     if current_user.role != "ACCOUNTANT":
@@ -60,12 +62,13 @@ def _apply_lead_scope(stmt, db: Session, current_user: User):
     return stmt.where(
         or_(
             Lead.owner_id == current_user.id,
-            Lead.customer.has(Customer.assigned_accountant_id == current_user.id),
+            Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id)),
         )
     )
 
 
 def _apply_customer_scope(stmt, db: Session, current_user: User):
+    stmt = stmt.where(active_filter(Customer))
     if current_user.role == "MANAGER":
         managed_ids = get_manager_subordinate_ids(db, current_user.id)
         return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
@@ -77,17 +80,23 @@ def _apply_customer_scope(stmt, db: Session, current_user: User):
 
 
 def _apply_billing_scope(stmt, db: Session, current_user: User):
+    stmt = stmt.where(active_filter(BillingRecord))
     if current_user.role == "MANAGER":
         managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(BillingRecord.customer.has(Customer.assigned_accountant_id.in_(managed_ids)))
+        return stmt.where(
+            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids)))
+        )
     if current_user.role != "ACCOUNTANT":
         return stmt
     if has_module_read_grant(db, current_user.id, "BILLING"):
         return stmt
-    return stmt.where(BillingRecord.customer.has(Customer.assigned_accountant_id == current_user.id))
+    return stmt.where(
+        BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id))
+    )
 
 
 def _apply_billing_system_todo_scope(stmt, db: Session, current_user: User):
+    stmt = stmt.where(active_filter(Customer))
     if current_user.role == "MANAGER":
         managed_ids = get_manager_subordinate_ids(db, current_user.id)
         return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
@@ -301,6 +310,7 @@ def get_dashboard_summary(
         select(func.count(TodoItem.id)).where(
             TodoItem.assignee_user_id == current_user.id,
             TodoItem.status == "OPEN",
+            active_filter(TodoItem),
         )
     ).scalar_one()
 

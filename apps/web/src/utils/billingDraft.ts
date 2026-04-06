@@ -50,12 +50,14 @@ export const billingFieldHelp = {
   charge_category: "同一客户可同时存在多条收费项，例如代账、注册、咨询分别增行录入。",
   charge_mode: "按期用于持续服务合同；按次用于股权变更、咨询等一次性项目。",
   amount_basis:
-    "金额口径用于解释费用单位。按次会固定为单次费用；按期会先按服务开始日期给出默认到期日期。",
+    "金额口径只用于解释这笔总费用是月费、年费还是整个合同周期总价，不再决定合同月份。",
   summary: "让会计和老板一眼看懂这条收费单在做什么，例如“2026年度代账服务”。",
-  total_fee: "该收费项整个服务期应收的总金额。",
-  monthly_fee: "用于统计月度盘子。按月费可直接填月费；按年费或周期总价可填折算月费。",
-  collection_start_date: "服务实际开始日期。系统会据此自动推导内部开始月份。",
-  due_month: "合同或服务结束日期。按期会先按服务开始日期和金额口径自动带出，仍可手动修改。",
+  total_fee: "优先录入整个合同周期应收的总费用；按期项目会根据合同月份自动折算月费。",
+  monthly_fee: "如果更习惯按月谈价，也可以直接录月费；系统会根据合同月份自动回算总费用。",
+  period_start_month: "按期项目从哪个月份开始计费。选定后系统会默认生成 12 个月合同。",
+  period_end_month: "按期项目默认从开始月份顺延 12 个月，可按实际合同手动改短或改长。",
+  collection_start_date: "按期项目会自动换算为开始月份的 1 号；按次项目可录实际开始日期。",
+  due_month: "按期项目会自动换算为结束月份的月末；按次项目默认等于服务开始日期。",
   payment_method: "预收表示服务开始前先收费；后收表示服务完成或账期结束后再收费。",
   billing_cycle_text: "给老板/会计看的补充说明，不参与核心金额计算。",
   status: "通常由系统根据总费用和已收金额自动得出；只有补录历史单据时才需要手动改。",
@@ -90,23 +92,6 @@ function formatDateText(value: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function subtractDays(value: Date, days: number): Date {
-  const next = new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  next.setDate(next.getDate() - days);
-  return next;
-}
-
-function addMonthsClamped(value: Date, months: number): Date {
-  const year = value.getFullYear();
-  const month = value.getMonth();
-  const day = value.getDate();
-  const targetMonthIndex = year * 12 + month + months;
-  const targetYear = Math.floor(targetMonthIndex / 12);
-  const targetMonth = targetMonthIndex % 12;
-  const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
-  return new Date(targetYear, targetMonth, Math.min(day, lastDay));
-}
-
 function addYearsClamped(value: Date, years: number): Date {
   const year = value.getFullYear() + years;
   const month = value.getMonth();
@@ -130,18 +115,18 @@ function monthFromDateText(dateText: string): string {
   return token.length >= 7 ? token.slice(0, 7) : "";
 }
 
-function deriveDueDateFromDraft(draft: BillingCreatePayload): string {
-  const serviceStart = parseDateText(draft.collection_start_date);
-  if (!serviceStart) return "";
+function normalizeMonthText(monthText: string): string {
+  const token = (monthText || "").trim();
+  if (token.length !== 7 || token[4] !== "-") return "";
+  const year = Number(token.slice(0, 4));
+  const month = Number(token.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return "";
+  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}`;
+}
 
-  if (draft.charge_mode === "ONE_TIME") {
-    return formatDateText(serviceStart);
-  }
-
-  if (draft.amount_basis === "MONTHLY") {
-    return formatDateText(subtractDays(addMonthsClamped(serviceStart, 1), 1));
-  }
-  return formatDateText(subtractDays(addYearsClamped(serviceStart, 1), 1));
+export function firstDayOfMonthText(monthText: string): string {
+  const normalized = normalizeMonthText(monthText);
+  return normalized ? `${normalized}-01` : "";
 }
 
 export function getAmountBasisOptions(chargeMode: BillingCreatePayload["charge_mode"]) {
@@ -234,10 +219,6 @@ export function syncBillingDerivedDates(
 ) {
   applyBillingModeDefaults(draft);
 
-  if (draft.collection_start_date) {
-    draft.period_start_month = monthFromDateText(draft.collection_start_date);
-  }
-
   if (draft.charge_mode === "ONE_TIME") {
     if (options.recalculateDue || !draft.due_month) {
       draft.due_month = draft.collection_start_date || todayInBrowserTimeZone();
@@ -247,19 +228,16 @@ export function syncBillingDerivedDates(
     return;
   }
 
-  if (!draft.collection_start_date && draft.period_start_month) {
-    draft.collection_start_date = `${draft.period_start_month}-01`;
-  }
+  const startMonth = normalizeMonthText(draft.period_start_month) || normalizeMonthText(monthFromDateText(draft.collection_start_date));
+  const endMonth =
+    normalizeMonthText(draft.period_end_month) ||
+    normalizeMonthText(monthFromDateText(draft.due_month)) ||
+    (startMonth ? shiftMonth(startMonth, 11) : "");
 
-  if (draft.collection_start_date && (options.recalculateDue || !draft.due_month)) {
-    draft.due_month = deriveDueDateFromDraft(draft);
-  }
-
-  if (draft.due_month) {
-    draft.period_end_month = monthFromDateText(draft.due_month);
-  } else if (draft.period_end_month) {
-    draft.due_month = lastDayOfMonthText(draft.period_end_month);
-  }
+  draft.period_start_month = startMonth;
+  draft.period_end_month = endMonth;
+  draft.collection_start_date = firstDayOfMonthText(startMonth);
+  draft.due_month = lastDayOfMonthText(endMonth);
 }
 
 export function validateBillingDraft(draft: BillingCreatePayload, index: number): string | null {
@@ -270,22 +248,43 @@ export function validateBillingDraft(draft: BillingCreatePayload, index: number)
   if (draft.total_fee <= 0) {
     return `${rowLabel}总费用必须大于 0`;
   }
-  if (!draft.collection_start_date) {
-    return `${rowLabel}请填写服务开始日期`;
+  if (draft.charge_mode === "ONE_TIME") {
+    if (!draft.collection_start_date) {
+      return `${rowLabel}请填写服务开始日期`;
+    }
+    if (!draft.due_month) {
+      return `${rowLabel}请填写到期日期`;
+    }
+    const serviceStart = parseDateText(draft.collection_start_date);
+    const dueDate = parseDateText(draft.due_month);
+    if (!serviceStart) {
+      return `${rowLabel}服务开始日期格式不正确`;
+    }
+    if (!dueDate) {
+      return `${rowLabel}到期日期格式不正确`;
+    }
+    if (dueDate < serviceStart) {
+      return `${rowLabel}到期日期不能早于服务开始日期`;
+    }
+    return null;
   }
-  if (!draft.due_month) {
-    return `${rowLabel}请填写到期日期`;
+
+  const startMonth = normalizeMonthText(draft.period_start_month);
+  const endMonth = normalizeMonthText(draft.period_end_month);
+  if (!startMonth) {
+    return `${rowLabel}请填写开始月份`;
   }
-  const serviceStart = parseDateText(draft.collection_start_date);
-  const dueDate = parseDateText(draft.due_month);
-  if (!serviceStart) {
-    return `${rowLabel}服务开始日期格式不正确`;
+  if (!endMonth) {
+    return `${rowLabel}请填写结束月份`;
   }
-  if (!dueDate) {
-    return `${rowLabel}到期日期格式不正确`;
+  if (endMonth < startMonth) {
+    return `${rowLabel}结束月份不能早于开始月份`;
   }
-  if (dueDate < serviceStart) {
-    return `${rowLabel}到期日期不能早于服务开始日期`;
+  if (!draft.collection_start_date || !parseDateText(draft.collection_start_date)) {
+    return `${rowLabel}系统未生成开始日期，请重新选择开始月份`;
+  }
+  if (!draft.due_month || !parseDateText(draft.due_month)) {
+    return `${rowLabel}系统未生成到期日期，请重新选择结束月份`;
   }
   return null;
 }

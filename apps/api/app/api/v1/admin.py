@@ -7,11 +7,26 @@ from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
-from app.models import DataAccessGrant, LdapSetting, OperationLog, SecuritySetting, User
+from app.models import (
+    AddressResource,
+    AddressResourceCompany,
+    BillingRecord,
+    CommonLibraryItem,
+    Customer,
+    DataAccessGrant,
+    LdapSetting,
+    Lead,
+    OperationLog,
+    SecuritySetting,
+    TodoItem,
+    User,
+)
 from app.schemas.admin import (
     DataAccessGrantCreate,
     DataAccessGrantOut,
     DataAccessGrantUpdate,
+    DeletedRecordOut,
+    DeletedRecordRestoreOut,
     LdapSettingsOut,
     LdapSettingsUpdate,
     LdapSyncResponse,
@@ -23,6 +38,7 @@ from app.services.data_access import has_overlapping_active_grant
 from app.services.audit import write_operation_log
 from app.services.login_security import get_or_create_security_setting
 from app.services.ldap_sync import get_or_create_ldap_setting, sync_ldap_users
+from app.services.soft_delete import deleted_filter, restore_deleted
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles("OWNER", "ADMIN"))])
 
@@ -106,6 +122,34 @@ def _get_grant_or_404(db: Session, grant_id: int) -> DataAccessGrant:
     if grant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据授权不存在")
     return grant
+
+
+def _keyword_matches(keyword: Optional[str], *values: object) -> bool:
+    raw = (keyword or "").strip().lower()
+    if not raw:
+        return True
+    return any(raw in str(value or "").lower() for value in values)
+
+
+def _to_deleted_record_out(
+    *,
+    entity_type: str,
+    entity_id: int,
+    display_name: str,
+    detail: str,
+    deleted_at: datetime,
+    deleted_by_user_id: Optional[int],
+    deleted_by_username: Optional[str],
+) -> DeletedRecordOut:
+    return DeletedRecordOut(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        display_name=display_name,
+        detail=detail,
+        deleted_at=deleted_at,
+        deleted_by_user_id=deleted_by_user_id,
+        deleted_by_username=deleted_by_username or "-",
+    )
 
 
 @router.get("/ldap/settings", response_model=LdapSettingsOut)
@@ -217,6 +261,7 @@ def update_security_settings(
 def list_operation_logs(
     action: Optional[str] = Query(default=None),
     entity_type: Optional[str] = Query(default=None),
+    audit_scope: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None),
     limit: int = Query(default=200, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -232,6 +277,11 @@ def list_operation_logs(
         stmt = stmt.where(OperationLog.action == action)
     if entity_type:
         stmt = stmt.where(OperationLog.entity_type == entity_type)
+    normalized_audit_scope = (audit_scope or "").strip().upper()
+    if normalized_audit_scope == "DELETE":
+        stmt = stmt.where(OperationLog.action.ilike("%DELETED"))
+    elif normalized_audit_scope == "RESTORE":
+        stmt = stmt.where(OperationLog.action.ilike("%RESTORED"))
     if keyword:
         key = f"%{keyword.strip()}%"
         stmt = stmt.where(
@@ -260,6 +310,285 @@ def list_operation_logs(
             )
         )
     return result
+
+
+@router.get("/deleted-records", response_model=list[DeletedRecordOut])
+def list_deleted_records(
+    entity_type: Optional[str] = Query(default=None),
+    keyword: Optional[str] = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    normalized_type = (entity_type or "").strip().upper()
+    deleted_by_user = aliased(User)
+    per_type_limit = min(max(limit, 50), 500)
+    results: list[DeletedRecordOut] = []
+
+    if not normalized_type or normalized_type == "LEAD":
+        rows = db.execute(
+            select(Lead, deleted_by_user.username)
+            .outerjoin(deleted_by_user, Lead.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(Lead))
+            .order_by(Lead.deleted_at.desc(), Lead.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for lead, deleted_by_username in rows:
+            display_name = (lead.name or "").strip() or (lead.contact_name or "").strip() or f"线索#{lead.id}"
+            detail = f"联系人：{(lead.contact_name or '').strip() or '-'}"
+            if _keyword_matches(keyword, display_name, detail, lead.source, lead.main_business):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="LEAD",
+                        entity_id=lead.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=lead.deleted_at or lead.updated_at,
+                        deleted_by_user_id=lead.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "CUSTOMER":
+        rows = db.execute(
+            select(Customer, deleted_by_user.username)
+            .outerjoin(deleted_by_user, Customer.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(Customer))
+            .order_by(Customer.deleted_at.desc(), Customer.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for customer, deleted_by_username in rows:
+            display_name = (customer.name or "").strip() or (customer.contact_name or "").strip() or f"客户#{customer.id}"
+            detail = f"联系人：{(customer.contact_name or '').strip() or '-'}"
+            if _keyword_matches(keyword, display_name, detail, customer.phone):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="CUSTOMER",
+                        entity_id=customer.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=customer.deleted_at or customer.created_at,
+                        deleted_by_user_id=customer.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "BILLING":
+        rows = db.execute(
+            select(BillingRecord, deleted_by_user.username)
+            .outerjoin(deleted_by_user, BillingRecord.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(BillingRecord))
+            .order_by(BillingRecord.deleted_at.desc(), BillingRecord.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for record, deleted_by_username in rows:
+            summary_text = (record.summary or "").strip() or (record.charge_category or "").strip() or f"收费单#{record.serial_no or record.id}"
+            display_name = f"{(record.customer_name or '').strip() or '未命名客户'} · {summary_text}"
+            detail = f"序号：{record.serial_no}，总费用：{float(record.total_fee or 0):.2f}"
+            if _keyword_matches(keyword, display_name, detail, record.note, record.charge_category):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="BILLING",
+                        entity_id=record.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=record.deleted_at or record.updated_at,
+                        deleted_by_user_id=record.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "TODO":
+        rows = db.execute(
+            select(TodoItem, deleted_by_user.username)
+            .outerjoin(deleted_by_user, TodoItem.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(TodoItem))
+            .order_by(TodoItem.deleted_at.desc(), TodoItem.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for todo, deleted_by_username in rows:
+            display_name = (todo.title or "").strip() or f"待办#{todo.id}"
+            detail = f"优先级：{todo.priority or '-'}"
+            if _keyword_matches(keyword, display_name, detail, todo.description):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="TODO",
+                        entity_id=todo.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=todo.deleted_at or todo.updated_at,
+                        deleted_by_user_id=todo.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "ADDRESS_RESOURCE":
+        rows = db.execute(
+            select(AddressResource, deleted_by_user.username)
+            .outerjoin(deleted_by_user, AddressResource.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(AddressResource))
+            .order_by(AddressResource.deleted_at.desc(), AddressResource.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for resource, deleted_by_username in rows:
+            display_name = (resource.category or "").strip() or (resource.contact_info or "").strip() or f"地址资源#{resource.id}"
+            detail = f"联系人：{(resource.contact_info or '').strip() or '-'}"
+            if _keyword_matches(keyword, display_name, detail, resource.description, resource.notes):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="ADDRESS_RESOURCE",
+                        entity_id=resource.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=resource.deleted_at or resource.updated_at,
+                        deleted_by_user_id=resource.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "ADDRESS_RESOURCE_COMPANY":
+        rows = db.execute(
+            select(AddressResourceCompany, deleted_by_user.username)
+            .outerjoin(deleted_by_user, AddressResourceCompany.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(AddressResourceCompany))
+            .order_by(AddressResourceCompany.deleted_at.desc(), AddressResourceCompany.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for item, deleted_by_username in rows:
+            display_name = (item.company_name or "").strip() or f"已服务公司#{item.id}"
+            detail = f"挂靠地址ID：{item.address_resource_id}"
+            if _keyword_matches(keyword, display_name, detail, item.notes):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="ADDRESS_RESOURCE_COMPANY",
+                        entity_id=item.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=item.deleted_at or item.updated_at,
+                        deleted_by_user_id=item.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "COMMON_LIBRARY":
+        rows = db.execute(
+            select(CommonLibraryItem, deleted_by_user.username)
+            .outerjoin(deleted_by_user, CommonLibraryItem.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(CommonLibraryItem))
+            .order_by(CommonLibraryItem.deleted_at.desc(), CommonLibraryItem.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for item, deleted_by_username in rows:
+            display_name = (item.title or "").strip() or (item.category or "").strip() or f"常用资料#{item.id}"
+            detail = f"分类：{(item.category or '').strip() or '-'}"
+            if _keyword_matches(keyword, display_name, detail, item.content, item.phone, item.address):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="COMMON_LIBRARY",
+                        entity_id=item.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=item.deleted_at or item.updated_at,
+                        deleted_by_user_id=item.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    results.sort(key=lambda item: (item.deleted_at, item.entity_type, item.entity_id), reverse=True)
+    return results[:limit]
+
+
+@router.post("/deleted-records/{entity_type}/{entity_id}/restore", response_model=DeletedRecordRestoreOut)
+def restore_deleted_record(
+    entity_type: str,
+    entity_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    normalized_type = (entity_type or "").strip().upper()
+    display_name = f"{normalized_type}#{entity_id}"
+
+    if normalized_type == "LEAD":
+        lead = db.execute(select(Lead).where(Lead.id == entity_id, deleted_filter(Lead))).scalar_one_or_none()
+        if lead is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除线索不存在")
+        restore_deleted(lead)
+        display_name = (lead.name or "").strip() or (lead.contact_name or "").strip() or f"线索#{lead.id}"
+        action = "LEAD_RESTORED"
+    elif normalized_type == "CUSTOMER":
+        customer = db.execute(select(Customer).where(Customer.id == entity_id, deleted_filter(Customer))).scalar_one_or_none()
+        if customer is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除客户不存在")
+        restore_deleted(customer)
+        source_lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id)).scalar_one_or_none()
+        if source_lead is not None:
+            source_lead.status = "CONVERTED"
+            source_lead.updated_at = datetime.utcnow()
+        display_name = (customer.name or "").strip() or (customer.contact_name or "").strip() or f"客户#{customer.id}"
+        action = "CUSTOMER_RESTORED"
+    elif normalized_type == "BILLING":
+        record = db.execute(select(BillingRecord).where(BillingRecord.id == entity_id, deleted_filter(BillingRecord))).scalar_one_or_none()
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除收费单不存在")
+        restore_deleted(record)
+        summary_text = (record.summary or "").strip() or (record.charge_category or "").strip() or f"收费单#{record.serial_no or record.id}"
+        display_name = f"{(record.customer_name or '').strip() or '未命名客户'} · {summary_text}"
+        action = "BILLING_RECORD_RESTORED"
+    elif normalized_type == "TODO":
+        todo = db.execute(select(TodoItem).where(TodoItem.id == entity_id, deleted_filter(TodoItem))).scalar_one_or_none()
+        if todo is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除待办不存在")
+        restore_deleted(todo)
+        display_name = (todo.title or "").strip() or f"待办#{todo.id}"
+        action = "TODO_RESTORED"
+    elif normalized_type == "ADDRESS_RESOURCE":
+        resource = db.execute(
+            select(AddressResource).where(AddressResource.id == entity_id, deleted_filter(AddressResource))
+        ).scalar_one_or_none()
+        if resource is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除挂靠地址不存在")
+        restore_deleted(resource)
+        display_name = (resource.category or "").strip() or (resource.contact_info or "").strip() or f"地址资源#{resource.id}"
+        action = "ADDRESS_RESOURCE_RESTORED"
+    elif normalized_type == "ADDRESS_RESOURCE_COMPANY":
+        item = db.execute(
+            select(AddressResourceCompany).where(AddressResourceCompany.id == entity_id, deleted_filter(AddressResourceCompany))
+        ).scalar_one_or_none()
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除已服务公司不存在")
+        parent = db.execute(select(AddressResource).where(AddressResource.id == item.address_resource_id)).scalar_one_or_none()
+        if parent is None or parent.is_deleted:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先恢复所属挂靠地址")
+        restore_deleted(item)
+        display_name = (item.company_name or "").strip() or f"已服务公司#{item.id}"
+        action = "ADDRESS_RESOURCE_COMPANY_RESTORED"
+    elif normalized_type == "COMMON_LIBRARY":
+        item = db.execute(
+            select(CommonLibraryItem).where(CommonLibraryItem.id == entity_id, deleted_filter(CommonLibraryItem))
+        ).scalar_one_or_none()
+        if item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除常用资料不存在")
+        restore_deleted(item)
+        display_name = (item.title or "").strip() or (item.category or "").strip() or f"常用资料#{item.id}"
+        action = "COMMON_LIBRARY_ITEM_RESTORED"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的恢复类型")
+
+    restored_at = datetime.utcnow()
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action=action,
+        entity_type=normalized_type,
+        entity_id=entity_id,
+        detail=display_name,
+    )
+    db.commit()
+    return DeletedRecordRestoreOut(
+        entity_type=normalized_type,
+        entity_id=entity_id,
+        display_name=display_name,
+        restored_at=restored_at,
+    )
 
 
 @router.get("/data-access-grants", response_model=list[DataAccessGrantOut])

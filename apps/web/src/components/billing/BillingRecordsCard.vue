@@ -11,6 +11,7 @@ const props = defineProps<{
   activeCustomerId: number | null;
   canManageAssignment: boolean;
   canManageLifecycle: boolean;
+  canDeleteRecord: boolean;
   canWriteRecord: (row: BillingRecord) => boolean;
 }>();
 
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   assignment: [row: BillingRecord];
   renew: [row: BillingRecord];
   terminate: [row: BillingRecord];
+  delete: [row: BillingRecord];
 }>();
 
 const { isMobile } = useResponsive();
@@ -83,6 +85,7 @@ function handleMenuCommand(command: { action: string; row: BillingRecord }) {
   if (action === "assignment") emit("assignment", row);
   if (action === "renew") emit("renew", row);
   if (action === "terminate") emit("terminate", row);
+  if (action === "delete") emit("delete", row);
 }
 
 function billingRowClassName({ row }: { row: BillingRecord }) {
@@ -153,6 +156,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
                 <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
+                <el-dropdown-item v-if="props.canDeleteRecord" :command="{ action: 'delete', row }">删除收费单</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -226,6 +230,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
                   <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
                   <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
                   <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
+                  <el-dropdown-item v-if="props.canDeleteRecord" :command="{ action: 'delete', row }">删除收费单</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>

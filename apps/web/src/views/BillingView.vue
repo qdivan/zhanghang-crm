@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Filter } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
@@ -27,10 +27,12 @@ import type {
   BillingActivity,
   BillingCreatePayload,
   BillingAssignmentItem,
+  BillingCustomerSummaryItem,
   BillingExecutionLogItem,
   BillingLedgerData,
   BillingPaymentSuggestion,
   BillingRecord,
+  BillingSummaryData,
   CustomerListItem,
 } from "../types";
 import {
@@ -38,6 +40,7 @@ import {
   prepareBillingDraftsForSubmit,
   shiftDateText,
   shiftMonth,
+  syncBillingDerivedDates,
   validateBillingDraft,
 } from "../utils/billingDraft";
 import { normalizeDateText } from "../utils/dateInput";
@@ -95,14 +98,18 @@ const billingListHydrated = ref(false);
 const billingSummaryHydrated = ref(false);
 const rows = ref<BillingRecord[]>([]);
 const customers = ref<CustomerListItem[]>([]);
-const summary = ref({
+const summary = ref<BillingSummaryData>({
   total_records: 0,
   total_fee: 0,
   total_monthly_fee: 0,
   payment_method_distribution: [] as Array<{ payment_method: string; count: number }>,
   status_distribution: [] as Array<{ status: string; count: number }>,
   receipt_account_distribution: [] as Array<{ receipt_account: string; payment_count: number; total_amount: number }>,
+  summary_date_from: null,
+  summary_date_to: null,
+  customer_summaries: [],
 });
+const summaryDateRange = ref<[string, string] | null>(null);
 
 const billingQuickView = ref<BillingQuickView>("ALL");
 const filters = reactive(createBillingFilters());
@@ -161,6 +168,7 @@ const splitForm = reactive<BillingSplitPaymentForm>(createBillingSplitPaymentFor
 const canManageBillingLifecycle = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
+const canDeleteBillingRecord = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const showTerminateDialog = ref(false);
 const terminating = ref(false);
 const terminateTargetRecord = ref<BillingRecord | null>(null);
@@ -179,9 +187,17 @@ const canViewReceiptLedger = computed(
     auth.user?.role === "MANAGER" ||
     Boolean(auth.user?.granted_read_modules.includes("BILLING")),
 );
+const defaultLedgerDateRange = computed(() => copyDateRange(summaryDateRange.value));
 const ledgerHasDateFilter = computed(() => {
-  return Boolean(ledgerDateRange.value?.[0] || ledgerDateRange.value?.[1]);
+  const current = ledgerDateRange.value;
+  const baseline = defaultLedgerDateRange.value;
+  if (!current && !baseline) return false;
+  if (!current || !baseline) return true;
+  return current[0] !== baseline[0] || current[1] !== baseline[1];
 });
+if (!summaryDateRange.value) {
+  summaryDateRange.value = getDefaultSummaryDateRange();
+}
 const routeActionHandling = ref(false);
 const billingRouteQueueHandling = ref(false);
 const showMobileFilters = ref(false);
@@ -269,6 +285,56 @@ function formatAmount(value: number): string {
     minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
     maximumFractionDigits: 2,
   });
+}
+
+function getDefaultSummaryDateRange(): [string, string] {
+  const today = todayInBrowserTimeZone();
+  const [yearText] = today.split("-");
+  const year = Number(yearText || "0");
+  return [`${String(year - 1)}-01-01`, today];
+}
+
+function copyDateRange(range: [string, string] | null): [string, string] | null {
+  return range ? [range[0], range[1]] : null;
+}
+
+function createLedgerTargetRecord(
+  customerId: number,
+  customerName: string,
+  customerContactName = "",
+): BillingRecord {
+  return {
+    id: 0,
+    serial_no: 0,
+    customer_id: customerId,
+    customer_name: customerName,
+    charge_category: "",
+    charge_mode: "PERIODIC",
+    amount_basis: "MONTHLY",
+    summary: "",
+    customer_contact_name: customerContactName,
+    accountant_username: "",
+    total_fee: 0,
+    monthly_fee: 0,
+    billing_cycle_text: "",
+    period_start_month: "",
+    period_end_month: "",
+    collection_start_date: "",
+    due_month: "",
+    payment_method: "后收",
+    status: "FULL_ARREARS",
+    received_amount: 0,
+    outstanding_amount: 0,
+    receivable_period_text: "",
+    latest_payment_at: null,
+    latest_payment_amount: 0,
+    latest_receipt_account: "",
+    note: "",
+    extra_note: "",
+    color_tag: "",
+    created_at: "",
+    updated_at: "",
+  };
 }
 
 const mobileFocusSummary = computed(() => {
@@ -459,18 +525,24 @@ async function fetchRecords() {
 async function fetchSummary() {
   summaryLoading.value = true;
   try {
-    const resp = await apiClient.get("/billing-records/summary", {
-      params: {
-        keyword: filters.keyword || undefined,
-        customer_id: filters.customer_id || undefined,
-        receipt_account: filters.receipt_account || undefined,
-        billing_month: filters.billing_month || undefined,
-        contact_name: filters.contact_name || undefined,
-        payment_method: filters.payment_method || undefined,
-        status: filters.status || undefined,
-      },
+    const params: Record<string, string | number | undefined> = {
+      keyword: filters.keyword || undefined,
+      customer_id: filters.customer_id || undefined,
+      receipt_account: filters.receipt_account || undefined,
+      billing_month: filters.billing_month || undefined,
+      contact_name: filters.contact_name || undefined,
+      payment_method: filters.payment_method || undefined,
+      status: filters.status || undefined,
+      date_from: summaryDateRange.value?.[0] || undefined,
+      date_to: summaryDateRange.value?.[1] || undefined,
+    };
+    const resp = await apiClient.get<BillingSummaryData>("/billing-records/summary", {
+      params,
     });
     summary.value = resp.data;
+    if (!summaryDateRange.value && resp.data.summary_date_from && resp.data.summary_date_to) {
+      summaryDateRange.value = [resp.data.summary_date_from, resp.data.summary_date_to];
+    }
   } catch (error) {
     ElMessage.error("获取收费统计失败");
   } finally {
@@ -557,6 +629,9 @@ const billingRowActionItems = computed(() => {
     canManageBillingLifecycle.value
       ? { key: "terminate", label: "提前终止", description: "按提前结束情况冲减费用。", danger: true }
       : null,
+    canDeleteBillingRecord.value
+      ? { key: "delete", label: "删除收费单", description: "删除前需要输入客户名和摘要确认。", danger: true }
+      : null,
   ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
 });
 
@@ -616,7 +691,7 @@ function openCreateDialog() {
 }
 
 function buildRenewDraft(record: BillingRecord): BillingCreatePayload {
-  return {
+  const draft: BillingCreatePayload = {
     serial_no: null,
     customer_id: record.customer_id,
     charge_category: record.charge_category,
@@ -637,6 +712,8 @@ function buildRenewDraft(record: BillingRecord): BillingCreatePayload {
     extra_note: record.extra_note || "",
     color_tag: record.color_tag || "",
   };
+  syncBillingDerivedDates(draft);
+  return draft;
 }
 
 function openRenewDialog(row: BillingRecord) {
@@ -690,6 +767,10 @@ async function submitRenew() {
 
 function openCustomerDetail(record: BillingRecord) {
   void openLedgerView(record);
+}
+
+function openCustomerLedgerSummary(row: BillingCustomerSummaryItem) {
+  void openLedgerView(createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name));
 }
 
 function openGrantSettings() {
@@ -761,14 +842,19 @@ async function deactivateAssignment(item: BillingAssignmentItem) {
   }
 }
 
-function resetSplitPaymentForm() {
-  Object.assign(splitForm, createBillingSplitPaymentForm(todayInBrowserTimeZone()));
+function resetSplitPaymentForm(customerId: number | null = splitTargetRecord.value?.customer_id ?? null) {
+  Object.assign(splitForm, createBillingSplitPaymentForm(todayInBrowserTimeZone()), {
+    customer_id: customerId,
+  });
   splitAllocations.value = [];
   splitCustomerRecordCount.value = 0;
 }
 
 async function buildSplitSuggestions() {
-  if (!splitTargetRecord.value?.customer_id) return;
+  if (!splitForm.customer_id) {
+    ElMessage.warning("请先选择收款单位");
+    return;
+  }
   if (splitForm.amount <= 0) {
     ElMessage.warning("请先输入收款总额");
     return;
@@ -776,7 +862,7 @@ async function buildSplitSuggestions() {
   splitSuggestionLoading.value = true;
   try {
     const resp = await apiClient.post<BillingPaymentSuggestion>("/billing-records/payments/suggest", {
-      customer_id: splitTargetRecord.value.customer_id,
+      customer_id: splitForm.customer_id,
       amount: splitForm.amount,
       strategy: splitForm.strategy,
     });
@@ -809,7 +895,15 @@ async function openSplitPaymentDialog(record: BillingRecord) {
   }
   splitTargetRecord.value = record;
   showSplitPaymentDialog.value = true;
-  resetSplitPaymentForm();
+  resetSplitPaymentForm(record.customer_id);
+}
+
+function openSplitPaymentForCustomer(row?: BillingCustomerSummaryItem) {
+  splitTargetRecord.value = row
+    ? createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name)
+    : null;
+  showSplitPaymentDialog.value = true;
+  resetSplitPaymentForm(row?.customer_id ?? filters.customer_id ?? null);
 }
 
 function normalizeSplitAllocationValue(row: BillingSplitAllocationRow) {
@@ -817,7 +911,10 @@ function normalizeSplitAllocationValue(row: BillingSplitAllocationRow) {
 }
 
 async function submitSplitPayment() {
-  if (!splitTargetRecord.value?.customer_id) return;
+  if (!splitForm.customer_id) {
+    ElMessage.warning("请先选择收款单位");
+    return;
+  }
   if (!splitAllocations.value.length) {
     ElMessage.warning("请先生成分摊建议");
     return;
@@ -844,7 +941,7 @@ async function submitSplitPayment() {
   splitSubmitting.value = true;
   try {
     await apiClient.post("/billing-records/payments", {
-      customer_id: splitTargetRecord.value.customer_id,
+      customer_id: splitForm.customer_id,
       occurred_at: splitForm.occurred_at,
       amount: splitForm.amount,
       strategy: splitForm.strategy,
@@ -869,6 +966,48 @@ function openTerminateDialog(row: BillingRecord) {
     reason: "提前终止合同",
   });
   showTerminateDialog.value = true;
+}
+
+function getBillingDeleteConfirmName(row: BillingRecord): string {
+  const summaryText = (row.summary || "").trim() || (row.charge_category || "").trim() || `收费单#${row.serial_no || row.id}`;
+  const customerText = (row.customer_name || "").trim() || "未命名客户";
+  return `${customerText} · ${summaryText}`;
+}
+
+async function removeBillingRecord(row: BillingRecord) {
+  if (!canDeleteBillingRecord.value) {
+    ElMessage.warning("只有老板和管理员可以删除收费单");
+    return;
+  }
+  const expectedName = getBillingDeleteConfirmName(row);
+  try {
+    const result = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这条收费单。`,
+      "删除收费单",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
+      },
+    )) as { value: string };
+    if ((result.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
+    await apiClient.delete(`/billing-records/${row.id}`, {
+      params: { confirm_name: expectedName },
+    });
+    ElMessage.success("收费单已删除");
+    if (ledgerTargetRecord.value?.id === row.id) {
+      clearLedgerPanel();
+    }
+    await fetchRecords();
+    await fetchSummary();
+  } catch (error: any) {
+    if (error === "cancel" || error?.message === "cancel") return;
+    ElMessage.error(error?.response?.data?.detail ?? "删除收费单失败");
+  }
 }
 
 async function submitTerminate() {
@@ -963,7 +1102,7 @@ async function drillDownLedgerMonth(monthText: string) {
 }
 
 async function resetLedgerDateFilter() {
-  ledgerDateRange.value = null;
+  ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   await fetchLedgerData();
 }
 
@@ -973,7 +1112,7 @@ async function openLedgerView(row: BillingRecord) {
     return;
   }
   ledgerTargetRecord.value = row;
-  ledgerDateRange.value = null;
+  ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   ledgerData.value = null;
   await fetchLedgerData();
   if (isMobile.value) {
@@ -990,7 +1129,7 @@ async function openLedgerDialog(row: BillingRecord) {
 
 function clearLedgerPanel() {
   ledgerTargetRecord.value = null;
-  ledgerDateRange.value = null;
+  ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   ledgerData.value = null;
 }
 
@@ -1101,6 +1240,7 @@ function handleBillingMenuCommand(command: string, row: BillingRecord) {
   if (command === "assignment") void openAssignmentDialog(row);
   if (command === "renew") openRenewDialog(row);
   if (command === "terminate") openTerminateDialog(row);
+  if (command === "delete") void removeBillingRecord(row);
 }
 
 function openBillingRowActions(row: BillingRecord) {
@@ -1695,11 +1835,15 @@ watch(
   <el-space v-else direction="vertical" fill :size="12">
     <BillingSummaryPanel
       :summary="summary"
-      :rows="rows"
+      :loading="summaryLoading"
+      v-model:date-range="summaryDateRange"
       :payment-method-distribution="paymentMethodDistributionNormalized"
       :receipt-account-distribution="summary.receipt_account_distribution"
       :can-view-receipt-ledger="canViewReceiptLedger"
+      @query-summary="fetchSummary"
       @open-receipt-ledger="openReceiptReconciliation"
+      @open-payment="openSplitPaymentForCustomer"
+      @open-customer-ledger="openCustomerLedgerSummary"
     />
 
     <BillingFilterCard
@@ -1717,6 +1861,7 @@ watch(
       :active-customer-id="ledgerTargetRecord?.customer_id ?? null"
       :can-manage-assignment="canManageAssignment"
       :can-manage-lifecycle="canManageBillingLifecycle"
+      :can-delete-record="canDeleteBillingRecord"
       :can-write-record="canWriteBillingRecord"
       @customer="openCustomerDetail"
       @ledger="openLedgerDialog"
@@ -1726,6 +1871,7 @@ watch(
       @assignment="openAssignmentDialog"
       @renew="openRenewDialog"
       @terminate="openTerminateDialog"
+      @delete="removeBillingRecord"
     />
     <div ref="ledgerPanelAnchor">
       <BillingLedgerPanel
@@ -1778,6 +1924,7 @@ watch(
   <BillingSplitPaymentDialog
     v-model:visible="showSplitPaymentDialog"
     :target-record="splitTargetRecord"
+    :customers="customers"
     :form="splitForm"
     :allocations="splitAllocations"
     :customer-record-count="splitCustomerRecordCount"

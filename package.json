@@ -17,6 +17,8 @@
     "prd": "npm run prod:up",
     "stop:dev": "npm run stop:docker",
     "stop:prd": "npm run prod:down",
+    "backup:prd": "bash ./scripts/backup-prd-db.sh",
+    "restore:prd": "bash ./scripts/restore-prd-db.sh",
     "test": "npm run test:api && npm run test:web",
     "test:api": "bash ./scripts/test-api.sh",
     "test:web": "npm run build:web",

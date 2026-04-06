@@ -622,7 +622,10 @@ def test_billing_defaults_for_periodic_and_one_time_modes():
             },
         )
         assert periodic_resp.status_code == 201
+        assert periodic_resp.json()["period_start_month"] == "2026-03"
         assert periodic_resp.json()["period_end_month"] == "2027-02"
+        assert periodic_resp.json()["collection_start_date"] == "2026-03-01"
+        assert periodic_resp.json()["due_month"] == "2027-02-28"
 
         one_time_resp = client.post(
             "/api/v1/billing-records",
@@ -684,7 +687,10 @@ def test_billing_batch_create_supports_multiple_rows_for_same_customer():
         assert len(records) == 2
         assert records[0]["customer_id"] == customer_id
         assert records[1]["customer_id"] == customer_id
+        assert records[0]["period_start_month"] == "2026-04"
         assert records[0]["period_end_month"] == "2027-03"
+        assert records[0]["collection_start_date"] == "2026-04-01"
+        assert records[0]["due_month"] == "2027-03-31"
         assert records[1]["due_month"] == date.today().isoformat()
         assert records[0]["serial_no"] + 1 == records[1]["serial_no"]
 
@@ -1215,7 +1221,7 @@ def test_lead_detail_and_convert_customer_flow():
         assert all(item["source_lead_id"] != lead_id for item in customers_after)
 
 
-def test_redevelop_lead_convert_reuses_existing_customer():
+def test_redevelop_lead_convert_defaults_to_new_linked_customer():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
@@ -1282,18 +1288,23 @@ def test_redevelop_lead_convert_reuses_existing_customer():
             },
         )
         assert convert_redevelop.status_code == 200
-        assert convert_redevelop.json()["customer"]["id"] == base_customer_id
+        new_customer = convert_redevelop.json()["customer"]
+        assert new_customer["id"] != base_customer_id
+        assert new_customer["source_customer_id"] == base_customer_id
+        assert new_customer["name"] == "老客二开基准客户-升级服务"
 
         customers_after = client.get("/api/v1/customers", headers=headers).json()
-        assert len(customers_after) == customer_count_before
-        reused_customer = next(item for item in customers_after if item["id"] == base_customer_id)
-        assert reused_customer["assigned_accountant_id"] == accountant_2["id"]
-        assert reused_customer["name"] == "老客二开基准客户-升级服务"
+        assert len(customers_after) == customer_count_before + 1
+        original_customer = next(item for item in customers_after if item["id"] == base_customer_id)
+        created_customer = next(item for item in customers_after if item["id"] == new_customer["id"])
+        assert original_customer["assigned_accountant_id"] == accountant_1["id"]
+        assert created_customer["assigned_accountant_id"] == accountant_2["id"]
+        assert created_customer["source_customer_id"] == base_customer_id
 
         redevelop_detail = client.get(f"/api/v1/leads/{redevelop_lead_id}", headers=headers)
         assert redevelop_detail.status_code == 200
         assert redevelop_detail.json()["status"] == "CONVERTED"
-        assert redevelop_detail.json()["customer_id"] == base_customer_id
+        assert redevelop_detail.json()["customer_id"] == new_customer["id"]
 
 
 def test_address_resources():
@@ -1323,6 +1334,7 @@ def test_address_resources():
         assert create_response.status_code == 201
         resource_id = create_response.json()["id"]
         assert create_response.json()["served_companies"] == "测试公司A、测试公司B"
+        assert create_response.json()["served_company_count"] == 2
 
         patch_response = client.patch(
             f"/api/v1/address-resources/{resource_id}",
@@ -1331,6 +1343,7 @@ def test_address_resources():
         )
         assert patch_response.status_code == 200
         assert patch_response.json()["served_companies"] == "测试公司A、测试公司C"
+        assert [item["company_name"] for item in patch_response.json()["company_items"]] == ["测试公司A", "测试公司C"]
 
         patch_with_null = client.patch(
             f"/api/v1/address-resources/{resource_id}",
@@ -1390,6 +1403,7 @@ def test_common_library_items_crud():
         delete_response = client.delete(
             f"/api/v1/common-library-items/{item_id}",
             headers=headers,
+            params={"confirm_name": "崂山税局"},
         )
         assert delete_response.status_code == 204
 
@@ -2457,6 +2471,522 @@ def test_dashboard_and_todo_flow():
         assert isinstance(system_todos.json(), list)
 
 
+def test_todo_delete_requires_admin_and_confirm_name():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        create_resp = client.post(
+            "/api/v1/todos",
+            headers=owner_headers,
+            json={
+                "title": "待办删除测试-A",
+                "priority": "HIGH",
+                "assignee_user_id": accountant["id"],
+            },
+        )
+        assert create_resp.status_code == 201
+        todo_id = create_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": DEMO_PASSWORD},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        forbidden_resp = client.delete(
+            f"/api/v1/todos/{todo_id}",
+            headers=accountant_headers,
+            params={"confirm_name": "待办删除测试-A"},
+        )
+        assert forbidden_resp.status_code == 403
+
+        mismatch_resp = client.delete(
+            f"/api/v1/todos/{todo_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误名称"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/todos/{todo_id}",
+            headers=owner_headers,
+            params={"confirm_name": "待办删除测试-A"},
+        )
+        assert delete_resp.status_code == 204
+
+        list_resp = client.get(
+            "/api/v1/todos",
+            headers=owner_headers,
+            params={"view": "ALL", "include_done": True, "assignee_user_id": accountant["id"]},
+        )
+        assert list_resp.status_code == 200
+        assert all(item["id"] != todo_id for item in list_resp.json())
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "TODO"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == todo_id for item in deleted_rows.json())
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/TODO/{todo_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+        assert restore_resp.json()["entity_type"] == "TODO"
+
+        restored_list_resp = client.get(
+            "/api/v1/todos",
+            headers=owner_headers,
+            params={"view": "ALL", "include_done": True, "assignee_user_id": accountant["id"]},
+        )
+        assert restored_list_resp.status_code == 200
+        assert any(item["id"] == todo_id for item in restored_list_resp.json())
+
+        restore_logs = client.get(
+            "/api/v1/admin/operation-logs",
+            headers=owner_headers,
+            params={"audit_scope": "RESTORE", "entity_type": "TODO"},
+        )
+        assert restore_logs.status_code == 200
+        assert any(item["action"] == "TODO_RESTORED" for item in restore_logs.json())
+
+
+def test_lead_delete_requires_admin_confirm_and_blocks_converted():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "FOLLOWUP",
+                "name": "线索删除测试-A",
+                "contact_name": "李女士",
+                "phone": "13950001001",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": DEMO_PASSWORD},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        forbidden_resp = client.delete(
+            f"/api/v1/leads/{lead_id}",
+            headers=accountant_headers,
+            params={"confirm_name": "线索删除测试-A"},
+        )
+        assert forbidden_resp.status_code == 403
+
+        mismatch_resp = client.delete(
+            f"/api/v1/leads/{lead_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误名称"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/leads/{lead_id}",
+            headers=owner_headers,
+            params={"confirm_name": "线索删除测试-A"},
+        )
+        assert delete_resp.status_code == 204
+
+        missing_resp = client.get(f"/api/v1/leads/{lead_id}", headers=owner_headers)
+        assert missing_resp.status_code == 404
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "LEAD"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == lead_id for item in deleted_rows.json())
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/LEAD/{lead_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+
+        restored_detail = client.get(f"/api/v1/leads/{lead_id}", headers=owner_headers)
+        assert restored_detail.status_code == 200
+        assert restored_detail.json()["name"] == "线索删除测试-A"
+
+        converted_lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "线索删除测试-B",
+                "contact_name": "王总",
+                "phone": "13950001002",
+                "source": "Sally直播",
+            },
+        )
+        assert converted_lead_resp.status_code == 201
+        converted_lead_id = converted_lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{converted_lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+
+        converted_delete_resp = client.delete(
+            f"/api/v1/leads/{converted_lead_id}",
+            headers=owner_headers,
+            params={"confirm_name": "线索删除测试-B"},
+        )
+        assert converted_delete_resp.status_code == 400
+        assert converted_delete_resp.json()["detail"] == "该线索已转化，请先撤销转化再删除"
+
+
+def test_customer_delete_requires_admin_confirm_and_supports_restore():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "客户删除测试-A",
+                "contact_name": "赵小姐",
+                "phone": "13950002001",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        redevelop_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "REDEVELOP",
+                "name": "客户删除测试-关联线索",
+                "contact_name": "赵小姐",
+                "phone": "13950002001",
+                "source": "老客户二次开发",
+                "related_customer_id": customer_id,
+            },
+        )
+        assert redevelop_resp.status_code == 201
+        redevelop_lead_id = redevelop_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": DEMO_PASSWORD},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        forbidden_resp = client.delete(
+            f"/api/v1/customers/{customer_id}",
+            headers=accountant_headers,
+            params={"confirm_name": "客户删除测试-A"},
+        )
+        assert forbidden_resp.status_code == 403
+
+        mismatch_resp = client.delete(
+            f"/api/v1/customers/{customer_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误名称"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/customers/{customer_id}",
+            headers=owner_headers,
+            params={"confirm_name": "客户删除测试-A"},
+        )
+        assert delete_resp.status_code == 204
+
+        customer_detail = client.get(f"/api/v1/customers/{customer_id}", headers=owner_headers)
+        assert customer_detail.status_code == 404
+
+        lead_detail = client.get(f"/api/v1/leads/{lead_id}", headers=owner_headers)
+        assert lead_detail.status_code == 200
+        assert lead_detail.json()["status"] == "CONVERTED"
+
+        redevelop_detail = client.get(f"/api/v1/leads/{redevelop_lead_id}", headers=owner_headers)
+        assert redevelop_detail.status_code == 200
+        assert redevelop_detail.json()["related_customer_id"] == customer_id
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "CUSTOMER"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == customer_id for item in deleted_rows.json())
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/CUSTOMER/{customer_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+
+        restored_customer_detail = client.get(f"/api/v1/customers/{customer_id}", headers=owner_headers)
+        assert restored_customer_detail.status_code == 200
+        assert restored_customer_detail.json()["name"] == "客户删除测试-A"
+
+
+def test_unconvert_then_reconvert_reuses_soft_deleted_customer():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "反复成交测试-A",
+                "contact_name": "林老板",
+                "phone": "13950002011",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        first_convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert first_convert_resp.status_code == 200
+        customer_id = first_convert_resp.json()["customer"]["id"]
+
+        unconvert_resp = client.post(f"/api/v1/leads/{lead_id}/unconvert", headers=owner_headers)
+        assert unconvert_resp.status_code == 200
+        assert unconvert_resp.json()["status"] == "NEW"
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "CUSTOMER"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == customer_id for item in deleted_rows.json())
+
+        second_convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={
+                "accountant_id": accountant["id"],
+                "customer_name": "反复成交测试-A（再次成交）",
+            },
+        )
+        assert second_convert_resp.status_code == 200
+        assert second_convert_resp.json()["customer"]["id"] == customer_id
+        assert second_convert_resp.json()["customer"]["name"] == "反复成交测试-A（再次成交）"
+
+
+def test_billing_record_delete_requires_admin_confirm_and_blocks_paid_record():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "收费删除测试-A",
+                "contact_name": "钱先生",
+                "phone": "13950003001",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "咨询",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "收费删除测试-未收",
+                "total_fee": 800,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-06",
+                "due_month": "2026-04-06",
+                "payment_method": "后收",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        accountant_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "accountant", "password": DEMO_PASSWORD},
+        )
+        assert accountant_login.status_code == 200
+        accountant_headers = {"Authorization": f"Bearer {accountant_login.json()['access_token']}"}
+
+        forbidden_resp = client.delete(
+            f"/api/v1/billing-records/{record_id}",
+            headers=accountant_headers,
+            params={"confirm_name": "收费删除测试-A · 收费删除测试-未收"},
+        )
+        assert forbidden_resp.status_code == 403
+
+        mismatch_resp = client.delete(
+            f"/api/v1/billing-records/{record_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误名称"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/billing-records/{record_id}",
+            headers=owner_headers,
+            params={"confirm_name": "收费删除测试-A · 收费删除测试-未收"},
+        )
+        assert delete_resp.status_code == 204
+
+        list_resp = client.get("/api/v1/billing-records", headers=owner_headers)
+        assert list_resp.status_code == 200
+        assert all(item["id"] != record_id for item in list_resp.json())
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "BILLING"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == record_id for item in deleted_rows.json())
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/BILLING/{record_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+
+        restored_list_resp = client.get("/api/v1/billing-records", headers=owner_headers)
+        assert restored_list_resp.status_code == 200
+        assert any(item["id"] == record_id for item in restored_list_resp.json())
+
+        paid_record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "注册",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "收费删除测试-已收",
+                "total_fee": 1200,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-07",
+                "due_month": "2026-04-07",
+                "payment_method": "后收",
+            },
+        )
+        assert paid_record_resp.status_code == 201
+        paid_record_id = paid_record_resp.json()["id"]
+
+        payment_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-04-07",
+                "amount": 1200,
+                "strategy": "DUE_DATE_ASC",
+                "receipt_account": "一帆光大",
+                "note": "删除校验测试",
+                "allocations": [
+                    {"billing_record_id": paid_record_id, "allocated_amount": 1200},
+                ],
+            },
+        )
+        assert payment_resp.status_code == 201
+
+        paid_delete_resp = client.delete(
+            f"/api/v1/billing-records/{paid_record_id}",
+            headers=owner_headers,
+            params={"confirm_name": "收费删除测试-A · 收费删除测试-已收"},
+        )
+        assert paid_delete_resp.status_code == 400
+        assert paid_delete_resp.json()["detail"] == "当前收费单已有收款核销记录，不能删除"
+
+
 def test_billing_due_system_todo_lifecycle():
     with TestClient(app) as client:
         owner_login = client.post(
@@ -2592,6 +3122,7 @@ def test_billing_renew_system_todo_contains_action_path():
         customer_id = convert_resp.json()["customer"]["id"]
 
         due_date = date.today() + timedelta(days=10)
+        due_month_text = due_date.isoformat()[:7]
         create_record_resp = client.post(
             "/api/v1/billing-records",
             headers=owner_headers,
@@ -2600,7 +3131,7 @@ def test_billing_renew_system_todo_contains_action_path():
                 "customer_id": customer_id,
                 "charge_mode": "PERIODIC",
                 "period_start_month": "2026-01",
-                "period_end_month": "2026-12",
+                "period_end_month": due_month_text,
                 "due_month": due_date.isoformat(),
                 "total_fee": 4800,
                 "monthly_fee": 400,
@@ -2859,9 +3390,9 @@ def test_periodic_billing_service_dates_auto_derive_due_date_and_month_range():
         assert monthly_resp.status_code == 201
         monthly_record = monthly_resp.json()
         assert monthly_record["collection_start_date"] == "2026-04-15"
-        assert monthly_record["due_month"] == "2026-05-14"
+        assert monthly_record["due_month"] == "2027-03-31"
         assert monthly_record["period_start_month"] == "2026-04"
-        assert monthly_record["period_end_month"] == "2026-05"
+        assert monthly_record["period_end_month"] == "2027-03"
 
         yearly_resp = client.post(
             "/api/v1/billing-records",
@@ -2879,9 +3410,10 @@ def test_periodic_billing_service_dates_auto_derive_due_date_and_month_range():
         )
         assert yearly_resp.status_code == 201
         yearly_record = yearly_resp.json()
-        assert yearly_record["due_month"] == "2027-04-14"
+        assert yearly_record["collection_start_date"] == "2026-04-15"
+        assert yearly_record["due_month"] == "2027-03-31"
         assert yearly_record["period_start_month"] == "2026-04"
-        assert yearly_record["period_end_month"] == "2027-04"
+        assert yearly_record["period_end_month"] == "2027-03"
 
 
 
@@ -3221,6 +3753,125 @@ def test_conversion_lead_defaults_contact_start_date_and_grade_reminder():
         assert body["contact_start_date"] == date.today().isoformat()
         assert body["reminder_value"] == "7天"
         assert body["next_reminder_at"] == (date.today() + timedelta(days=7)).isoformat()
+
+
+def test_conversion_lead_allows_blank_company_and_phone_with_contact_name_fallback():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        create_resp = client.post(
+            "/api/v1/leads",
+            headers=headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "",
+                "contact_name": "王老板",
+                "phone": "",
+                "grade": "意向中",
+                "main_business": "代账和报税咨询",
+                "intro": "老客户转介绍",
+            },
+        )
+        assert create_resp.status_code == 201
+        body = create_resp.json()
+        assert body["name"] == "王老板"
+        assert body["phone"] == ""
+        assert body["contact_start_date"] == date.today().isoformat()
+
+
+def test_lead_intro_options_return_distinct_recent_matches():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        for index, intro in enumerate(["老客户转介绍", "百度渠道", "老客户转介绍", "抖音渠道"], start=1):
+            create_resp = client.post(
+                "/api/v1/leads",
+                headers=headers,
+                json={
+                    "template_type": "CONVERSION",
+                    "name": f"介绍人联想客户{index}",
+                    "contact_name": f"联系人{index}",
+                    "phone": "",
+                    "grade": "意向中",
+                    "main_business": "代理记账",
+                    "intro": intro,
+                },
+            )
+            assert create_resp.status_code == 201
+
+        suggest_resp = client.get(
+            "/api/v1/leads/intro-options",
+            headers=headers,
+            params={"q": "渠道", "limit": 10},
+        )
+        assert suggest_resp.status_code == 200
+        assert suggest_resp.json() == ["抖音渠道", "百度渠道"]
+
+        all_resp = client.get(
+            "/api/v1/leads/intro-options",
+            headers=headers,
+            params={"limit": 10},
+        )
+        assert all_resp.status_code == 200
+        all_items = all_resp.json()
+        assert "老客户转介绍" in all_items
+        assert "百度渠道" in all_items
+        assert all_items.count("老客户转介绍") == 1
+
+
+def test_lead_source_options_return_distinct_recent_matches():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        for index, source in enumerate(["Sally直播", "转介绍", "Sally直播", "抖音投流"], start=1):
+            create_resp = client.post(
+                "/api/v1/leads",
+                headers=headers,
+                json={
+                    "template_type": "CONVERSION",
+                    "name": f"来源联想客户{index}",
+                    "contact_name": f"来源联系人{index}",
+                    "phone": "",
+                    "grade": "意向中",
+                    "main_business": "代理记账",
+                    "source": source,
+                },
+            )
+            assert create_resp.status_code == 201
+
+        suggest_resp = client.get(
+            "/api/v1/leads/source-options",
+            headers=headers,
+            params={"q": "抖", "limit": 10},
+        )
+        assert suggest_resp.status_code == 200
+        assert suggest_resp.json() == ["抖音投流"]
+
+        all_resp = client.get(
+            "/api/v1/leads/source-options",
+            headers=headers,
+            params={"limit": 10},
+        )
+        assert all_resp.status_code == 200
+        all_items = all_resp.json()
+        assert "Sally直播" in all_items
+        assert "转介绍" in all_items
+        assert all_items.count("Sally直播") == 1
 
 
 def test_followup_updates_grade_and_reminder_defaults():

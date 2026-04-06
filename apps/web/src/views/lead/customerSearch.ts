@@ -7,6 +7,7 @@ export type LeadCustomerSearchItem = {
   phone: string;
   assigned_accountant_id: number;
   accountant_username: string;
+  source_intro?: string;
 };
 
 function normalizeCustomerName(value: string) {

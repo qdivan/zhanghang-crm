@@ -29,6 +29,7 @@ output/playwright/
 output/spreadsheet/
 output/release/
 old_example_table/
+backups/
 
 # Local SQLite runtime data
 /test.db
@@ -36,6 +37,7 @@ apps/api/*.db
 apps/api/*.sqlite
 apps/api/*.sqlite3
 infra/data/dev/
+infra/data/prd/
 
 # Accidental duplicate files (local editor/iCloud artifacts)
 apps/api/.dockerignore 2

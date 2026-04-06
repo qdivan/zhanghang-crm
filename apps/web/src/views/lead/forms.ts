@@ -54,6 +54,7 @@ export type LeadConvertForm = {
   customer_name: string;
   customer_contact_name: string;
   customer_phone: string;
+  conversion_mode: "NEW_CUSTOMER_LINKED" | "REUSE_CUSTOMER";
 };
 
 export type LeadFilters = {
@@ -83,7 +84,7 @@ export function createLeadForm(): LeadCreateForm {
     phone: "",
     region: "",
     country: "",
-    source: "",
+    source: "Sally直播",
     contact_wechat: "",
     fax: "",
     other_contact: "",
@@ -132,5 +133,6 @@ export function createLeadConvertForm(): LeadConvertForm {
     customer_name: "",
     customer_contact_name: "",
     customer_phone: "",
+    conversion_mode: "NEW_CUSTOMER_LINKED",
   };
 }

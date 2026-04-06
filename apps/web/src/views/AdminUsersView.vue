@@ -12,6 +12,8 @@ import type {
   DataAccessGrantItem,
   DataAccessGrantUpdatePayload,
   DataAccessModule,
+  DeletedRecordItem,
+  DeletedRecordRestoreResult,
   LdapSettings,
   LdapSettingsUpdatePayload,
   LdapSyncResult,
@@ -29,7 +31,7 @@ type GrantStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "EFFECTIVE";
 
 const auth = useAuthStore();
 const route = useRoute();
-const activeTab = ref<"users" | "grants" | "security" | "ldap" | "logs">("users");
+const activeTab = ref<"users" | "grants" | "security" | "ldap" | "logs" | "recycle">("users");
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const loading = ref(false);
@@ -95,6 +97,16 @@ const logRows = ref<OperationLogItem[]>([]);
 const logFilters = reactive({
   keyword: "",
   action: "",
+  entity_type: "",
+  audit_scope: "",
+  limit: 200,
+});
+
+const recycleLoading = ref(false);
+const recycleRestoreLoadingKey = ref<string | null>(null);
+const deletedRows = ref<DeletedRecordItem[]>([]);
+const recycleFilters = reactive({
+  keyword: "",
   entity_type: "",
   limit: 200,
 });
@@ -171,6 +183,7 @@ const mobileTabItems = [
   { key: "security", label: "安全" },
   { key: "ldap", label: "LDAP" },
   { key: "logs", label: "日志" },
+  { key: "recycle", label: "回收站" },
 ] as const;
 const mobileUserStats = computed(() => [
   { label: "全部", value: rows.value.length },
@@ -182,12 +195,23 @@ const mobileGrantStats = computed(() => [
   { label: "生效中", value: grantRows.value.filter((item) => item.is_effective).length },
   { label: "停用", value: grantRows.value.filter((item) => !item.is_active).length },
 ]);
+const deletedEntityOptions = [
+  { label: "全部类型", value: "" },
+  { label: "线索", value: "LEAD" },
+  { label: "客户", value: "CUSTOMER" },
+  { label: "收费单", value: "BILLING" },
+  { label: "待办", value: "TODO" },
+  { label: "挂靠地址", value: "ADDRESS_RESOURCE" },
+  { label: "已服务公司", value: "ADDRESS_RESOURCE_COMPANY" },
+  { label: "常用资料", value: "COMMON_LIBRARY" },
+] as const;
 
-function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" {
+function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" | "recycle" {
   if (tab === "grants") return "grants";
   if (tab === "security") return "security";
   if (tab === "ldap") return "ldap";
   if (tab === "logs") return "logs";
+  if (tab === "recycle") return "recycle";
   return "users";
 }
 
@@ -225,21 +249,33 @@ function actionLabel(action: string): string {
     LEAD_FOLLOWUP_CREATED: "线索跟进",
     LEAD_CONVERTED: "线索转化",
     LEAD_UNCONVERTED: "撤销转化",
+    LEAD_DELETED: "线索删除",
+    LEAD_RESTORED: "线索恢复",
     BILLING_RECORD_CREATED: "收费记录创建",
     BILLING_RECORD_UPDATED: "收费记录更新",
     BILLING_RECORD_RENEWED: "收费记录续费",
     BILLING_RECORD_TERMINATED: "收费记录终止",
+    BILLING_RECORD_DELETED: "收费记录删除",
+    BILLING_RECORD_RESTORED: "收费记录恢复",
     BILLING_ACTIVITY_CREATED: "收费明细日志创建",
     BILLING_PAYMENT_CREATED: "统一收款分摊",
     CUSTOMER_UPDATED: "客户档案更新",
+    CUSTOMER_DELETED: "客户删除",
+    CUSTOMER_RESTORED: "客户恢复",
     CUSTOMER_TIMELINE_EVENT_CREATED: "客户事项创建",
     CUSTOMER_TIMELINE_EVENT_UPDATED: "客户事项更新",
     CUSTOMER_TIMELINE_TEMPLATE_APPLIED: "客户模板套用",
     ADDRESS_RESOURCE_CREATED: "地址资源创建",
     ADDRESS_RESOURCE_UPDATED: "地址资源更新",
+    ADDRESS_RESOURCE_DELETED: "地址资源删除",
+    ADDRESS_RESOURCE_RESTORED: "地址资源恢复",
+    ADDRESS_RESOURCE_COMPANY_CREATED: "已服务公司创建",
+    ADDRESS_RESOURCE_COMPANY_DELETED: "已服务公司删除",
+    ADDRESS_RESOURCE_COMPANY_RESTORED: "已服务公司恢复",
     COMMON_LIBRARY_ITEM_CREATED: "常用资料创建",
     COMMON_LIBRARY_ITEM_UPDATED: "常用资料更新",
     COMMON_LIBRARY_ITEM_DELETED: "常用资料删除",
+    COMMON_LIBRARY_ITEM_RESTORED: "常用资料恢复",
     DATA_ACCESS_GRANT_CREATED: "数据授权创建",
     DATA_ACCESS_GRANT_UPDATED: "数据授权更新",
     DATA_ACCESS_GRANT_REVOKED: "数据授权停用",
@@ -252,6 +288,11 @@ function actionLabel(action: string): string {
     TODO_MY_DAY_CLEARED: "待办今日清空",
   };
   return map[action] || action;
+}
+
+function entityTypeLabel(value: string): string {
+  const found = deletedEntityOptions.find((item) => item.value === value);
+  return found?.label ?? (value || "-");
 }
 
 function moduleLabel(module: DataAccessModule): string {
@@ -564,6 +605,7 @@ async function fetchLogs() {
         keyword: logFilters.keyword || undefined,
         action: logFilters.action || undefined,
         entity_type: logFilters.entity_type || undefined,
+        audit_scope: logFilters.audit_scope || undefined,
         limit: logFilters.limit,
       },
     });
@@ -572,6 +614,55 @@ async function fetchLogs() {
     ElMessage.error("加载操作日志失败");
   } finally {
     logLoading.value = false;
+  }
+}
+
+async function fetchDeletedRecords() {
+  recycleLoading.value = true;
+  try {
+    const resp = await apiClient.get<DeletedRecordItem[]>("/admin/deleted-records", {
+      params: {
+        keyword: recycleFilters.keyword || undefined,
+        entity_type: recycleFilters.entity_type || undefined,
+        limit: recycleFilters.limit,
+      },
+    });
+    deletedRows.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载回收站失败");
+  } finally {
+    recycleLoading.value = false;
+  }
+}
+
+async function restoreDeletedRecord(row: DeletedRecordItem) {
+  const restoreKey = `${row.entity_type}:${row.entity_id}`;
+  try {
+    await ElMessageBox.confirm(
+      `确认恢复「${row.display_name}」吗？恢复后会重新出现在业务页面里。`,
+      "恢复确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认恢复",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  recycleRestoreLoadingKey.value = restoreKey;
+  try {
+    const resp = await apiClient.post<DeletedRecordRestoreResult>(
+      `/admin/deleted-records/${row.entity_type}/${row.entity_id}/restore`,
+      {},
+    );
+    ElMessage.success(`已恢复：${resp.data.display_name}`);
+    await Promise.all([fetchDeletedRecords(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "恢复失败");
+  } finally {
+    recycleRestoreLoadingKey.value = null;
   }
 }
 
@@ -675,6 +766,7 @@ onMounted(async () => {
     fetchSecuritySettings(),
     fetchLdapSettings(),
     fetchLogs(),
+    fetchDeletedRecords(),
   ]);
 });
 
@@ -993,12 +1085,12 @@ watch(
         </section>
       </template>
 
-      <template v-else>
+      <template v-else-if="activeTab === 'logs'">
         <section class="mobile-shell-panel">
           <div class="mobile-toolbar">
             <div class="mobile-toolbar-main">
               <div class="admin-mobile-section-title">操作日志</div>
-              <div class="admin-mobile-section-copy">按关键词、动作和对象类型筛最近的后台操作。</div>
+              <div class="admin-mobile-section-copy">按关键词、动作、对象类型和删除/恢复范围筛后台审计。</div>
             </div>
             <div class="mobile-toolbar-actions">
               <el-tag class="mobile-count-tag" size="small" effect="plain">{{ logRows.length }} 条</el-tag>
@@ -1008,6 +1100,11 @@ watch(
             <el-input v-model="logFilters.keyword" placeholder="操作描述 / 对象" clearable @keyup.enter="fetchLogs" />
             <el-input v-model="logFilters.action" placeholder="如 USER_UPDATED" clearable />
             <el-input v-model="logFilters.entity_type" placeholder="如 USER / LDAP" clearable />
+            <el-select v-model="logFilters.audit_scope" placeholder="全部审计">
+              <el-option label="全部审计" value="" />
+              <el-option label="仅删除" value="DELETE" />
+              <el-option label="仅恢复" value="RESTORE" />
+            </el-select>
             <el-input-number v-model="logFilters.limit" :min="1" :max="500" :controls="false" />
           </div>
           <div class="admin-mobile-filter-actions">
@@ -1045,6 +1142,67 @@ watch(
                   <div class="mobile-metric-label">对象ID</div>
                   <div class="mobile-metric-value">{{ row.entity_id || "-" }}</div>
                 </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <template v-else>
+        <section class="mobile-shell-panel">
+          <div class="mobile-toolbar">
+            <div class="mobile-toolbar-main">
+              <div class="admin-mobile-section-title">回收站</div>
+              <div class="admin-mobile-section-copy">已删除业务数据会先留在这里，确认后可以恢复。</div>
+            </div>
+            <div class="mobile-toolbar-actions">
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ deletedRows.length }} 条</el-tag>
+            </div>
+          </div>
+          <div class="admin-mobile-filter-grid">
+            <el-input v-model="recycleFilters.keyword" placeholder="名称 / 备注" clearable @keyup.enter="fetchDeletedRecords" />
+            <el-select v-model="recycleFilters.entity_type" placeholder="全部类型">
+              <el-option v-for="item in deletedEntityOptions" :key="item.value || 'all'" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-input-number v-model="recycleFilters.limit" :min="1" :max="500" :controls="false" />
+          </div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-secondary-button" plain @click="fetchDeletedRecords">查询</el-button>
+          </div>
+        </section>
+
+        <section class="mobile-shell-panel">
+          <div v-if="recycleLoading && !deletedRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">回收站</div>
+            <div class="mobile-empty-title">正在加载已删除数据</div>
+            <div class="mobile-empty-copy">线索、客户、收费单和资料删除后会先留在这里。</div>
+          </div>
+          <div v-else-if="!deletedRows.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">回收站</div>
+            <div class="mobile-empty-title">当前没有可恢复的数据</div>
+            <div class="mobile-empty-copy">如果刚删了记录，可以刷新查询看看。</div>
+          </div>
+          <div v-else class="mobile-record-list">
+            <article v-for="row in deletedRows" :key="`${row.entity_type}-${row.entity_id}`" class="mobile-record-card admin-mobile-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.display_name }}</div>
+                  <div class="mobile-record-subtitle">{{ entityTypeLabel(row.entity_type) }} · {{ formatDateTimeInBrowserTimeZone(row.deleted_at) }}</div>
+                </div>
+                <el-tag class="mobile-status-tag" size="small" effect="plain">{{ row.deleted_by_username || "-" }}</el-tag>
+              </div>
+              <div class="mobile-record-note">{{ row.detail || "-" }}</div>
+              <div class="mobile-action-main">
+                <el-button
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  type="primary"
+                  :loading="recycleRestoreLoadingKey === `${row.entity_type}:${row.entity_id}`"
+                  @click="restoreDeletedRecord(row)"
+                >
+                  恢复
+                </el-button>
               </div>
             </article>
           </div>
@@ -1432,6 +1590,12 @@ watch(
               <el-form-item label="对象类型">
                 <el-input v-model="logFilters.entity_type" placeholder="如 USER/LDAP" clearable />
               </el-form-item>
+              <el-form-item label="审计范围">
+                <el-select v-model="logFilters.audit_scope" placeholder="全部" clearable>
+                  <el-option label="仅删除" value="DELETE" />
+                  <el-option label="仅恢复" value="RESTORE" />
+                </el-select>
+              </el-form-item>
               <el-form-item label="条数">
                 <el-input-number v-model="logFilters.limit" :min="1" :max="500" :controls="false" />
               </el-form-item>
@@ -1490,6 +1654,79 @@ watch(
                 label-class-name="mobile-hide"
               />
               <el-table-column prop="detail" label="详情" min-width="180" show-overflow-tooltip />
+            </el-table>
+          </el-card>
+        </el-space>
+      </el-tab-pane>
+
+      <el-tab-pane label="回收站" name="recycle">
+        <el-space direction="vertical" fill :size="12">
+          <el-card shadow="never">
+            <el-form inline @submit.prevent="fetchDeletedRecords" class="admin-filter-form">
+              <el-form-item label="关键词">
+                <el-input
+                  v-model="recycleFilters.keyword"
+                  placeholder="名称/备注"
+                  clearable
+                  @keyup.enter="fetchDeletedRecords"
+                />
+              </el-form-item>
+              <el-form-item label="类型">
+                <el-select v-model="recycleFilters.entity_type" placeholder="全部类型">
+                  <el-option v-for="item in deletedEntityOptions" :key="item.value || 'all'" :label="item.label" :value="item.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="条数">
+                <el-input-number v-model="recycleFilters.limit" :min="1" :max="500" :controls="false" />
+              </el-form-item>
+              <el-form-item>
+                <el-button @click="fetchDeletedRecords">查询</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="head">
+                <span>回收站</span>
+                <el-tag type="warning" effect="plain">{{ deletedRows.length }} 条</el-tag>
+              </div>
+            </template>
+            <el-table v-loading="recycleLoading" :data="deletedRows" stripe border>
+              <el-table-column label="删除时间" min-width="160">
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.deleted_at) }}</template>
+              </el-table-column>
+              <el-table-column label="类型" width="150">
+                <template #default="{ row }">{{ entityTypeLabel(row.entity_type) }}</template>
+              </el-table-column>
+              <el-table-column prop="display_name" label="名称" min-width="220" show-overflow-tooltip />
+              <el-table-column
+                prop="detail"
+                label="说明"
+                min-width="180"
+                show-overflow-tooltip
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column
+                prop="deleted_by_username"
+                label="删除人"
+                width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              />
+              <el-table-column label="操作" width="100">
+                <template #default="{ row }">
+                  <el-button
+                    link
+                    type="primary"
+                    :loading="recycleRestoreLoadingKey === `${row.entity_type}:${row.entity_id}`"
+                    @click="restoreDeletedRecord(row)"
+                  >
+                    恢复
+                  </el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </el-space>

@@ -67,6 +67,23 @@ class OperationLogOut(BaseModel):
     created_at: datetime
 
 
+class DeletedRecordOut(BaseModel):
+    entity_type: str
+    entity_id: int
+    display_name: str
+    detail: str
+    deleted_at: datetime
+    deleted_by_user_id: Optional[int]
+    deleted_by_username: str
+
+
+class DeletedRecordRestoreOut(BaseModel):
+    entity_type: str
+    entity_id: int
+    display_name: str
+    restored_at: datetime
+
+
 class DataAccessGrantCreate(BaseModel):
     grantee_user_id: int = Field(gt=0)
     module: Literal["CUSTOMER", "BILLING"]

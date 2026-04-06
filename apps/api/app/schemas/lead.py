@@ -1,15 +1,15 @@
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class LeadCreate(BaseModel):
     template_type: str = "FOLLOWUP"
-    name: str = Field(min_length=2, max_length=200)
+    name: str = Field(default="", max_length=200)
     grade: str = ""
     contact_name: str = Field(min_length=1, max_length=100)
-    phone: str = Field(min_length=6, max_length=32)
+    phone: str = Field(default="", max_length=32)
     region: str = ""
     country: str = ""
     source: str = ""
@@ -131,6 +131,7 @@ class ConvertLeadRequest(BaseModel):
     customer_name: Optional[str] = None
     customer_contact_name: Optional[str] = None
     customer_phone: Optional[str] = None
+    conversion_mode: Literal["NEW_CUSTOMER_LINKED", "REUSE_CUSTOMER"] = "NEW_CUSTOMER_LINKED"
 
 
 class CustomerOut(BaseModel):
@@ -142,6 +143,7 @@ class CustomerOut(BaseModel):
     phone: str
     status: str
     assigned_accountant_id: int
+    source_customer_id: Optional[int]
     source_lead_id: int
     created_at: datetime
 

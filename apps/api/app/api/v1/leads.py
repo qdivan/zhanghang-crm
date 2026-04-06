@@ -1,8 +1,8 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_roles
@@ -20,6 +20,7 @@ from app.schemas.lead import (
 from app.services.audit import write_operation_log
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
+from app.services.soft_delete import active_filter, deleted_filter, mark_deleted, restore_deleted
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -39,7 +40,7 @@ REMINDER_DAY_MAP = {
 
 
 def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
-    lead = db.execute(select(Lead).where(Lead.id == lead_id)).scalar_one_or_none()
+    lead = db.execute(select(Lead).where(Lead.id == lead_id, active_filter(Lead))).scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     return lead
@@ -65,11 +66,14 @@ def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_writ
         managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
         if lead.owner_id in managed_ids:
             return
-        if lead.customer is not None and lead.customer.assigned_accountant_id in managed_ids:
+        if lead.customer is not None and not lead.customer.is_deleted and lead.customer.assigned_accountant_id in managed_ids:
             return
         if lead.related_customer_id is not None:
             related_customer_assignee = db.execute(
-                select(Customer.assigned_accountant_id).where(Customer.id == lead.related_customer_id)
+                select(Customer.assigned_accountant_id).where(
+                    Customer.id == lead.related_customer_id,
+                    active_filter(Customer),
+                )
             ).scalar_one_or_none()
             if related_customer_assignee in managed_ids:
                 return
@@ -78,11 +82,14 @@ def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_writ
     if lead.owner_id == current_user.id:
         return
     # 转化后的客户，允许被分配的会计继续写跟进
-    if lead.customer is not None and lead.customer.assigned_accountant_id == current_user.id:
+    if lead.customer is not None and not lead.customer.is_deleted and lead.customer.assigned_accountant_id == current_user.id:
         return
     if lead.related_customer_id is not None:
         related_customer_assignee = db.execute(
-            select(Customer.assigned_accountant_id).where(Customer.id == lead.related_customer_id)
+            select(Customer.assigned_accountant_id).where(
+                Customer.id == lead.related_customer_id,
+                active_filter(Customer),
+            )
         ).scalar_one_or_none()
         if related_customer_assignee == current_user.id:
             return
@@ -93,6 +100,26 @@ def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_writ
         ):
             return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this lead")
+
+
+def _apply_lead_scope(stmt, current_user: User, db: Session):
+    stmt = stmt.where(active_filter(Lead))
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        return stmt.where(
+            or_(
+                Lead.owner_id.in_(managed_ids),
+                Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids))),
+            )
+        )
+    if current_user.role == "ACCOUNTANT":
+        return stmt.where(
+            or_(
+                Lead.owner_id == current_user.id,
+                Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id)),
+            )
+        )
+    return stmt
 
 
 @router.get("", response_model=list[LeadOut])
@@ -117,23 +144,53 @@ def list_leads(
         stmt = stmt.where(Lead.status == status_filter)
     if owner_id:
         stmt = stmt.where(Lead.owner_id == owner_id)
-    if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        stmt = stmt.where(
-            or_(
-                Lead.owner_id.in_(managed_ids),
-                Lead.customer.has(Customer.assigned_accountant_id.in_(managed_ids)),
-            )
-        )
-    elif current_user.role == "ACCOUNTANT":
-        stmt = stmt.where(
-            or_(
-                Lead.owner_id == current_user.id,
-                Lead.customer.has(Customer.assigned_accountant_id == current_user.id),
-            )
-        )
+    stmt = _apply_lead_scope(stmt, current_user, db)
 
     return db.execute(stmt).scalars().all()
+
+
+@router.get("/intro-options", response_model=list[str])
+def list_lead_intro_options(
+    q: Optional[str] = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Lead.intro, func.max(Lead.id).label("latest_id"))
+        .where(func.trim(Lead.intro) != "", active_filter(Lead))
+        .group_by(Lead.intro)
+        .order_by(func.max(Lead.id).desc())
+        .limit(limit)
+    )
+    if q:
+        keyword = f"%{q.strip()}%"
+        stmt = stmt.where(Lead.intro.ilike(keyword))
+    stmt = _apply_lead_scope(stmt, current_user, db)
+    rows = db.execute(stmt).all()
+    return [str(intro).strip() for intro, _ in rows if str(intro).strip()]
+
+
+@router.get("/source-options", response_model=list[str])
+def list_lead_source_options(
+    q: Optional[str] = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Lead.source, func.max(Lead.id).label("latest_id"))
+        .where(func.trim(Lead.source) != "", active_filter(Lead))
+        .group_by(Lead.source)
+        .order_by(func.max(Lead.id).desc())
+        .limit(limit)
+    )
+    if q:
+        keyword = f"%{q.strip()}%"
+        stmt = stmt.where(Lead.source.ilike(keyword))
+    stmt = _apply_lead_scope(stmt, current_user, db)
+    rows = db.execute(stmt).all()
+    return [str(source).strip() for source, _ in rows if str(source).strip()]
 
 
 @router.get("/{lead_id}", response_model=LeadOut)
@@ -143,7 +200,7 @@ def get_lead(
     current_user: User = Depends(get_current_user),
 ):
     lead = (
-        db.execute(select(Lead).options(selectinload(Lead.customer)).where(Lead.id == lead_id))
+        db.execute(select(Lead).options(selectinload(Lead.customer)).where(Lead.id == lead_id, active_filter(Lead)))
         .scalar_one_or_none()
     )
     if lead is None:
@@ -158,6 +215,7 @@ def create_lead(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    related_customer = None
     if current_user.role == "ACCOUNTANT":
         target_owner_id = current_user.id
     elif current_user.role == "MANAGER":
@@ -175,7 +233,11 @@ def create_lead(
 
     related_customer_id = payload.related_customer_id
     if related_customer_id is not None:
-        related_customer = db.execute(select(Customer).where(Customer.id == related_customer_id)).scalar_one_or_none()
+        related_customer = db.execute(
+            select(Customer)
+            .options(selectinload(Customer.source_lead))
+            .where(Customer.id == related_customer_id, active_filter(Customer))
+        ).scalar_one_or_none()
         if related_customer is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
         if current_user.role == "ACCOUNTANT":
@@ -196,6 +258,22 @@ def create_lead(
                     detail="No access to related customer",
                 )
 
+    normalized_name = (payload.name or "").strip() or (payload.contact_name or "").strip()
+    if not normalized_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="联系人不能为空")
+    normalized_phone = (payload.phone or "").strip()
+    normalized_source = (payload.source or "").strip()
+    if not normalized_source:
+        normalized_source = "老客户二次开发" if payload.template_type == "REDEVELOP" else "Sally直播"
+    normalized_intro = (payload.intro or "").strip()
+    if (
+        not normalized_intro
+        and payload.template_type == "REDEVELOP"
+        and related_customer is not None
+        and related_customer.source_lead is not None
+    ):
+        normalized_intro = (related_customer.source_lead.intro or "").strip()
+
     contact_start_date = payload.contact_start_date
     if contact_start_date is None and payload.template_type != "FOLLOWUP":
         contact_start_date = date.today()
@@ -205,13 +283,13 @@ def create_lead(
 
     lead = Lead(
         template_type=payload.template_type,
-        name=payload.name,
+        name=normalized_name,
         grade=payload.grade,
-        contact_name=payload.contact_name,
-        phone=payload.phone,
+        contact_name=payload.contact_name.strip(),
+        phone=normalized_phone,
         region=payload.region,
         country=payload.country,
-        source=payload.source,
+        source=normalized_source,
         contact_wechat=payload.contact_wechat,
         fax=payload.fax,
         other_contact=payload.other_contact,
@@ -219,8 +297,8 @@ def create_lead(
         service_start_text=payload.service_start_text,
         company_nature=payload.company_nature,
         service_mode=payload.service_mode,
-        main_business=payload.main_business,
-        intro=payload.intro,
+        main_business=payload.main_business.strip(),
+        intro=normalized_intro,
         fee_standard=payload.fee_standard,
         first_billing_period=payload.first_billing_period,
         reserve_2=payload.reserve_2,
@@ -314,6 +392,8 @@ def update_lead(
         lead.notes = payload.notes
     if payload.related_customer_id is not None:
         related_customer = db.execute(select(Customer).where(Customer.id == payload.related_customer_id)).scalar_one_or_none()
+        if related_customer is not None and related_customer.is_deleted:
+            related_customer = None
         if related_customer is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
         lead.related_customer_id = related_customer.id
@@ -322,6 +402,40 @@ def update_lead(
     db.commit()
     db.refresh(lead)
     return lead
+
+
+@router.delete(
+    "/{lead_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_lead(
+    lead_id: int,
+    confirm_name: str = Query(default=""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lead = _get_lead_or_404(db, lead_id)
+    expected_name = (lead.name or "").strip() or (lead.contact_name or "").strip() or f"线索#{lead.id}"
+    if (confirm_name or "").strip() != expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
+    if lead.status == "CONVERTED" or lead.customer_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该线索已转化，请先撤销转化再删除",
+        )
+
+    mark_deleted(lead, current_user.id)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="LEAD_DELETED",
+        entity_type="LEAD",
+        entity_id=lead.id,
+        detail=f"name={expected_name}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{lead_id}/followups", response_model=LeadFollowupOut, status_code=status.HTTP_201_CREATED)
@@ -412,25 +526,32 @@ def convert_lead(
     requested_name = (payload.customer_name or "").strip()
     requested_contact_name = (payload.customer_contact_name or "").strip()
     requested_phone = (payload.customer_phone or "").strip()
+    conversion_mode = (payload.conversion_mode or "NEW_CUSTOMER_LINKED").strip().upper()
+    if conversion_mode not in {"NEW_CUSTOMER_LINKED", "REUSE_CUSTOMER"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid conversion mode")
+    if conversion_mode == "REUSE_CUSTOMER" and lead.related_customer_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前线索不能复用原客户")
 
     customer: Customer
     assigned_accountant_id = payload.accountant_id
+    related_customer: Optional[Customer] = None
     if lead.related_customer_id is not None:
-        customer = db.execute(select(Customer).where(Customer.id == lead.related_customer_id)).scalar_one_or_none()
-        if customer is None:
+        related_customer = db.execute(
+            select(Customer).where(Customer.id == lead.related_customer_id, active_filter(Customer))
+        ).scalar_one_or_none()
+        if related_customer is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
         if assigned_accountant_id is None:
-            assigned_accountant_id = customer.assigned_accountant_id
-    else:
-        if assigned_accountant_id is None:
-            owner = db.execute(select(User).where(User.id == lead.owner_id)).scalar_one_or_none()
-            if owner is not None and owner.role == "ACCOUNTANT":
-                assigned_accountant_id = owner.id
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="accountant_id is required",
-                )
+            assigned_accountant_id = related_customer.assigned_accountant_id
+    if assigned_accountant_id is None:
+        owner = db.execute(select(User).where(User.id == lead.owner_id)).scalar_one_or_none()
+        if owner is not None and owner.role == "ACCOUNTANT":
+            assigned_accountant_id = owner.id
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="accountant_id is required",
+            )
 
     accountant = db.execute(select(User).where(User.id == assigned_accountant_id)).scalar_one_or_none()
     if accountant is None:
@@ -442,7 +563,10 @@ def convert_lead(
         if accountant.id not in managed_ids:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能转给直属下属会计")
 
-    if lead.related_customer_id is not None:
+    if conversion_mode == "REUSE_CUSTOMER":
+        if related_customer is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Related customer not found")
+        customer = related_customer
         old_customer_name = customer.name
         customer.name = requested_name or customer.name or lead.name
         customer.contact_name = requested_contact_name or customer.contact_name or lead.contact_name
@@ -455,14 +579,24 @@ def convert_lead(
         customer_name = requested_name or lead.name
         customer_contact_name = requested_contact_name or lead.contact_name
         customer_phone = requested_phone or lead.phone
-        customer = Customer(
-            name=customer_name,
-            contact_name=customer_contact_name,
-            phone=customer_phone,
-            assigned_accountant_id=assigned_accountant_id,
-            source_lead_id=lead.id,
-        )
-        db.add(customer)
+        customer = db.execute(select(Customer).where(Customer.source_lead_id == lead.id, deleted_filter(Customer))).scalar_one_or_none()
+        if customer is not None:
+            restore_deleted(customer)
+            customer.name = customer_name
+            customer.contact_name = customer_contact_name
+            customer.phone = customer_phone
+            customer.assigned_accountant_id = assigned_accountant_id
+            customer.source_customer_id = lead.related_customer_id
+        else:
+            customer = Customer(
+                name=customer_name,
+                contact_name=customer_contact_name,
+                phone=customer_phone,
+                assigned_accountant_id=assigned_accountant_id,
+                source_customer_id=lead.related_customer_id,
+                source_lead_id=lead.id,
+            )
+            db.add(customer)
 
     lead.status = "CONVERTED"
     lead.updated_at = datetime.utcnow()
@@ -475,7 +609,8 @@ def convert_lead(
         entity_id=lead.id,
         detail=(
             f"customer={customer.name},accountant_id={assigned_accountant_id},"
-            f"reused_customer={'Y' if lead.related_customer_id is not None else 'N'}"
+            f"reused_customer={'Y' if conversion_mode == 'REUSE_CUSTOMER' else 'N'},"
+            f"source_customer_id={lead.related_customer_id or ''}"
         ),
     )
     db.commit()
@@ -499,10 +634,17 @@ def unconvert_lead(
     if lead.status != "CONVERTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lead is not converted")
 
-    customer = db.execute(select(Customer).where(Customer.source_lead_id == lead.id)).scalar_one_or_none()
+    customer = db.execute(
+        select(Customer).where(Customer.source_lead_id == lead.id, active_filter(Customer))
+    ).scalar_one_or_none()
     if customer is not None:
         linked_billing = (
-            db.execute(select(func.count(BillingRecord.id)).where(BillingRecord.customer_id == customer.id)).scalar()
+            db.execute(
+                select(func.count(BillingRecord.id)).where(
+                    BillingRecord.customer_id == customer.id,
+                    active_filter(BillingRecord),
+                )
+            ).scalar()
             or 0
         )
         if linked_billing > 0:
@@ -510,7 +652,7 @@ def unconvert_lead(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Customer has billing records, cannot revoke conversion",
             )
-        db.delete(customer)
+        mark_deleted(customer, current_user.id)
 
     lead.status = "FOLLOWING" if lead.last_followup_date is not None else "NEW"
     lead.updated_at = datetime.utcnow()

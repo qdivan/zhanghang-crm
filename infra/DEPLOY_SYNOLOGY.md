@@ -165,6 +165,10 @@ cd /volume1/docker/daizhang
   - `infra/env/*.env` 做加密备份。
 - 异地备份：
   - 关键备份同步到异地对象存储。
+- 项目内置命令入口：
+  - `npm run backup:prd`
+  - `npm run restore:prd -- --dump backups/prd/<timestamp>/postgres.dump --confirm daizhang`
+- 详细策略、恢复演练和边界说明见 [docs/backup-architecture.md](/Users/shangyifan/Documents/New%20project/docs/backup-architecture.md)。
 
 ## 12. 监控与告警（企业最小集）
 - 容器健康：`docker ps`、容器重启次数。

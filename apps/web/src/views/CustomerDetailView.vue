@@ -101,9 +101,45 @@ const customerSummaryNotes = computed(() => {
   if (!detail.value) return [];
   return [
     { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
+    { label: "来源", value: displayText(detail.value.lead.source) },
     { label: "介绍人", value: displayText(detail.value.lead.intro) },
     { label: "备注", value: displayText(detail.value.lead.notes), multiline: true },
   ];
+});
+const customerDesktopQuickFacts = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "对接人", value: displayContactLine.value },
+    { label: "国家 / 地区", value: displayCountry.value },
+    { label: "服务方式", value: displayText(detail.value.lead.service_mode) },
+    { label: "来源", value: displayText(detail.value.lead.source) },
+  ];
+});
+const customerDesktopNarrative = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "主营产品", value: displayText(detail.value.lead.main_business), wide: true },
+    { label: "介绍人", value: displayText(detail.value.lead.intro) },
+  ].filter((item) => item.value !== "-");
+});
+const customerDesktopSignalTail = computed(() => {
+  if (!detail.value) return [];
+  return [
+    {
+      label: detail.value.lead.next_reminder_at ? "下次提醒" : "最后跟进",
+      value: detail.value.lead.next_reminder_at || displayText(detail.value.lead.last_followup_date),
+      emphasized: Boolean(detail.value.lead.next_reminder_at),
+    },
+  ];
+});
+const customerDesktopExtraNotes = computed(() => {
+  if (!detail.value) return [];
+  return [
+    { label: "微信", value: displayText(detail.value.lead.contact_wechat) },
+    { label: "其他联系人", value: displayText(detail.value.lead.other_contact) },
+    { label: "收费标准", value: displayText(detail.value.lead.fee_standard) },
+    { label: "备注", value: displayText(detail.value.lead.notes), multiline: true },
+  ].filter((item) => item.value !== "-");
 });
 const mobileSecondaryActionItems = computed(() => [
   {
@@ -155,6 +191,7 @@ const longDesktopFields = computed(() => {
   if (!detail.value) return [];
   return [
     { label: "主营产品", value: displayText(detail.value.lead.main_business) },
+    { label: "来源", value: displayText(detail.value.lead.source) },
     { label: "介绍人", value: displayText(detail.value.lead.intro) },
     { label: "备注", value: displayText(detail.value.lead.notes) },
   ].filter((item) => item.value !== "-");
@@ -631,116 +668,60 @@ onMounted(fetchDetail);
       </div>
     </section>
 
-    <el-card v-loading="loading" shadow="never" class="customer-detail-card">
-      <template #header>
-        <div class="head">
-          <div class="head-copy-block">
-            <span>客户档案</span>
-            <div class="head-copy">这里只看成单后的客户信息和完整时间线。</div>
-          </div>
-          <el-space v-if="detail" class="meta-tags" wrap size="8">
-            <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
-            <el-tag size="small" type="info" effect="plain">会计 {{ detail.accountant_username }}</el-tag>
-            <el-tag size="small" effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
-          </el-space>
-        </div>
-      </template>
-
+    <el-card v-loading="loading" shadow="never" class="customer-overview-card">
       <el-empty v-if="!detail" description="未找到客户" />
       <template v-else>
-        <div v-if="isMobile" class="detail-mobile-stack">
-          <div class="mobile-record-card">
-            <div class="mobile-record-head">
-              <div class="mobile-record-main">
-                <div class="mobile-record-title">{{ detail.name }}</div>
-                <div class="mobile-record-subtitle">
-                  会计 {{ detail.accountant_username }} · {{ templateLabel(detail.lead.template_type) }}
-                </div>
-              </div>
-              <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+        <div class="customer-overview-shell">
+          <div class="customer-overview-main">
+            <div class="customer-overview-kicker">客户档案</div>
+            <div class="customer-overview-title-row">
+              <div class="customer-overview-title">{{ detail.name }}</div>
+              <el-space class="customer-overview-tags" wrap :size="8">
+                <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
+                <el-tag size="small" type="info" effect="plain">会计 {{ detail.accountant_username || "未分配" }}</el-tag>
+                <el-tag size="small" effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
+              </el-space>
             </div>
-            <div class="mobile-record-metrics">
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">等级</div>
-                <div class="mobile-metric-value">{{ detail.lead.grade || "-" }}</div>
-              </div>
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">国家</div>
-                <div class="mobile-metric-value">{{ displayCountry }}</div>
-              </div>
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">服务开始</div>
-                <div class="mobile-metric-value">{{ displayServiceStart }}</div>
-              </div>
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">服务方式</div>
-                <div class="mobile-metric-value">{{ detail.lead.service_mode || "-" }}</div>
-              </div>
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">对接人</div>
-                <div class="mobile-metric-value">{{ displayContactLine }}</div>
-              </div>
-              <div class="mobile-metric">
-                <div class="mobile-metric-label">收费标准</div>
-                <div class="mobile-metric-value">{{ detail.lead.fee_standard || "-" }}</div>
-              </div>
+            <div class="customer-overview-copy">{{ customerHeroCopy }}</div>
+            <div class="customer-overview-meta">
+              <span v-for="item in customerFocusMeta" :key="item">{{ item }}</span>
             </div>
-            <div class="detail-long-fields">
-              <div class="detail-long-field">
-                <div class="detail-long-label">主营产品</div>
-                <div class="detail-long-value">{{ detail.lead.main_business || "-" }}</div>
-              </div>
-              <div class="detail-long-field">
-                <div class="detail-long-label">介绍人</div>
-                <div class="detail-long-value">{{ detail.lead.intro || "-" }}</div>
-              </div>
-              <div class="detail-long-field">
-                <div class="detail-long-label">备注</div>
-                <div class="detail-long-value">{{ detail.lead.notes || "-" }}</div>
-              </div>
+            <div class="customer-overview-quickfacts">
+              <article
+                v-for="item in customerDesktopQuickFacts"
+                :key="`customer-quick-${item.label}`"
+                class="customer-overview-quickfact"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </article>
+            </div>
+            <div v-if="customerDesktopNarrative.length" class="customer-overview-storyline">
+              <article
+                v-for="item in customerDesktopNarrative"
+                :key="`customer-story-${item.label}`"
+                class="customer-overview-storyline-item"
+                :class="{ wide: item.wide }"
+              >
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </article>
             </div>
           </div>
-        </div>
-        <div v-else class="detail-compact-panel">
-          <div class="detail-compact-grid">
-            <div
-              v-for="item in primaryDesktopFields"
-              :key="`customer-primary-${item.label}`"
-              class="detail-compact-item"
-              :class="{ wide: item.wide }"
+          <div class="customer-overview-rail">
+            <article v-for="item in customerSignalFacts" :key="item.label" class="customer-overview-rail-item">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
+            <article
+              v-for="item in customerDesktopSignalTail"
+              :key="`customer-signal-tail-${item.label}`"
+              class="customer-overview-rail-item"
+              :class="{ emphasized: item.emphasized }"
             >
-              <div class="detail-compact-label">{{ item.label }}</div>
-              <div class="detail-compact-value">{{ item.value }}</div>
-            </div>
-          </div>
-
-          <el-collapse v-if="secondaryDesktopFields.length" v-model="detailCollapse" class="detail-secondary-collapse">
-            <el-collapse-item name="extra">
-              <template #title>
-                <span class="detail-collapse-title">补充信息（{{ secondaryDesktopFields.length }}项）</span>
-              </template>
-              <div class="detail-compact-grid secondary">
-                <div
-                  v-for="item in secondaryDesktopFields"
-                  :key="`customer-secondary-${item.label}`"
-                  class="detail-compact-item secondary"
-                >
-                  <div class="detail-compact-label">{{ item.label }}</div>
-                  <div class="detail-compact-value">{{ item.value }}</div>
-                </div>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
-
-          <div v-if="longDesktopFields.length" class="detail-long-stack">
-            <div
-              v-for="item in longDesktopFields"
-              :key="`customer-long-${item.label}`"
-              class="detail-long-row"
-            >
-              <div class="detail-long-row-label">{{ item.label }}</div>
-              <div class="detail-long-row-value">{{ item.value }}</div>
-            </div>
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </article>
           </div>
         </div>
       </template>
@@ -751,7 +732,7 @@ onMounted(fetchDetail);
         <div class="head">
           <div class="head-copy-block">
             <span>客户时间线</span>
-            <div class="head-copy">按日期查看成单前后记录、收款、执行和客户事项。</div>
+            <div class="head-copy">把沟通、收费、执行和临时事项放到前面，进来先看最近发生了什么。</div>
           </div>
           <el-tag size="small" type="info" effect="plain">{{ detail?.timeline.length ?? 0 }} 条</el-tag>
         </div>
@@ -855,6 +836,84 @@ onMounted(fetchDetail);
           </template>
         </el-table-column>
       </el-table>
+    </el-card>
+
+    <el-card shadow="never" class="customer-detail-card">
+      <template #header>
+        <div class="head">
+          <div class="head-copy-block">
+            <span>补充档案</span>
+            <div class="head-copy">缺失字段、原始开发信息和补充说明都放在这里，需要时展开查看或继续补录。</div>
+          </div>
+          <el-button size="small" :disabled="!detail || !canWriteCustomer" @click="openEditDialog">补录 / 编辑</el-button>
+        </div>
+      </template>
+
+      <el-empty v-if="!detail" description="暂无补充档案" />
+      <el-collapse v-else v-model="detailCollapse" class="customer-archive-collapse">
+        <el-collapse-item name="profile">
+          <template #title>
+            <span class="detail-collapse-title">展开补充信息</span>
+          </template>
+
+          <div class="detail-section">
+            <div class="detail-section-title">基础档案</div>
+            <div class="detail-compact-grid">
+              <div
+                v-for="item in primaryDesktopFields"
+                :key="`customer-primary-${item.label}`"
+                class="detail-compact-item"
+                :class="{ wide: item.wide }"
+              >
+                <div class="detail-compact-label">{{ item.label }}</div>
+                <div class="detail-compact-value">{{ item.value }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="secondaryDesktopFields.length" class="detail-section">
+            <div class="detail-section-title">服务与收费补充</div>
+            <div class="detail-compact-grid secondary">
+              <div
+                v-for="item in secondaryDesktopFields"
+                :key="`customer-secondary-${item.label}`"
+                class="detail-compact-item secondary"
+              >
+                <div class="detail-compact-label">{{ item.label }}</div>
+                <div class="detail-compact-value">{{ item.value }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="customerDesktopExtraNotes.length" class="detail-section">
+            <div class="detail-section-title">备注与补充说明</div>
+            <div class="detail-long-stack">
+              <div
+                v-for="item in customerDesktopExtraNotes"
+                :key="`customer-extra-${item.label}`"
+                class="detail-long-row"
+              >
+                <div class="detail-long-row-label">{{ item.label }}</div>
+                <div class="detail-long-row-value">{{ item.value }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="longDesktopFields.length" class="detail-section">
+            <div class="detail-section-title">原始开发字段</div>
+            <div class="detail-long-stack">
+              <div
+                v-for="item in longDesktopFields"
+                :key="`customer-long-${item.label}`"
+                class="detail-long-row"
+              >
+                <div class="detail-long-row-label">{{ item.label }}</div>
+                <div class="detail-long-row-value">{{ item.value }}</div>
+              </div>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
     </el-card>
   </el-space>
 
@@ -1373,9 +1432,164 @@ onMounted(fetchDetail);
 
 .head {
   display: flex;
+}
+
+.head {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+.customer-overview-card,
+.customer-detail-card,
+.timeline-card {
+  border-color: #dfe6e8;
+}
+
+.customer-overview-card :deep(.el-card__body),
+.customer-detail-card :deep(.el-card__body),
+.timeline-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+
+.customer-overview-card :deep(.el-card__header),
+.customer-detail-card :deep(.el-card__header),
+.timeline-card :deep(.el-card__header) {
+  padding: 12px 16px;
+}
+
+.customer-overview-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(240px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.customer-overview-main {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.customer-overview-kicker {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.customer-overview-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-overview-title {
+  min-width: 0;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #111827;
+  word-break: break-word;
+}
+
+.customer-overview-tags {
+  justify-content: flex-end;
+}
+
+.customer-overview-copy {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4b5563;
+}
+
+.customer-overview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.customer-overview-quickfacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.customer-overview-quickfact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-top: 1px solid #edf1f5;
+  background: transparent;
+}
+
+.customer-overview-quickfact span,
+.customer-overview-storyline-item span,
+.customer-overview-rail-item span {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.customer-overview-quickfact strong,
+.customer-overview-storyline-item strong,
+.customer-overview-rail-item strong {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #111827;
+  word-break: break-word;
+}
+
+.customer-overview-storyline {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 0.8fr);
+  gap: 8px;
+}
+
+.customer-overview-storyline-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-top: 1px solid #edf1f5;
+  background: transparent;
+}
+
+.customer-overview-storyline-item.wide {
+  grid-column: span 1;
+}
+
+.customer-overview-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  padding-left: 14px;
+  border-left: 1px solid #edf1f5;
+}
+
+.customer-overview-rail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 0;
+  border-top: 1px solid #edf1f5;
+}
+
+.customer-overview-rail-item:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.customer-overview-rail-item.emphasized strong {
+  color: #b45309;
 }
 
 .head-copy-block {
@@ -1392,11 +1606,6 @@ onMounted(fetchDetail);
 
 .meta-tags {
   justify-content: flex-end;
-}
-
-.customer-detail-card,
-.timeline-card {
-  border-color: #dfe6e8;
 }
 
 .detail-compact-panel {
@@ -1441,7 +1650,7 @@ onMounted(fetchDetail);
   word-break: break-word;
 }
 
-.detail-secondary-collapse {
+.customer-archive-collapse {
   border-top: none;
   border-bottom: none;
 }
@@ -1451,18 +1660,35 @@ onMounted(fetchDetail);
   color: #4b5563;
 }
 
-.detail-secondary-collapse :deep(.el-collapse-item__header) {
+.customer-archive-collapse :deep(.el-collapse-item__header) {
   height: 34px;
   font-size: 13px;
   color: #4b5563;
 }
 
-.detail-secondary-collapse :deep(.el-collapse-item__wrap) {
+.customer-archive-collapse :deep(.el-collapse-item__wrap) {
   border-bottom: none;
 }
 
-.detail-secondary-collapse :deep(.el-collapse-item__content) {
-  padding-bottom: 4px;
+.customer-archive-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 6px;
+}
+
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.detail-section:first-child {
+  margin-top: 0;
+}
+
+.detail-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
 }
 
 .detail-long-stack {
@@ -1530,6 +1756,30 @@ onMounted(fetchDetail);
   .head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .customer-overview-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-overview-title-row {
+    flex-direction: column;
+  }
+
+  .customer-overview-tags {
+    justify-content: flex-start;
+  }
+
+  .customer-overview-quickfacts,
+  .customer-overview-storyline {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-overview-rail {
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid #edf1f5;
+    padding-top: 8px;
   }
 
   .customer-topbar {

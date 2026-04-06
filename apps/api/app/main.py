@@ -1,3 +1,5 @@
+import re
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
@@ -27,6 +29,23 @@ app.include_router(v1_router, prefix="/api/v1")
 def _ensure_schema_compatibility() -> None:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+
+    def ensure_soft_delete_columns(table_name: str) -> None:
+        if table_name not in table_names:
+            return
+        columns = {item["name"] for item in inspector.get_columns(table_name)}
+        with engine.begin() as conn:
+            if "is_deleted" not in columns:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        "ADD COLUMN is_deleted BOOLEAN DEFAULT 0"
+                    )
+                )
+            if "deleted_at" not in columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_at DATETIME"))
+            if "deleted_by_user_id" not in columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_by_user_id INTEGER"))
 
     if "todo_items" in table_names:
         todo_columns = {item["name"] for item in inspector.get_columns("todo_items")}
@@ -139,6 +158,12 @@ def _ensure_schema_compatibility() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN manager_user_id INTEGER"))
 
+    if "customers" in table_names:
+        customer_columns = {item["name"] for item in inspector.get_columns("customers")}
+        if "source_customer_id" not in customer_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN source_customer_id INTEGER"))
+
     if "customer_timeline_events" in table_names:
         timeline_columns = {item["name"] for item in inspector.get_columns("customer_timeline_events")}
         with engine.begin() as conn:
@@ -178,6 +203,59 @@ def _ensure_schema_compatibility() -> None:
                         "ADD COLUMN visibility VARCHAR(16) DEFAULT 'INTERNAL'"
                     )
                 )
+
+    if "address_resources" in table_names and "address_resource_companies" in table_names:
+        with engine.begin() as conn:
+            migrated_resource_ids = {
+                int(row[0])
+                for row in conn.execute(
+                    text("SELECT DISTINCT address_resource_id FROM address_resource_companies")
+                ).fetchall()
+                if row and row[0] is not None
+            }
+            resource_rows = conn.execute(
+                text(
+                    "SELECT id, served_companies FROM address_resources "
+                    "WHERE served_companies IS NOT NULL AND trim(served_companies) != ''"
+                )
+            ).fetchall()
+            for resource_id, served_companies in resource_rows:
+                if int(resource_id) in migrated_resource_ids:
+                    continue
+                names = [
+                    token.strip()
+                    for token in re.split(r"[、,，\n]+", str(served_companies))
+                    if token and token.strip()
+                ]
+                for name in names:
+                    conn.execute(
+                        text(
+                            "INSERT INTO address_resource_companies "
+                            "("
+                            "address_resource_id, customer_id, company_name, notes, "
+                            "created_at, updated_at, is_deleted, deleted_at, deleted_by_user_id"
+                            ") "
+                            "VALUES ("
+                            ":address_resource_id, NULL, :company_name, '', "
+                            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE, NULL, NULL"
+                            ")"
+                        ),
+                        {
+                            "address_resource_id": int(resource_id),
+                            "company_name": name,
+                        },
+                    )
+
+    for soft_delete_table in [
+        "leads",
+        "customers",
+        "billing_records",
+        "todo_items",
+        "address_resources",
+        "address_resource_companies",
+        "common_library_items",
+    ]:
+        ensure_soft_delete_columns(soft_delete_table)
 
 
 @app.on_event("startup")

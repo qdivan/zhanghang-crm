@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import { apiClient } from "../../api/client";
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
 import type { LeadCreateForm } from "../../views/lead/forms";
 import {
@@ -38,6 +39,14 @@ type CompanySuggestionItem = LeadCustomerSearchItem & {
   value: string;
 };
 
+type IntroSuggestionItem = {
+  value: string;
+};
+
+type SourceSuggestionItem = {
+  value: string;
+};
+
 const selectedCustomer = ref<LeadCustomerSearchItem | null>(null);
 
 async function fetchCompanySuggestions(
@@ -67,6 +76,42 @@ function handleCompanySelect(item: CompanySuggestionItem) {
   }
   if (!props.form.phone) {
     props.form.phone = item.phone;
+  }
+}
+
+async function fetchIntroSuggestions(
+  queryString: string,
+  callback: (items: IntroSuggestionItem[]) => void,
+) {
+  const q = queryString.trim();
+  try {
+    const resp = await apiClient.get<string[]>("/leads/intro-options", {
+      params: {
+        q: q || undefined,
+        limit: 12,
+      },
+    });
+    callback(resp.data.map((item) => ({ value: item })));
+  } catch {
+    callback([]);
+  }
+}
+
+async function fetchSourceSuggestions(
+  queryString: string,
+  callback: (items: SourceSuggestionItem[]) => void,
+) {
+  const q = queryString.trim();
+  try {
+    const resp = await apiClient.get<string[]>("/leads/source-options", {
+      params: {
+        q: q || undefined,
+        limit: 12,
+      },
+    });
+    callback(resp.data.map((item) => ({ value: item })));
+  } catch {
+    callback([]);
   }
 }
 
@@ -150,8 +195,11 @@ watch(
                 </div>
               </template>
             </el-autocomplete>
+            <el-text v-if="!props.form.name?.trim()" size="small" type="info">
+              留空时会默认使用联系人姓名作为公司名。
+            </el-text>
             <el-text v-if="props.form.related_customer_id" size="small" type="primary">
-              已关联现有客户，后续转化会复用客户档案，避免重复建客户。
+              已关联现有客户，后续转化时可选择复用原客户或新建客户主体。
             </el-text>
           </el-form-item>
         </el-col>
@@ -185,7 +233,7 @@ watch(
 
       <el-row :gutter="12">
         <el-col :span="8">
-          <el-form-item label="联系人">
+          <el-form-item label="联系人" required>
             <el-input v-model="props.form.contact_name" />
           </el-form-item>
         </el-col>
@@ -209,7 +257,7 @@ watch(
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="联络开始时间">
+            <el-form-item label="联络开始时间" required>
               <FlexibleDateInput v-model="props.form.contact_start_date" />
             </el-form-item>
           </el-col>
@@ -227,17 +275,31 @@ watch(
             </el-form-item>
           </el-col>
           <el-col :span="8">
-            <el-form-item label="来源">
-              <el-input v-model="props.form.source" />
+            <el-form-item label="来源" required>
+              <el-autocomplete
+                v-model="props.form.source"
+                :fetch-suggestions="fetchSourceSuggestions"
+                :trigger-on-focus="true"
+                :debounce="150"
+                clearable
+                placeholder="默认 Sally直播，可联想历史来源"
+              />
             </el-form-item>
           </el-col>
         </el-row>
 
-        <el-form-item label="主营/需求">
+        <el-form-item label="主营/需要" required>
           <el-input v-model="props.form.main_business" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="介绍人">
-          <el-input v-model="props.form.intro" />
+          <el-autocomplete
+            v-model="props.form.intro"
+            :fetch-suggestions="fetchIntroSuggestions"
+            :trigger-on-focus="true"
+            :debounce="150"
+            clearable
+            placeholder="可留空，也可复用之前录过的介绍人"
+          />
         </el-form-item>
 
         <el-row :gutter="12">
@@ -302,8 +364,15 @@ watch(
 
         <el-row :gutter="12">
           <el-col :span="8">
-            <el-form-item label="来源">
-              <el-input v-model="props.form.source" />
+            <el-form-item label="来源" required>
+              <el-autocomplete
+                v-model="props.form.source"
+                :fetch-suggestions="fetchSourceSuggestions"
+                :trigger-on-focus="true"
+                :debounce="150"
+                clearable
+                placeholder="默认 Sally直播，可联想历史来源"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="8">
@@ -325,11 +394,18 @@ watch(
           </el-col>
         </el-row>
 
-        <el-form-item label="主营产品">
+        <el-form-item label="主营/需要" required>
           <el-input v-model="props.form.main_business" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="介绍人">
-          <el-input v-model="props.form.intro" />
+          <el-autocomplete
+            v-model="props.form.intro"
+            :fetch-suggestions="fetchIntroSuggestions"
+            :trigger-on-focus="true"
+            :debounce="150"
+            clearable
+            placeholder="可留空，也可复用之前录过的介绍人"
+          />
         </el-form-item>
 
         <el-row :gutter="12">

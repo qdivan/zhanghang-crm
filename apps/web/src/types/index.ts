@@ -95,6 +95,23 @@ export interface OperationLogItem {
   created_at: string;
 }
 
+export interface DeletedRecordItem {
+  entity_type: string;
+  entity_id: number;
+  display_name: string;
+  detail: string;
+  deleted_at: string;
+  deleted_by_user_id: number | null;
+  deleted_by_username: string;
+}
+
+export interface DeletedRecordRestoreResult {
+  entity_type: string;
+  entity_id: number;
+  display_name: string;
+  restored_at: string;
+}
+
 export type DataAccessModule = "CUSTOMER" | "BILLING";
 
 export interface DataAccessGrantItem {
@@ -177,6 +194,7 @@ export interface CustomerListItem {
   status: string;
   assigned_accountant_id: number;
   accountant_username: string;
+  source_customer_id: number | null;
   source_lead_id: number;
   source_template_type: LeadTemplateType;
   source_grade: string;
@@ -205,6 +223,7 @@ export interface CustomerDetail {
   status: string;
   assigned_accountant_id: number;
   accountant_username: string;
+  source_customer_id: number | null;
   source_lead_id: number;
   created_at: string;
   lead: LeadItem;
@@ -271,11 +290,24 @@ export interface CustomerTimelineEventUpdatePayload {
   amount?: number | null;
 }
 
+export interface AddressResourceCompanyItem {
+  id: number;
+  address_resource_id: number;
+  customer_id: number | null;
+  customer_name: string;
+  company_name: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AddressResource {
   id: number;
   category: string;
   contact_info: string;
   served_companies: string;
+  served_company_count: number;
+  company_items: AddressResourceCompanyItem[];
   description: string;
   next_action: string;
   notes: string;
@@ -463,11 +495,38 @@ export interface BillingLedgerData {
   customer_name: string;
   date_from: string | null;
   date_to: string | null;
+  opening_balance: number;
   receivable_total: number;
   received_total: number;
   balance: number;
+  closing_balance: number;
   monthly_summaries: BillingLedgerMonthlySummaryItem[];
   entries: BillingLedgerEntryItem[];
+}
+
+export interface BillingCustomerSummaryItem {
+  customer_id: number;
+  customer_name: string;
+  customer_contact_name: string;
+  opening_arrears: number;
+  period_receivable: number;
+  period_received: number;
+  ending_outstanding: number;
+  overdue_count: number;
+  latest_activity_at: string | null;
+  latest_activity_content: string;
+}
+
+export interface BillingSummaryData {
+  total_records: number;
+  total_fee: number;
+  total_monthly_fee: number;
+  payment_method_distribution: Array<{ payment_method: string; count: number }>;
+  status_distribution: Array<{ status: string; count: number }>;
+  receipt_account_distribution: Array<{ receipt_account: string; payment_count: number; total_amount: number }>;
+  summary_date_from: string | null;
+  summary_date_to: string | null;
+  customer_summaries: BillingCustomerSummaryItem[];
 }
 
 export interface BillingReceiptAccountSummaryItem {
@@ -482,8 +541,9 @@ export interface BillingReceiptAccountEntryItem {
   receipt_account: string;
   customer_name: string;
   summary: string;
-  received_amount: number;
-  cumulative_received: number;
+  debit_amount: number;
+  credit_amount: number;
+  balance: number;
   actor_username: string;
   payment_id: number | null;
   billing_record_id: number | null;
@@ -493,6 +553,9 @@ export interface BillingReceiptAccountLedgerData {
   receipt_account: string | null;
   date_from: string | null;
   date_to: string | null;
+  opening_debit: number;
+  opening_credit: number;
+  opening_balance: number;
   total_received: number;
   payment_count: number;
   account_summaries: BillingReceiptAccountSummaryItem[];

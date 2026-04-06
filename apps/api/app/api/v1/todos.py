@@ -5,11 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, aliased
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models import TodoItem, User
 from app.schemas.todo import TodoBulkUpdateResult, TodoCreate, TodoOut, TodoUpdate
 from app.services.audit import write_operation_log
+from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/todos", tags=["todos"])
 
@@ -40,7 +41,7 @@ def _get_user_or_400(db: Session, user_id: int) -> User:
 
 
 def _get_todo_or_404(db: Session, todo_id: int) -> TodoItem:
-    todo = db.execute(select(TodoItem).where(TodoItem.id == todo_id)).scalar_one_or_none()
+    todo = db.execute(select(TodoItem).where(TodoItem.id == todo_id, active_filter(TodoItem))).scalar_one_or_none()
     if todo is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="待办不存在")
     return todo
@@ -84,7 +85,7 @@ def _load_todo_out(db: Session, todo_id: int) -> TodoOut:
         select(TodoItem, assignee.username, creator.username)
         .join(assignee, TodoItem.assignee_user_id == assignee.id)
         .join(creator, TodoItem.created_by_user_id == creator.id)
-        .where(TodoItem.id == todo_id)
+        .where(TodoItem.id == todo_id, active_filter(TodoItem))
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="待办不存在")
@@ -110,7 +111,7 @@ def list_todos(
         select(TodoItem, assignee.username, creator.username)
         .join(assignee, TodoItem.assignee_user_id == assignee.id)
         .join(creator, TodoItem.created_by_user_id == creator.id)
-        .where(TodoItem.assignee_user_id == target_assignee_user_id)
+        .where(TodoItem.assignee_user_id == target_assignee_user_id, active_filter(TodoItem))
         .limit(limit)
     )
     if view == "TODAY":
@@ -217,6 +218,7 @@ def add_all_to_my_day(
         select(TodoItem)
         .where(
             TodoItem.assignee_user_id == target_assignee_user_id,
+            active_filter(TodoItem),
             TodoItem.status == "OPEN",
             or_(TodoItem.my_day_date.is_(None), TodoItem.my_day_date != today),
         )
@@ -250,6 +252,7 @@ def clear_my_day(
         select(TodoItem)
         .where(
             TodoItem.assignee_user_id == target_assignee_user_id,
+            active_filter(TodoItem),
             TodoItem.my_day_date == today,
         )
     ).scalars().all()
@@ -269,22 +272,29 @@ def clear_my_day(
     return TodoBulkUpdateResult(affected_count=len(todos))
 
 
-@router.delete("/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{todo_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
 def delete_todo(
     todo_id: int,
+    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     todo = _get_todo_or_404(db, todo_id)
-    _ensure_todo_write_access(todo, current_user)
-    db.delete(todo)
+    expected_name = (todo.title or "").strip() or f"待办#{todo.id}"
+    if (confirm_name or "").strip() != expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
+    mark_deleted(todo, current_user.id)
     write_operation_log(
         db,
         actor_id=current_user.id,
         action="TODO_DELETED",
         entity_type="TODO",
         entity_id=todo_id,
-        detail="deleted",
+        detail=f"title={expected_name}",
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -16,6 +16,7 @@ const props = defineProps<{
   loading: boolean;
   rows: LeadItem[];
   canConvert: boolean;
+  canDelete: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   history: [row: LeadItem];
   convert: [row: LeadItem];
   revoke: [row: LeadItem];
+  delete: [row: LeadItem];
 }>();
 
 const { isMobile } = useResponsive();
@@ -47,6 +49,7 @@ function handleMobileCommand(command: string, row: LeadItem) {
   if (command === "customer") emit("customer", row);
   if (command === "convert") emit("convert", row);
   if (command === "revoke") emit("revoke", row);
+  if (command === "delete") emit("delete", row);
 }
 
 function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
@@ -136,6 +139,9 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
                   :disabled="!props.canConvert"
                 >
                   撤销转化
+                </el-dropdown-item>
+                <el-dropdown-item v-if="props.canDelete" :command="{ action: 'delete', row }">
+                  删除线索
                 </el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -260,6 +266,7 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
             >
               撤销转化
             </el-button>
+            <el-button v-if="props.canDelete" link type="danger" @click="emit('delete', row)">删除</el-button>
           </el-space>
         </template>
       </el-table-column>

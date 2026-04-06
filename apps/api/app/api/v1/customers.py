@@ -1,15 +1,17 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
 from app.models import (
+    AddressResourceCompany,
     BillingActivity,
     BillingExecutionLog,
+    BillingPayment,
     BillingRecord,
     Customer,
     CustomerTimelineEvent,
@@ -30,8 +32,16 @@ from app.schemas.customer import (
 from app.services.audit import write_operation_log
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
+from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/customers", tags=["customers"])
+
+
+def _get_customer_or_404(db: Session, customer_id: int) -> Customer:
+    customer = db.execute(select(Customer).where(Customer.id == customer_id, active_filter(Customer))).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    return customer
 
 
 def _ensure_customer_access(
@@ -206,7 +216,9 @@ def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> lis
     ).scalars().all()
 
     records = db.execute(
-        select(BillingRecord).where(BillingRecord.customer_id == customer.id).order_by(BillingRecord.id.desc())
+        select(BillingRecord)
+        .where(BillingRecord.customer_id == customer.id, active_filter(BillingRecord))
+        .order_by(BillingRecord.id.desc())
     ).scalars().all()
     record_ids = [item.id for item in records]
     serial_keys = [str(item.serial_no) for item in records]
@@ -448,6 +460,7 @@ def list_customers(
         )
         .join(User, Customer.assigned_accountant_id == User.id)
         .join(Lead, Customer.source_lead_id == Lead.id)
+        .where(active_filter(Customer), active_filter(Lead))
         .order_by(Customer.id.desc())
     )
     if keyword:
@@ -501,6 +514,7 @@ def list_customers(
                 status=customer.status,
                 assigned_accountant_id=customer.assigned_accountant_id,
                 accountant_username=accountant_username,
+                source_customer_id=customer.source_customer_id,
                 source_lead_id=customer.source_lead_id,
                 source_template_type=template_type or "",
                 source_grade=grade or "",
@@ -530,16 +544,13 @@ def get_customer_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = (
-        db.execute(select(Customer).where(Customer.id == customer_id))
-        .scalar_one_or_none()
-    )
-    if customer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    customer = _get_customer_or_404(db, customer_id)
     _ensure_customer_access(customer, current_user, db)
 
     lead = (
-        db.execute(select(Lead).options(selectinload(Lead.customer)).where(Lead.id == customer.source_lead_id))
+        db.execute(
+            select(Lead).options(selectinload(Lead.customer)).where(Lead.id == customer.source_lead_id, active_filter(Lead))
+        )
         .scalar_one_or_none()
     )
     if lead is None:
@@ -564,12 +575,67 @@ def get_customer_detail(
         status=customer.status,
         assigned_accountant_id=customer.assigned_accountant_id,
         accountant_username=accountant_username,
+        source_customer_id=customer.source_customer_id,
         source_lead_id=customer.source_lead_id,
         created_at=customer.created_at,
         lead=lead,
         followups=followups,
         timeline=timeline,
     )
+
+
+@router.delete(
+    "/{customer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_customer(
+    customer_id: int,
+    confirm_name: str = Query(default=""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    customer = _get_customer_or_404(db, customer_id)
+
+    expected_name = (customer.name or "").strip() or (customer.contact_name or "").strip() or f"客户#{customer.id}"
+    if (confirm_name or "").strip() != expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
+
+    billing_count = (
+        db.execute(
+            select(func.count(BillingRecord.id)).where(BillingRecord.customer_id == customer.id, active_filter(BillingRecord))
+        ).scalar()
+        or 0
+    )
+    if billing_count > 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer has billing records, cannot delete")
+
+    payment_count = (
+        db.execute(select(func.count(BillingPayment.id)).where(BillingPayment.customer_id == customer.id)).scalar() or 0
+    )
+    if payment_count > 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer has payment records, cannot delete")
+
+    for item in db.execute(
+        select(AddressResourceCompany).where(
+            AddressResourceCompany.customer_id == customer.id,
+            active_filter(AddressResourceCompany),
+        )
+    ).scalars().all():
+        if not (item.company_name or "").strip():
+            item.company_name = customer.name
+
+    mark_deleted(customer, current_user.id)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMER_DELETED",
+        entity_type="CUSTOMER",
+        entity_id=customer.id,
+        detail=f"name={expected_name}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -583,9 +649,7 @@ def create_customer_timeline_event(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    customer = _get_customer_or_404(db, customer_id)
     _ensure_customer_access(customer, current_user, db, for_write=True)
 
     content = (payload.content or "").strip()
@@ -644,9 +708,7 @@ def update_customer_timeline_event(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    customer = _get_customer_or_404(db, customer_id)
     _ensure_customer_access(customer, current_user, db, for_write=True)
 
     event = db.execute(
@@ -714,12 +776,10 @@ def apply_customer_timeline_template(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    customer = _get_customer_or_404(db, customer_id)
     _ensure_customer_access(customer, current_user, db, for_write=True)
 
-    lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id)).scalar_one_or_none()
+    lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id, active_filter(Lead))).scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source lead not found")
 
@@ -778,12 +838,10 @@ def update_customer(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    customer = db.execute(select(Customer).where(Customer.id == customer_id)).scalar_one_or_none()
-    if customer is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    customer = _get_customer_or_404(db, customer_id)
     _ensure_customer_access(customer, current_user, db, for_write=True)
 
-    lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id)).scalar_one_or_none()
+    lead = db.execute(select(Lead).where(Lead.id == customer.source_lead_id, active_filter(Lead))).scalar_one_or_none()
     if lead is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source lead not found")
 

@@ -35,10 +35,22 @@ const dialogVisible = computed({
       <el-form-item label="线索">
         <el-input :model-value="props.targetLeadName" disabled />
       </el-form-item>
+      <el-form-item label="转化方式">
+        <el-radio-group v-model="props.form.conversion_mode">
+          <el-radio-button value="NEW_CUSTOMER_LINKED">新建客户主体并关联原客户</el-radio-button>
+          <el-radio-button value="REUSE_CUSTOMER">复用原客户</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-alert
+        v-if="props.form.conversion_mode === 'REUSE_CUSTOMER'"
+        type="warning"
+        :closable="false"
+        title="复用原客户时，不会新建客户档案；本次成交仍会新增收费和后续办理记录。"
+      />
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="转化后客户名称">
-            <el-input v-model="props.form.customer_name" placeholder="可与线索名称不同" />
+            <el-input v-model="props.form.customer_name" placeholder="可与线索名称不同，老客二开可填新公司名" />
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -48,7 +60,7 @@ const dialogVisible = computed({
         </el-col>
       </el-row>
       <el-form-item label="转化后电话">
-        <el-input v-model="props.form.customer_phone" />
+        <el-input v-model="props.form.customer_phone" placeholder="可选填" />
       </el-form-item>
       <el-form-item label="分配会计">
         <el-select v-model="props.form.accountant_id" placeholder="请选择会计">

@@ -50,7 +50,6 @@ const scopeLabel = computed(() => {
 });
 
 const selectedAccountLabel = computed(() => receiptAccount.value || "全部账户");
-const accountCount = computed(() => data.value?.account_summaries.length ?? 0);
 const visibleEntries = computed(() => data.value?.entries || []);
 const showReceiptInitialSkeleton = computed(() => !receiptHydrated.value);
 const mobileAccountPresets = computed(() => {
@@ -98,6 +97,14 @@ function getMonthToken(offset = 0) {
   const year = current.getFullYear();
   const month = String(current.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
+}
+
+function formatAmount(value: number): string {
+  const amount = Number(value || 0);
+  return amount.toLocaleString("zh-CN", {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function receiptDatePresetLabel(preset: ReceiptDatePreset) {
@@ -257,16 +264,16 @@ watch(
         </div>
         <div class="receipt-mobile-stat-grid">
           <article class="receipt-mobile-stat-card">
-            <span>入账合计</span>
-            <strong>{{ data?.total_received ?? 0 }}</strong>
+            <span>期初余额</span>
+            <strong>{{ formatAmount(data?.opening_balance ?? 0) }}</strong>
+          </article>
+          <article class="receipt-mobile-stat-card">
+            <span>借方合计</span>
+            <strong>{{ formatAmount(data?.total_received ?? 0) }}</strong>
           </article>
           <article class="receipt-mobile-stat-card">
             <span>收款笔数</span>
             <strong>{{ data?.payment_count ?? 0 }}</strong>
-          </article>
-          <article class="receipt-mobile-stat-card">
-            <span>账户数</span>
-            <strong>{{ accountCount }}</strong>
           </article>
         </div>
         <div class="mobile-filter-presets receipt-mobile-presets">
@@ -335,7 +342,7 @@ watch(
         <template v-else>
           <article
             v-for="row in visibleEntries"
-            :key="`${row.occurred_at}-${row.customer_name}-${row.received_amount}`"
+            :key="`${row.occurred_at}-${row.customer_name}-${row.debit_amount}`"
             class="receipt-mobile-item"
           >
             <div class="receipt-mobile-top">
@@ -343,13 +350,13 @@ watch(
                 <div class="receipt-mobile-company">{{ row.customer_name }}</div>
                 <div class="receipt-mobile-summary">{{ row.summary }}</div>
               </div>
-              <div class="receipt-mobile-amount">{{ row.received_amount }}</div>
+              <div class="receipt-mobile-amount">{{ formatAmount(row.debit_amount - row.credit_amount) }}</div>
             </div>
             <div class="receipt-mobile-meta">
               <span>{{ row.occurred_at }}</span>
               <span>{{ buildVoucherNo(row) }}</span>
               <span>{{ row.receipt_account }}</span>
-              <span>累计 {{ row.cumulative_received }}</span>
+              <span>余额 {{ formatAmount(row.balance) }}</span>
               <span>{{ row.actor_username || "-" }}</span>
             </div>
           </article>
@@ -417,16 +424,16 @@ watch(
       </div>
       <div class="receipt-header-stats">
         <div class="receipt-stat-block">
-          <span class="receipt-stat-label">收款笔数</span>
-          <strong class="receipt-stat-value">{{ data?.payment_count ?? 0 }}</strong>
+          <span class="receipt-stat-label">期初借方</span>
+          <strong class="receipt-stat-value">{{ formatAmount(data?.opening_debit ?? 0) }}</strong>
         </div>
         <div class="receipt-stat-block">
-          <span class="receipt-stat-label">入账合计</span>
-          <strong class="receipt-stat-value">{{ data?.total_received ?? 0 }}</strong>
+          <span class="receipt-stat-label">期初贷方</span>
+          <strong class="receipt-stat-value">{{ formatAmount(data?.opening_credit ?? 0) }}</strong>
         </div>
         <div class="receipt-stat-block">
-          <span class="receipt-stat-label">账户数</span>
-          <strong class="receipt-stat-value">{{ accountCount }}</strong>
+          <span class="receipt-stat-label">期初余额</span>
+          <strong class="receipt-stat-value">{{ formatAmount(data?.opening_balance ?? 0) }}</strong>
         </div>
       </div>
     </section>
@@ -473,7 +480,7 @@ watch(
             <div class="receipt-account-title">全部账户</div>
             <div class="receipt-account-note">当前筛选范围内的全部到账</div>
           </div>
-          <strong class="receipt-account-total">{{ data?.total_received ?? 0 }}</strong>
+          <strong class="receipt-account-total">{{ formatAmount(data?.total_received ?? 0) }}</strong>
         </button>
 
         <button
@@ -487,7 +494,7 @@ watch(
             <div class="receipt-account-title">{{ item.receipt_account }}</div>
             <div class="receipt-account-note">{{ item.payment_count }} 笔 · 最近 {{ item.last_received_at || '-' }}</div>
           </div>
-          <strong class="receipt-account-total">{{ item.total_received }}</strong>
+          <strong class="receipt-account-total">{{ formatAmount(item.total_received) }}</strong>
         </button>
       </aside>
 
@@ -495,25 +502,25 @@ watch(
         <div class="receipt-main-head">
           <div>
             <div class="receipt-main-title">{{ selectedAccountLabel }}</div>
-            <div class="receipt-main-copy">贷方表示实收，累计入账用于当前筛选范围的核对。</div>
+            <div class="receipt-main-copy">按银行日记账口径查看借方、贷方和运行余额。</div>
           </div>
           <el-tag size="small" type="success" effect="plain">{{ visibleEntries.length }} 条流水</el-tag>
         </div>
 
         <div v-if="isMobile" v-loading="loading" class="receipt-mobile-list">
-          <article v-for="row in visibleEntries" :key="`${row.occurred_at}-${row.customer_name}-${row.received_amount}`" class="receipt-mobile-item">
+          <article v-for="row in visibleEntries" :key="`${row.occurred_at}-${row.customer_name}-${row.debit_amount}`" class="receipt-mobile-item">
             <div class="receipt-mobile-top">
               <div>
                 <div class="receipt-mobile-company">{{ row.customer_name }}</div>
                 <div class="receipt-mobile-summary">{{ row.summary }}</div>
               </div>
-              <div class="receipt-mobile-amount">{{ row.received_amount }}</div>
+              <div class="receipt-mobile-amount">{{ formatAmount(row.debit_amount - row.credit_amount) }}</div>
             </div>
             <div class="receipt-mobile-meta">
               <span>{{ row.occurred_at }}</span>
               <span>{{ buildVoucherNo(row) }}</span>
               <span>{{ row.receipt_account }}</span>
-              <span>累计 {{ row.cumulative_received }}</span>
+              <span>余额 {{ formatAmount(row.balance) }}</span>
               <span>{{ row.actor_username || '-' }}</span>
             </div>
           </article>
@@ -528,9 +535,10 @@ watch(
           </el-table-column>
           <el-table-column prop="customer_name" label="公司名称" min-width="160" show-overflow-tooltip />
           <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
-          <el-table-column prop="received_amount" label="贷方(收款)" width="112" />
-          <el-table-column prop="receipt_account" label="入账账户" width="112" />
-          <el-table-column prop="cumulative_received" label="累计入账" width="118" />
+          <el-table-column prop="debit_amount" label="借方" width="112" />
+          <el-table-column prop="credit_amount" label="贷方" width="112" />
+          <el-table-column prop="receipt_account" label="入账账户" width="180" show-overflow-tooltip />
+          <el-table-column prop="balance" label="余额" width="118" />
           <el-table-column prop="actor_username" label="记录人" width="92" />
         </el-table>
       </div>
@@ -736,6 +744,7 @@ watch(
 .receipt-toolbar-form :deep(.el-select__wrapper),
 .receipt-toolbar-form :deep(.el-date-editor.el-input__wrapper) {
   min-height: 34px;
+  min-width: 220px;
 }
 
 .receipt-workspace {

@@ -66,7 +66,7 @@ export const leadGuideStepItems = [
 export const leadGuideTemplateItems = [
   { label: "客户跟进模板（FOLLOWUP）", value: "适合常规跟进字段：服务方式、收费标准、国家/类型等。" },
   { label: "转化模板（CONVERSION）", value: "适合转化导向字段：地区、联络时间、备用字段等。" },
-  { label: "老客二开模板（REDEVELOP）", value: "用于老客户二次开发，成交后复用原客户档案并直接录入新增费用。" },
+  { label: "老客二开模板（REDEVELOP）", value: "用于老客户二次开发，成交后默认新建客户主体并关联原客户，也可切换为复用原客户。" },
   { label: "页面顶部“模板筛选”", value: "仅用于过滤列表显示，不会修改线索本身的数据。" },
 ];
 

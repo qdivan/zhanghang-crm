@@ -108,6 +108,22 @@ npm run prod:down
    - `BOOTSTRAP_DEMO_PASSWORD=<强密码>`（演示账号默认密码，默认 `Daizhang#2026!`）
    - `RESET_DB_ON_STARTUP=true|false`（是否启动时重建数据库）
 
+## 备份与恢复（生产）
+生产备份：
+```bash
+npm run backup:prd
+```
+
+生产恢复：
+```bash
+npm run restore:prd -- --dump backups/prd/<timestamp>/postgres.dump --confirm daizhang
+```
+
+说明：
+1. `backup:prd` 会输出数据库逻辑备份、配置归档和清单文件。
+2. `restore:prd` 是覆盖式恢复，恢复前默认会先做一次 `pre-restore` 备份。
+3. 完整策略、保留周期和恢复演练建议见 [docs/backup-architecture.md](/Users/shangyifan/Documents/New%20project/docs/backup-architecture.md)。
+
 ## 群晖 DS920+ 双环境部署（dev + prd）
 - 部署文档：`infra/DEPLOY_SYNOLOGY.md`
 - 测试环境 runbook：`infra/DEPLOY_SYNOLOGY_TEST.md`

@@ -110,6 +110,7 @@ const leadSummaryHighlights = computed(() => {
 const leadSummaryNotes = computed(() => {
   if (!lead.value) return [];
   return [
+    { label: "来源", value: lead.value.source || "未补充" },
     { label: "介绍人", value: lead.value.intro || "未补充" },
     { label: "备注", value: lead.value.notes || "未补充", multiline: true },
   ];

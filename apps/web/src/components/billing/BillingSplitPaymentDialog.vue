@@ -2,13 +2,14 @@
 import { computed } from "vue";
 
 import FlexibleDateInput from "../shared/FlexibleDateInput.vue";
-import type { BillingRecord } from "../../types";
+import type { BillingRecord, CustomerListItem } from "../../types";
 import type { BillingSplitAllocationRow, BillingSplitPaymentForm } from "../../views/billing/forms";
 import { paymentStrategyOptions, receiptAccountOptions } from "../../views/billing/viewMeta";
 
 const props = defineProps<{
   visible: boolean;
   targetRecord: BillingRecord | null;
+  customers: CustomerListItem[];
   form: BillingSplitPaymentForm;
   allocations: BillingSplitAllocationRow[];
   customerRecordCount: number;
@@ -30,13 +31,37 @@ const dialogVisible = computed({
   set: (value: boolean) => emit("update:visible", value),
 });
 
-const dialogTitle = computed(() => `分摊收款 - ${props.targetRecord?.customer_name ?? ""}`);
+const resolvedCustomerName = computed(() => {
+  if (props.targetRecord?.customer_name) return props.targetRecord.customer_name;
+  const matched = props.customers.find((item) => item.id === props.form.customer_id);
+  return matched?.name || "";
+});
+const accountSelectWidth = { width: "100%" };
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" :title="dialogTitle" width="860px">
+  <el-dialog v-model="dialogVisible" :title="resolvedCustomerName ? `收款登记 - ${resolvedCustomerName}` : '收款登记'" width="920px">
     <el-form label-position="top">
       <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="收款单位">
+            <el-select
+              v-model="props.form.customer_id"
+              class="wide-select"
+              filterable
+              clearable
+              placeholder="输入公司名 / 联系人后选择客户"
+              :disabled="Boolean(props.targetRecord?.customer_id)"
+            >
+              <el-option
+                v-for="item in props.customers"
+                :key="`split-customer-${item.id}`"
+                :label="item.contact_name ? `${item.name} / ${item.contact_name}` : item.name"
+                :value="item.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
         <el-col :span="8">
           <el-form-item label="收款日期">
             <FlexibleDateInput v-model="props.form.occurred_at" :empty-value="''" />
@@ -49,7 +74,7 @@ const dialogTitle = computed(() => `分摊收款 - ${props.targetRecord?.custome
         </el-col>
         <el-col :span="8">
           <el-form-item label="优先策略">
-            <el-select v-model="props.form.strategy">
+            <el-select v-model="props.form.strategy" class="wide-select">
               <el-option
                 v-for="item in paymentStrategyOptions"
                 :key="`split-strategy-${item.value}`"
@@ -65,9 +90,11 @@ const dialogTitle = computed(() => `分摊收款 - ${props.targetRecord?.custome
           <el-form-item label="入账账户">
             <el-select
               v-model="props.form.receipt_account"
+              class="wide-select"
               filterable
               allow-create
               default-first-option
+              :style="accountSelectWidth"
             >
               <el-option
                 v-for="item in receiptAccountOptions"
@@ -130,5 +157,13 @@ const dialogTitle = computed(() => `分摊收款 - ${props.targetRecord?.custome
   align-items: center;
   justify-content: flex-end;
   gap: 14px;
+}
+
+.wide-select {
+  width: 100%;
+}
+
+.wide-select :deep(.el-select__wrapper) {
+  min-width: 100%;
 }
 </style>

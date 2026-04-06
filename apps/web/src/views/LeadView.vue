@@ -113,6 +113,7 @@ const followupForm = reactive<LeadFollowupForm>(createLeadFollowupForm(todayInBr
 const canConvert = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
+const canDeleteLead = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 const leadFilterChips = computed(() =>
   [
@@ -168,6 +169,15 @@ const leadRowActionItems = computed(() => {
           disabled: !canConvert.value,
         }
       : null,
+    canDeleteLead.value
+      ? {
+          key: "delete",
+          label: "删除线索",
+          description:
+            row.status === "CONVERTED" ? "已转化线索需先撤销转化后再删除。" : "删除前需要输入线索名称确认。",
+          danger: true,
+        }
+      : null,
   ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
 });
 
@@ -202,22 +212,46 @@ async function fetchLeads() {
 }
 
 async function createLead() {
-  if (!leadForm.name || !leadForm.contact_name || !leadForm.phone) {
-    ElMessage.warning("请填写完整客户名称、联系人和电话");
+  if (!leadForm.contact_name.trim()) {
+    ElMessage.warning("请填写联系人");
+    return;
+  }
+  if (leadForm.template_type !== "FOLLOWUP" && !leadForm.contact_start_date) {
+    ElMessage.warning("请填写联络开始时间");
+    return;
+  }
+  if (!leadForm.main_business.trim()) {
+    ElMessage.warning("请填写主营/需要");
+    return;
+  }
+  if (!leadForm.source.trim()) {
+    ElMessage.warning("请填写来源");
     return;
   }
 
   try {
+    const rawCompanyName = leadForm.name.trim();
+    const effectiveCompanyName = rawCompanyName || leadForm.contact_name.trim();
+    const payload = {
+      ...leadForm,
+      name: effectiveCompanyName,
+      contact_name: leadForm.contact_name.trim(),
+      main_business: leadForm.main_business.trim(),
+      intro: leadForm.intro.trim(),
+      source: leadForm.source.trim(),
+      phone: leadForm.phone.trim(),
+    };
+
     let autoLinkedCustomerName = "";
-    if (!leadForm.related_customer_id) {
-      const exactCustomer = await findExactLeadCustomer(leadForm.name);
+    if (!leadForm.related_customer_id && rawCompanyName) {
+      const exactCustomer = await findExactLeadCustomer(rawCompanyName);
       if (exactCustomer) {
-        leadForm.related_customer_id = exactCustomer.id;
+        payload.related_customer_id = exactCustomer.id;
         autoLinkedCustomerName = exactCustomer.name;
       }
     }
 
-    await apiClient.post("/leads", leadForm);
+    await apiClient.post("/leads", payload);
     ElMessage.success(
       autoLinkedCustomerName
         ? `线索已创建，已自动关联现有客户：${autoLinkedCustomerName}`
@@ -297,6 +331,7 @@ async function createRedevelopLead() {
       contact_name: selected.contact_name,
       phone: selected.phone,
       source: redevelopForm.source.trim() || "老客户二次开发",
+      intro: selected.source_intro || "",
       notes: redevelopForm.notes.trim(),
       next_reminder_at: redevelopForm.next_reminder_at,
     });
@@ -406,6 +441,7 @@ async function openConvertDialog(lead: LeadItem) {
     customer_name: lead.name,
     customer_contact_name: lead.contact_name,
     customer_phone: lead.phone,
+    conversion_mode: "NEW_CUSTOMER_LINKED",
   });
   showConvertDialog.value = true;
 }
@@ -420,11 +456,10 @@ function validateConvertForm(): boolean {
     return false;
   }
   if (
-    !convertForm.customer_name.trim() ||
-    !convertForm.customer_contact_name.trim() ||
-    !convertForm.customer_phone.trim()
+    convertForm.conversion_mode === "NEW_CUSTOMER_LINKED" &&
+    (!convertForm.customer_name.trim() || !convertForm.customer_contact_name.trim())
   ) {
-    ElMessage.warning("请补充转化后的客户名称、联系人和电话");
+    ElMessage.warning("请补充转化后的客户名称和联系人");
     return false;
   }
   return true;
@@ -434,20 +469,21 @@ async function performConvert(): Promise<{ id: number; name: string } | null> {
   if (!validateConvertForm()) return null;
   converting.value = true;
   try {
-    const resp = await apiClient.post<{ customer: { id: number } }>(
+    const resp = await apiClient.post<{ customer: { id: number; name: string } }>(
       `/leads/${convertForm.lead_id}/convert`,
       {
         accountant_id: convertForm.accountant_id,
         customer_name: convertForm.customer_name.trim(),
         customer_contact_name: convertForm.customer_contact_name.trim(),
         customer_phone: convertForm.customer_phone.trim(),
+        conversion_mode: convertForm.conversion_mode,
       },
     );
     showConvertDialog.value = false;
     await fetchLeads();
     return {
       id: resp.data.customer.id,
-      name: convertForm.customer_name.trim(),
+      name: resp.data.customer.name,
     };
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "转化失败，可能已转化或无权限");
@@ -518,6 +554,38 @@ async function revokeConvert(lead: LeadItem) {
       return;
     }
     ElMessage.error(error?.response?.data?.detail ?? "撤销失败");
+  }
+}
+
+async function removeLead(lead: LeadItem) {
+  if (!canDeleteLead.value) {
+    ElMessage.warning("只有老板和管理员可以删除线索");
+    return;
+  }
+  const expectedName = (lead.name || "").trim() || (lead.contact_name || "").trim() || `线索#${lead.id}`;
+  try {
+    const resp = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这条线索。`,
+      "删除线索",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
+      },
+    )) as { value: string };
+    if ((resp.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
+    await apiClient.delete(`/leads/${lead.id}`, {
+      params: { confirm_name: expectedName },
+    });
+    ElMessage.success("线索已删除");
+    await fetchLeads();
+  } catch (error: any) {
+    if (error === "cancel" || error?.message === "cancel") return;
+    ElMessage.error(error?.response?.data?.detail ?? "删除线索失败");
   }
 }
 
@@ -651,6 +719,7 @@ function handleMobileMenuCommand(command: string, row: LeadItem) {
   if (command === "customer") openCustomerArchive(row);
   if (command === "convert") void openConvertDialog(row);
   if (command === "revoke") void revokeConvert(row);
+  if (command === "delete") void removeLead(row);
 }
 
 function canQuickConvertLead(row: LeadItem) {
@@ -937,6 +1006,7 @@ watch(
       :loading="loading"
       :rows="rows"
       :can-convert="canConvert"
+      :can-delete="canDeleteLead"
       @company="openCompanyPage"
       @detail="openLeadDetail"
       @customer="openCustomerArchive"
@@ -944,6 +1014,7 @@ watch(
       @history="openHistoryDrawer"
       @convert="openConvertDialog"
       @revoke="revokeConvert"
+      @delete="removeLead"
     />
   </el-space>
 

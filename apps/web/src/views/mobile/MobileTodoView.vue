@@ -78,13 +78,13 @@ const {
   createForm,
   openManualCount,
   doneManualCount,
+  canDeleteTodos,
   refreshAll,
   createTodo,
   toggleTodoDone,
   toggleTodayMembership,
   addAllToToday,
   clearToday,
-  clearCompletedTodos,
   removeTodo,
   openSystemAction,
 } = useTodoWorkspace();
@@ -974,16 +974,6 @@ onMounted(() => {
               >
                 全部加入今日
               </el-button>
-              <el-button
-                plain
-                size="small"
-                :icon="Files"
-                :disabled="allDoneRows.length <= 0"
-                :loading="bulkActionLoading === 'clear_done'"
-                @click="clearCompletedTodos"
-              >
-                清理已完成
-              </el-button>
             </div>
           </div>
 
@@ -1115,6 +1105,7 @@ onMounted(() => {
                 {{ row.is_in_today ? "撤销今日" : "加入今日" }}
               </el-button>
               <el-button
+                v-if="canDeleteTodos"
                 class="mobile-inline-action"
                 text
                 size="small"

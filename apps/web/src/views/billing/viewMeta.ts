@@ -54,9 +54,9 @@ export const billingStatusHelpLines = [
 ];
 
 export const billingTableHelpLines = [
-  "新增收费时只需录服务开始日期和到期日期。",
-  "内部开始/结束月份由系统自动推导，避免重复填写。",
-  "按次项目的金额口径固定为单次费用。",
+  "按期项目先录开始月份，系统默认顺延 12 个月，并自动换算月初/月末日期。",
+  "按次项目再录服务日期和到期日期，金额口径固定为单次费用。",
+  "如果合同不是整年，可以手动调整结束月份。",
 ];
 
 export function normalizePaymentMethod(value: string): "预收" | "后收" {

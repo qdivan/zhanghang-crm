@@ -14,6 +14,7 @@ class CustomerListOut(BaseModel):
     status: str
     assigned_accountant_id: int
     accountant_username: str
+    source_customer_id: Optional[int]
     source_lead_id: int
     source_template_type: str
     source_grade: str
@@ -42,6 +43,7 @@ class CustomerDetailOut(BaseModel):
     status: str
     assigned_accountant_id: int
     accountant_username: str
+    source_customer_id: Optional[int]
     source_lead_id: int
     created_at: datetime
     lead: LeadOut
