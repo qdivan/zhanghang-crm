@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models import User
+from app.services.soft_delete import active_filter
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -29,7 +30,7 @@ def get_current_user(
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效")
 
-    user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    user = db.execute(select(User).where(User.username == username, active_filter(User))).scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号不存在或已停用")
     return user

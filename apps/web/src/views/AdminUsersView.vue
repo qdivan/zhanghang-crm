@@ -38,6 +38,7 @@ const loading = ref(false);
 const createLoading = ref(false);
 const editLoading = ref(false);
 const deleteLoadingUserId = ref<number | null>(null);
+const deleteLoadingGrantId = ref<number | null>(null);
 const rows = ref<ManagedUser[]>([]);
 const showCreateDialog = ref(false);
 const showEditDialog = ref(false);
@@ -197,10 +198,12 @@ const mobileGrantStats = computed(() => [
 ]);
 const deletedEntityOptions = [
   { label: "全部类型", value: "" },
+  { label: "用户账号", value: "USER" },
   { label: "线索", value: "LEAD" },
   { label: "客户", value: "CUSTOMER" },
   { label: "收费单", value: "BILLING" },
   { label: "待办", value: "TODO" },
+  { label: "数据授权", value: "DATA_ACCESS_GRANT" },
   { label: "挂靠地址", value: "ADDRESS_RESOURCE" },
   { label: "已服务公司", value: "ADDRESS_RESOURCE_COMPANY" },
   { label: "常用资料", value: "COMMON_LIBRARY" },
@@ -240,6 +243,7 @@ function actionLabel(action: string): string {
     USER_CREATED: "创建用户",
     USER_UPDATED: "更新用户",
     USER_DELETED: "删除用户",
+    USER_RESTORED: "恢复用户",
     SECURITY_SETTINGS_UPDATED: "安全设置更新",
     LOGIN_FAILED: "登录失败",
     LOGIN_IP_BLOCKED: "IP锁定拦截",
@@ -281,9 +285,11 @@ function actionLabel(action: string): string {
     DATA_ACCESS_GRANT_REVOKED: "数据授权停用",
     DATA_ACCESS_GRANT_REACTIVATED: "数据授权启用",
     DATA_ACCESS_GRANT_DELETED: "数据授权删除",
+    DATA_ACCESS_GRANT_RESTORED: "数据授权恢复",
     TODO_CREATED: "待办创建",
     TODO_UPDATED: "待办更新",
     TODO_DELETED: "待办删除",
+    TODO_RESTORED: "待办恢复",
     TODO_MY_DAY_BULK_ADD: "待办批量加入今日",
     TODO_MY_DAY_CLEARED: "待办今日清空",
   };
@@ -314,6 +320,7 @@ function resolveErrorMessage(error: any, fallback: string): string {
     "Cannot deactivate yourself": "不能停用当前登录账号",
     "不能删除当前登录账号": "不能删除当前登录账号",
     "Cannot delete yourself": "不能删除当前登录账号",
+    "确认名称不匹配": "确认名称不匹配",
     "老板不能管理管理员账号": "老板不能管理管理员账号",
     "Owner cannot manage admin users": "老板不能管理管理员账号",
     "直属经理不存在或已停用": "直属经理不存在或已停用",
@@ -323,6 +330,8 @@ function resolveErrorMessage(error: any, fallback: string): string {
     "直属经理不能设置为自己": "直属经理不能设置为自己",
     "用户不存在": "用户不存在",
     "User not found": "用户不存在",
+    "该用户名已在回收站，可先恢复": "该用户名已在回收站，可先恢复",
+    "请先恢复被授权账号": "请先恢复被授权账号",
     "LDAP账号请在LDAP中停用或删除": "LDAP账号请在LDAP中停用或删除",
   };
   return map[detail] ?? detail;
@@ -464,29 +473,76 @@ async function removeUser(row: ManagedUser) {
     ElMessage.warning("不能删除当前登录账号");
     return;
   }
+  const expectedName = row.username;
   try {
-    await ElMessageBox.confirm(
-      `确认删除账号「${row.username}」吗？删除后无法登录，且仅无关联业务数据的账号可删除。`,
-      "删除确认",
+    const result = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这个账号。删除后会先进入回收站，且仅无关联业务数据的账号可删除。`,
+      "删除用户",
       {
         type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
       },
-    );
+    )) as { value: string };
+    if ((result.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
   } catch {
     return;
   }
 
   deleteLoadingUserId.value = row.id;
   try {
-    await apiClient.delete(`/users/${row.id}`);
-    ElMessage.success("账号已删除");
-    await Promise.all([fetchUsers(), fetchLogs()]);
+    await apiClient.delete(`/users/${row.id}`, {
+      params: { confirm_name: expectedName },
+    });
+    ElMessage.success("账号已移入回收站");
+    await Promise.all([fetchUsers(), fetchDeletedRecords(), fetchLogs()]);
   } catch (error: any) {
     ElMessage.error(resolveErrorMessage(error, "删除失败"));
   } finally {
     deleteLoadingUserId.value = null;
+  }
+}
+
+function getGrantDeleteConfirmName(row: DataAccessGrantItem) {
+  return `${row.grantee_username} · ${moduleLabel(row.module)}`;
+}
+
+async function removeGrant(row: DataAccessGrantItem) {
+  const expectedName = getGrantDeleteConfirmName(row);
+  try {
+    const result = (await ElMessageBox.prompt(
+      `请输入“${expectedName}”确认删除这条临时授权。删除后会先进入回收站。`,
+      "删除数据授权",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        inputPlaceholder: expectedName,
+      },
+    )) as { value: string };
+    if ((result.value || "").trim() !== expectedName) {
+      ElMessage.warning("输入名称不一致，已取消删除");
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  deleteLoadingGrantId.value = row.id;
+  try {
+    await apiClient.delete(`/admin/data-access-grants/${row.id}`, {
+      params: { confirm_name: expectedName },
+    });
+    ElMessage.success("数据授权已移入回收站");
+    await Promise.all([fetchDataAccessGrants(), fetchDeletedRecords(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(resolveErrorMessage(error, "删除授权失败"));
+  } finally {
+    deleteLoadingGrantId.value = null;
   }
 }
 
@@ -658,7 +714,7 @@ async function restoreDeletedRecord(row: DeletedRecordItem) {
       {},
     );
     ElMessage.success(`已恢复：${resp.data.display_name}`);
-    await Promise.all([fetchDeletedRecords(), fetchLogs()]);
+    await Promise.all([fetchUsers(), fetchDataAccessGrants(), fetchDeletedRecords(), fetchLogs()]);
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "恢复失败");
   } finally {
@@ -993,6 +1049,16 @@ watch(
                 >
                   {{ row.is_active ? "停用" : "启用" }}
                 </el-button>
+                <el-button
+                  class="mobile-row-secondary-button"
+                  size="small"
+                  plain
+                  type="danger"
+                  :loading="deleteLoadingGrantId === row.id"
+                  @click="removeGrant(row)"
+                >
+                  删除
+                </el-button>
               </div>
             </article>
           </div>
@@ -1153,7 +1219,7 @@ watch(
           <div class="mobile-toolbar">
             <div class="mobile-toolbar-main">
               <div class="admin-mobile-section-title">回收站</div>
-              <div class="admin-mobile-section-copy">已删除业务数据会先留在这里，确认后可以恢复。</div>
+              <div class="admin-mobile-section-copy">已删除的账号、授权和业务数据都会先留在这里，确认后可以恢复。</div>
             </div>
             <div class="mobile-toolbar-actions">
               <el-tag class="mobile-count-tag" size="small" effect="plain">{{ deletedRows.length }} 条</el-tag>
@@ -1175,7 +1241,7 @@ watch(
           <div v-if="recycleLoading && !deletedRows.length" class="mobile-empty-block">
             <div class="mobile-empty-kicker">回收站</div>
             <div class="mobile-empty-title">正在加载已删除数据</div>
-            <div class="mobile-empty-copy">线索、客户、收费单和资料删除后会先留在这里。</div>
+            <div class="mobile-empty-copy">用户、授权、线索、客户、收费单和资料删除后都会先留在这里。</div>
           </div>
           <div v-else-if="!deletedRows.length" class="mobile-empty-block">
             <div class="mobile-empty-kicker">回收站</div>
@@ -1310,7 +1376,7 @@ watch(
               >
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="120">
+              <el-table-column label="操作" width="150">
                 <template #default="{ row }">
                   <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
                   <el-button
@@ -1422,7 +1488,7 @@ watch(
               >
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column label="操作" width="110">
+              <el-table-column label="操作" width="150">
                 <template #default="{ row }">
                   <el-button
                     link
@@ -1431,6 +1497,14 @@ watch(
                     @click="toggleGrantActive(row, !row.is_active)"
                   >
                     {{ row.is_active ? "停用" : "启用" }}
+                  </el-button>
+                  <el-button
+                    link
+                    type="danger"
+                    :loading="deleteLoadingGrantId === row.id"
+                    @click="removeGrant(row)"
+                  >
+                    删除
                   </el-button>
                 </template>
               </el-table-column>
@@ -1735,7 +1809,7 @@ watch(
   </el-space>
 
   <el-dialog v-model="showCreateDialog" title="新增本地用户" width="520px">
-    <el-form label-position="top">
+    <el-form label-position="top" class="admin-dialog-form">
       <el-form-item label="用户名">
         <el-input v-model="createForm.username" placeholder="如 accountant5" />
       </el-form-item>
@@ -1783,7 +1857,7 @@ watch(
   </el-dialog>
 
   <el-dialog v-model="showEditDialog" title="编辑用户" width="520px">
-    <el-form label-position="top">
+    <el-form label-position="top" class="admin-dialog-form">
       <el-form-item label="用户名">
         <el-input v-model="editForm.username" />
       </el-form-item>
@@ -1828,7 +1902,7 @@ watch(
   </el-dialog>
 
   <el-dialog v-model="showGrantDialog" title="新增临时只读授权" width="560px">
-    <el-form label-position="top">
+    <el-form label-position="top" class="admin-dialog-form">
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="被授权会计">
@@ -1991,6 +2065,20 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.admin-filter-form :deep(.el-select),
+.admin-filter-form :deep(.el-autocomplete),
+.admin-filter-form :deep(.el-date-editor),
+.admin-filter-form :deep(.el-input-number) {
+  min-width: 220px;
+}
+
+.admin-dialog-form :deep(.el-select),
+.admin-dialog-form :deep(.el-autocomplete),
+.admin-dialog-form :deep(.el-date-editor),
+.admin-dialog-form :deep(.el-input-number) {
+  width: 100%;
 }
 
 @media (max-width: 768px) {

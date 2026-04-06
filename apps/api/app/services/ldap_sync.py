@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.models import LdapSetting, User
+from app.services.soft_delete import restore_deleted
 
 VALID_ROLES = {"OWNER", "ADMIN", "ACCOUNTANT"}
 
@@ -114,8 +115,14 @@ def sync_ldap_users(db: Session, setting: LdapSetting) -> dict[str, int]:
             continue
 
         changed = False
+        if user.is_deleted:
+            restore_deleted(user)
+            changed = True
         if user.auth_source != "LDAP":
             user.auth_source = "LDAP"
+            changed = True
+        if not user.is_active:
+            user.is_active = True
             changed = True
         if user.ldap_dn != entry_dn:
             user.ldap_dn = entry_dn

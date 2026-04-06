@@ -38,7 +38,7 @@ from app.services.data_access import has_overlapping_active_grant
 from app.services.audit import write_operation_log
 from app.services.login_security import get_or_create_security_setting
 from app.services.ldap_sync import get_or_create_ldap_setting, sync_ldap_users
-from app.services.soft_delete import deleted_filter, restore_deleted
+from app.services.soft_delete import active_filter, deleted_filter, mark_deleted, restore_deleted
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles("OWNER", "ADMIN"))])
 
@@ -118,7 +118,7 @@ def _ensure_time_range_valid(starts_at: Optional[datetime], ends_at: Optional[da
 
 
 def _get_grant_or_404(db: Session, grant_id: int) -> DataAccessGrant:
-    grant = db.execute(select(DataAccessGrant).where(DataAccessGrant.id == grant_id)).scalar_one_or_none()
+    grant = db.execute(select(DataAccessGrant).where(DataAccessGrant.id == grant_id, active_filter(DataAccessGrant))).scalar_one_or_none()
     if grant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据授权不存在")
     return grant
@@ -129,6 +129,10 @@ def _keyword_matches(keyword: Optional[str], *values: object) -> bool:
     if not raw:
         return True
     return any(raw in str(value or "").lower() for value in values)
+
+
+def _grant_module_label(module: str) -> str:
+    return "客户列表" if module == "CUSTOMER" else "收费明细"
 
 
 def _to_deleted_record_out(
@@ -493,6 +497,56 @@ def list_deleted_records(
                     )
                 )
 
+    if not normalized_type or normalized_type == "USER":
+        rows = db.execute(
+            select(User, deleted_by_user.username)
+            .outerjoin(deleted_by_user, User.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(User))
+            .order_by(User.deleted_at.desc(), User.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for user, deleted_by_username in rows:
+            display_name = (user.username or "").strip() or f"用户#{user.id}"
+            detail = f"角色：{user.role} / 来源：{'LDAP' if user.auth_source == 'LDAP' else '本地'}"
+            if _keyword_matches(keyword, display_name, detail, user.role, user.auth_source):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="USER",
+                        entity_id=user.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=user.deleted_at or user.created_at,
+                        deleted_by_user_id=user.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
+    if not normalized_type or normalized_type == "DATA_ACCESS_GRANT":
+        grantee = aliased(User)
+        rows = db.execute(
+            select(DataAccessGrant, grantee.username, deleted_by_user.username)
+            .join(grantee, DataAccessGrant.grantee_user_id == grantee.id)
+            .outerjoin(deleted_by_user, DataAccessGrant.deleted_by_user_id == deleted_by_user.id)
+            .where(deleted_filter(DataAccessGrant))
+            .order_by(DataAccessGrant.deleted_at.desc(), DataAccessGrant.id.desc())
+            .limit(per_type_limit)
+        ).all()
+        for grant, grantee_username, deleted_by_username in rows:
+            display_name = f"{(grantee_username or '-').strip() or '-'} · {_grant_module_label(grant.module)}"
+            detail = f"授权原因：{(grant.reason or '').strip() or '-'}"
+            if _keyword_matches(keyword, display_name, detail, grant.reason, grant.module):
+                results.append(
+                    _to_deleted_record_out(
+                        entity_type="DATA_ACCESS_GRANT",
+                        entity_id=grant.id,
+                        display_name=display_name,
+                        detail=detail,
+                        deleted_at=grant.deleted_at or grant.updated_at,
+                        deleted_by_user_id=grant.deleted_by_user_id,
+                        deleted_by_username=deleted_by_username,
+                    )
+                )
+
     results.sort(key=lambda item: (item.deleted_at, item.entity_type, item.entity_id), reverse=True)
     return results[:limit]
 
@@ -570,6 +624,25 @@ def restore_deleted_record(
         restore_deleted(item)
         display_name = (item.title or "").strip() or (item.category or "").strip() or f"常用资料#{item.id}"
         action = "COMMON_LIBRARY_ITEM_RESTORED"
+    elif normalized_type == "USER":
+        user = db.execute(select(User).where(User.id == entity_id, deleted_filter(User))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除用户不存在")
+        restore_deleted(user)
+        display_name = (user.username or "").strip() or f"用户#{user.id}"
+        action = "USER_RESTORED"
+    elif normalized_type == "DATA_ACCESS_GRANT":
+        grant = db.execute(
+            select(DataAccessGrant).where(DataAccessGrant.id == entity_id, deleted_filter(DataAccessGrant))
+        ).scalar_one_or_none()
+        if grant is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="已删除数据授权不存在")
+        grantee = db.execute(select(User).where(User.id == grant.grantee_user_id, active_filter(User))).scalar_one_or_none()
+        if grantee is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先恢复被授权账号")
+        restore_deleted(grant)
+        display_name = f"{(grantee.username or '-').strip() or '-'} · {_grant_module_label(grant.module)}"
+        action = "DATA_ACCESS_GRANT_RESTORED"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不支持的恢复类型")
 
@@ -605,6 +678,7 @@ def list_data_access_grants(
         select(DataAccessGrant, grantee.username, grantor.username)
         .join(grantee, DataAccessGrant.grantee_user_id == grantee.id)
         .outerjoin(grantor, DataAccessGrant.granted_by_user_id == grantor.id)
+        .where(active_filter(DataAccessGrant))
         .order_by(DataAccessGrant.created_at.desc(), DataAccessGrant.id.desc())
     )
     if module:
@@ -633,7 +707,7 @@ def create_data_access_grant(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    grantee = db.execute(select(User).where(User.id == payload.grantee_user_id)).scalar_one_or_none()
+    grantee = db.execute(select(User).where(User.id == payload.grantee_user_id, active_filter(User))).scalar_one_or_none()
     if grantee is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="被授权用户不存在")
     if grantee.role != "ACCOUNTANT":
@@ -687,7 +761,7 @@ def update_data_access_grant(
     current_user: User = Depends(get_current_user),
 ):
     grant = _get_grant_or_404(db, grant_id)
-    grantee = db.execute(select(User).where(User.id == grant.grantee_user_id)).scalar_one_or_none()
+    grantee = db.execute(select(User).where(User.id == grant.grantee_user_id, active_filter(User))).scalar_one_or_none()
     if grantee is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="被授权用户不存在")
 
@@ -740,24 +814,29 @@ def update_data_access_grant(
     )
     db.commit()
     db.refresh(grant)
-    grantor = db.execute(select(User).where(User.id == grant.granted_by_user_id)).scalar_one_or_none()
+    grantor = db.execute(select(User).where(User.id == grant.granted_by_user_id, active_filter(User))).scalar_one_or_none()
     return _serialize_grant(grant, grantee.username, grantor.username if grantor else None)
 
 
 @router.delete("/data-access-grants/{grant_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_data_access_grant(
     grant_id: int,
+    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     grant = _get_grant_or_404(db, grant_id)
-    db.delete(grant)
+    grantee = db.execute(select(User).where(User.id == grant.grantee_user_id)).scalar_one_or_none()
+    expected_name = f"{(grantee.username if grantee is not None else '-').strip() or '-'} · {_grant_module_label(grant.module)}"
+    if confirm_name.strip() != expected_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="确认名称不匹配")
+    mark_deleted(grant, current_user.id)
     write_operation_log(
         db,
         actor_id=current_user.id,
         action="DATA_ACCESS_GRANT_DELETED",
         entity_type="DATA_ACCESS_GRANT",
         entity_id=grant_id,
-        detail="deleted",
+        detail=expected_name,
     )
     db.commit()

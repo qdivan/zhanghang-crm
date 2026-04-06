@@ -744,7 +744,7 @@ watch(
 .receipt-toolbar-form :deep(.el-select__wrapper),
 .receipt-toolbar-form :deep(.el-date-editor.el-input__wrapper) {
   min-height: 34px;
-  min-width: 220px;
+  min-width: 280px;
 }
 
 .receipt-workspace {

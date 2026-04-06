@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import hash_password, verify_password
 from app.models import AddressResource, BillingActivity, BillingRecord, CommonLibraryItem, Customer, Lead, User
+from app.services.soft_delete import restore_deleted
 
 DEMO_USER_SPECS = (
     ("boss", "OWNER"),
@@ -35,6 +36,10 @@ def bootstrap_data(db: Session) -> None:
             demo_users_changed = True
             continue
 
+        if existing_user.is_deleted:
+            restore_deleted(existing_user)
+            existing_user.is_active = True
+            demo_users_changed = True
         if existing_user.role != role:
             existing_user.role = role
             demo_users_changed = True

@@ -72,7 +72,7 @@ const { isMobile } = useResponsive();
         </el-col>
       </el-row>
       <el-row :gutter="12">
-        <el-col :span="6">
+        <el-col :span="8">
           <el-form-item label="收款类型">
             <el-select v-model="props.form.payment_nature" clearable :disabled="!isPaymentActivity">
               <el-option label="月付" value="MONTHLY" />
@@ -81,12 +81,12 @@ const { isMobile } = useResponsive();
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="8">
           <el-form-item label="下次跟进">
             <FlexibleDateInput v-model="props.form.next_followup_at" clearable />
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="8">
           <el-form-item label="入账账户">
             <el-select
               v-model="props.form.receipt_account"
@@ -104,7 +104,9 @@ const { isMobile } = useResponsive();
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="24">
           <el-form-item label="结算标记">
             <el-space>
               <el-checkbox v-model="props.form.is_prepay" :disabled="!isPaymentActivity">预付</el-checkbox>
@@ -163,7 +165,7 @@ const { isMobile } = useResponsive();
         </template>
       </el-table-column>
       <el-table-column prop="amount" label="金额" width="90" />
-      <el-table-column prop="receipt_account" label="入账账户" width="120" />
+      <el-table-column prop="receipt_account" label="入账账户" width="180" show-overflow-tooltip />
       <el-table-column prop="actor_username" label="记录人" width="100" />
       <el-table-column
         prop="payment_nature"

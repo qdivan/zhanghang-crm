@@ -247,10 +247,12 @@ def _ensure_schema_compatibility() -> None:
                     )
 
     for soft_delete_table in [
+        "users",
         "leads",
         "customers",
         "billing_records",
         "todo_items",
+        "data_access_grants",
         "address_resources",
         "address_resource_companies",
         "common_library_items",

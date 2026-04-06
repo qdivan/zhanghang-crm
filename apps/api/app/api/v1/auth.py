@@ -16,6 +16,7 @@ from app.services.login_security import (
     ensure_local_login_ip_allowed,
     register_local_login_failure,
 )
+from app.services.soft_delete import active_filter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,7 +37,7 @@ def build_user_out(db: Session, user: User) -> UserOut:
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    user = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
+    user = db.execute(select(User).where(User.username == payload.username, active_filter(User))).scalar_one_or_none()
     ip_address, security_setting = ensure_local_login_ip_allowed(db, request=request, user=user)
 
     if user is None or not user.is_active:

@@ -5,11 +5,13 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import DataAccessGrant
+from app.services.soft_delete import active_filter
 
 
 def has_module_read_grant(db: Session, user_id: int, module: str) -> bool:
     now = datetime.utcnow()
     stmt = select(DataAccessGrant.id).where(
+        active_filter(DataAccessGrant),
         DataAccessGrant.grantee_user_id == user_id,
         DataAccessGrant.module == module,
         DataAccessGrant.is_active.is_(True),
@@ -34,6 +36,7 @@ def has_overlapping_active_grant(
     query_end = ends_at or datetime(9999, 12, 31, 23, 59, 59)
 
     stmt = select(DataAccessGrant.id).where(
+        active_filter(DataAccessGrant),
         DataAccessGrant.grantee_user_id == grantee_user_id,
         DataAccessGrant.module == module,
         DataAccessGrant.is_active.is_(True),

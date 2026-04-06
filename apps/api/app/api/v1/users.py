@@ -23,6 +23,7 @@ from app.schemas.auth import UserOut
 from app.schemas.user_admin import UserCreate, UserUpdate
 from app.services.audit import write_operation_log
 from app.services.org_scope import get_manager_subordinate_ids
+from app.services.soft_delete import active_filter, deleted_filter, mark_deleted
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -52,7 +53,7 @@ def _resolve_manager_user_id(
         return None
     if manager_user_id is None:
         return None
-    manager = db.execute(select(User).where(User.id == manager_user_id)).scalar_one_or_none()
+    manager = db.execute(select(User).where(User.id == manager_user_id, active_filter(User))).scalar_one_or_none()
     if manager is None or not manager.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="直属经理不存在或已停用")
     if manager.role != "MANAGER":
@@ -62,12 +63,15 @@ def _resolve_manager_user_id(
 
 def _count_direct_reports(db: Session, user_id: int) -> int:
     return int(
-        db.execute(select(func.count(User.id)).where(User.manager_user_id == user_id)).scalar_one() or 0
+        db.execute(
+            select(func.count(User.id)).where(User.manager_user_id == user_id, active_filter(User))
+        ).scalar_one()
+        or 0
     )
 
 
 def _get_user_or_404(db: Session, user_id: int) -> User:
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+    user = db.execute(select(User).where(User.id == user_id, active_filter(User))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     return user
@@ -96,7 +100,7 @@ def _count_user_dependencies(db: Session, user_id: int) -> dict[str, int]:
         select(func.count(OperationLog.id)).where(OperationLog.actor_id == user_id),
     ).scalar_one()
     data_grant_count = db.execute(
-        select(func.count(DataAccessGrant.id)).where(DataAccessGrant.grantee_user_id == user_id),
+        select(func.count(DataAccessGrant.id)).where(DataAccessGrant.grantee_user_id == user_id, active_filter(DataAccessGrant)),
     ).scalar_one()
     todo_count = db.execute(
         select(func.count(TodoItem.id)).where(
@@ -130,6 +134,7 @@ def list_users(
     current_user: User = Depends(get_current_user),
 ):
     stmt = select(User).order_by(User.id.asc())
+    stmt = stmt.where(active_filter(User))
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
     if role:
@@ -160,6 +165,8 @@ def create_user(
     username = _normalize_username(payload.username)
     existing = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
     if existing is not None:
+        if existing.is_deleted:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该用户名已在回收站，可先恢复")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已存在")
 
     user = User(
@@ -223,6 +230,8 @@ def update_user(
             db.execute(select(User).where(User.username == username, User.id != target_user.id)).scalar_one_or_none()
         )
         if existing is not None:
+            if existing.is_deleted:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该用户名已在回收站，可先恢复")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已存在")
         old_username = target_user.username
         target_user.username = username
@@ -294,6 +303,7 @@ def update_user(
 )
 def delete_user(
     user_id: int,
+    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -317,7 +327,9 @@ def delete_user(
         )
 
     username = target_user.username
-    db.delete(target_user)
+    if confirm_name.strip() != username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="确认名称不匹配")
+    mark_deleted(target_user, current_user.id)
     write_operation_log(
         db,
         actor_id=current_user.id,

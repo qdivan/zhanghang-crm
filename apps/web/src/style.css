@@ -34,6 +34,25 @@ body {
   color: #1f2937;
 }
 
+.el-form--inline .el-select,
+.el-form--inline .el-autocomplete,
+.el-form--inline .el-date-editor,
+.el-form--inline .el-input-number {
+  min-width: 220px;
+}
+
+.el-dialog .el-select,
+.el-dialog .el-autocomplete,
+.el-dialog .el-date-editor,
+.el-dialog .el-input-number,
+.el-drawer .el-select,
+.el-drawer .el-autocomplete,
+.el-drawer .el-date-editor,
+.el-drawer .el-input-number {
+  width: 100%;
+  max-width: 100%;
+}
+
 .table-action-wrap {
   display: flex;
   flex-wrap: wrap;

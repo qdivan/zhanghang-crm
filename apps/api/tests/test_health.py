@@ -1,5 +1,6 @@
 import os
 from datetime import date, timedelta
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -2295,7 +2296,11 @@ def test_user_delete_flow_and_dependency_guard():
         assert create_response.status_code == 201
         delete_id = create_response.json()["id"]
 
-        delete_response = client.delete(f"/api/v1/users/{delete_id}", headers=headers)
+        delete_response = client.delete(
+            f"/api/v1/users/{delete_id}",
+            headers=headers,
+            params={"confirm_name": "delete_me"},
+        )
         assert delete_response.status_code == 204
 
         list_response = client.get("/api/v1/users", headers=headers, params={"include_inactive": True})
@@ -2985,6 +2990,169 @@ def test_billing_record_delete_requires_admin_confirm_and_blocks_paid_record():
         )
         assert paid_delete_resp.status_code == 400
         assert paid_delete_resp.json()["detail"] == "当前收费单已有收款核销记录，不能删除"
+
+
+def test_user_delete_requires_confirm_and_supports_restore():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        username = f"qa_user_{uuid4().hex[:8]}"
+        create_resp = client.post(
+            "/api/v1/users",
+            headers=owner_headers,
+            json={
+                "username": username,
+                "password": DEMO_PASSWORD,
+                "role": "ACCOUNTANT",
+                "is_active": True,
+            },
+        )
+        assert create_resp.status_code == 201
+        user_id = create_resp.json()["id"]
+
+        mismatch_resp = client.delete(
+            f"/api/v1/users/{user_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误账号"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/users/{user_id}",
+            headers=owner_headers,
+            params={"confirm_name": username},
+        )
+        assert delete_resp.status_code == 204
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"include_inactive": True})
+        assert users_resp.status_code == 200
+        assert all(item["id"] != user_id for item in users_resp.json())
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "USER"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == user_id for item in deleted_rows.json())
+
+        deleted_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": username, "password": DEMO_PASSWORD},
+        )
+        assert deleted_login.status_code == 401
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/USER/{user_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+        assert restore_resp.json()["entity_type"] == "USER"
+
+        restored_users = client.get("/api/v1/users", headers=owner_headers, params={"include_inactive": True})
+        assert restored_users.status_code == 200
+        assert any(item["id"] == user_id for item in restored_users.json())
+
+        restored_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": username, "password": DEMO_PASSWORD},
+        )
+        assert restored_login.status_code == 200
+
+        restore_logs = client.get(
+            "/api/v1/admin/operation-logs",
+            headers=owner_headers,
+            params={"audit_scope": "RESTORE", "entity_type": "USER"},
+        )
+        assert restore_logs.status_code == 200
+        assert any(item["action"] == "USER_RESTORED" for item in restore_logs.json())
+
+
+def test_data_access_grant_delete_requires_confirm_and_supports_restore():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        username = f"qa_grant_{uuid4().hex[:8]}"
+        create_user_resp = client.post(
+            "/api/v1/users",
+            headers=owner_headers,
+            json={
+                "username": username,
+                "password": DEMO_PASSWORD,
+                "role": "ACCOUNTANT",
+                "is_active": True,
+            },
+        )
+        assert create_user_resp.status_code == 201
+        user_id = create_user_resp.json()["id"]
+
+        create_grant_resp = client.post(
+            "/api/v1/admin/data-access-grants",
+            headers=owner_headers,
+            json={
+                "grantee_user_id": user_id,
+                "module": "CUSTOMER",
+                "reason": "删除恢复测试",
+                "is_active": True,
+            },
+        )
+        assert create_grant_resp.status_code == 201
+        grant_id = create_grant_resp.json()["id"]
+
+        mismatch_resp = client.delete(
+            f"/api/v1/admin/data-access-grants/{grant_id}",
+            headers=owner_headers,
+            params={"confirm_name": "错误名称"},
+        )
+        assert mismatch_resp.status_code == 400
+
+        delete_resp = client.delete(
+            f"/api/v1/admin/data-access-grants/{grant_id}",
+            headers=owner_headers,
+            params={"confirm_name": f"{username} · 客户列表"},
+        )
+        assert delete_resp.status_code == 204
+
+        active_grants_resp = client.get("/api/v1/admin/data-access-grants", headers=owner_headers)
+        assert active_grants_resp.status_code == 200
+        assert all(item["id"] != grant_id for item in active_grants_resp.json())
+
+        deleted_rows = client.get(
+            "/api/v1/admin/deleted-records",
+            headers=owner_headers,
+            params={"entity_type": "DATA_ACCESS_GRANT"},
+        )
+        assert deleted_rows.status_code == 200
+        assert any(item["entity_id"] == grant_id for item in deleted_rows.json())
+
+        restore_resp = client.post(
+            f"/api/v1/admin/deleted-records/DATA_ACCESS_GRANT/{grant_id}/restore",
+            headers=owner_headers,
+        )
+        assert restore_resp.status_code == 200
+        assert restore_resp.json()["entity_type"] == "DATA_ACCESS_GRANT"
+
+        restored_grants_resp = client.get("/api/v1/admin/data-access-grants", headers=owner_headers)
+        assert restored_grants_resp.status_code == 200
+        assert any(item["id"] == grant_id for item in restored_grants_resp.json())
+
+        restore_logs = client.get(
+            "/api/v1/admin/operation-logs",
+            headers=owner_headers,
+            params={"audit_scope": "RESTORE", "entity_type": "DATA_ACCESS_GRANT"},
+        )
+        assert restore_logs.status_code == 200
+        assert any(item["action"] == "DATA_ACCESS_GRANT_RESTORED" for item in restore_logs.json())
 
 
 def test_billing_due_system_todo_lifecycle():

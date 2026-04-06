@@ -9,6 +9,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
+class SoftDeleteMixin:
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    deleted_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+
+
 def _normalize_month_text(value: str) -> str:
     raw = (value or "").strip()
     if not raw:
@@ -39,7 +45,7 @@ def _format_month_text(month_text: str) -> str:
     return f"{year[2:4]}.{int(month)}"
 
 
-class User(Base):
+class User(SoftDeleteMixin, Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -74,14 +80,6 @@ class User(Base):
         if self.manager is None:
             return ""
         return self.manager.username
-
-
-class SoftDeleteMixin:
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
-    deleted_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-
-
 class Lead(SoftDeleteMixin, Base):
     __tablename__ = "leads"
 
@@ -541,7 +539,7 @@ class TodoItem(SoftDeleteMixin, Base):
     )
 
 
-class DataAccessGrant(Base):
+class DataAccessGrant(SoftDeleteMixin, Base):
     __tablename__ = "data_access_grants"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
