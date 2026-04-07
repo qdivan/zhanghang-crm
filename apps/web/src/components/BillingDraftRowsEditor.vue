@@ -7,7 +7,6 @@ import type { BillingCreatePayload } from "../types";
 import {
   billingCycleOptions,
   billingFieldHelp,
-  billingStatusOptions,
   chargeCategoryOptions,
   chargeModeOptions,
   cloneBillingDraft,
@@ -105,10 +104,6 @@ function patchRow(
 
 function setStringField<K extends keyof BillingCreatePayload>(index: number, key: K, value: unknown) {
   patchRow(index, { [key]: String(value ?? "") } as Pick<BillingCreatePayload, K>);
-}
-
-function setNumberField<K extends keyof BillingCreatePayload>(index: number, key: K, value: unknown) {
-  patchRow(index, { [key]: Number(value ?? 0) } as Pick<BillingCreatePayload, K>);
 }
 
 function setTotalFee(index: number, value: unknown) {
@@ -533,15 +528,15 @@ function syncEndMonthFromStart(startMonth: string) {
           <el-collapse-item :name="advancedPanelName(index)">
             <template #title>
               <span class="label-with-help">
-                高级项（到账/说明/历史补录）
-                <el-tooltip placement="top" :show-after="150" content="常规新单通常不需要展开；历史单据补录或已收部分款项时再填写。">
+                高级项（编号/周期说明/历史补录）
+                <el-tooltip placement="top" :show-after="150" content="常规新单主要录收费项目本身；实收金额请通过收款单登记。">
                   <el-icon class="help-icon"><QuestionFilled /></el-icon>
                 </el-tooltip>
               </span>
             </template>
 
             <el-row :gutter="12">
-              <el-col :xs="24" :md="6">
+              <el-col :xs="24" :md="8">
                 <el-form-item>
                   <template #label>
                     <span class="label-with-help">
@@ -561,46 +556,7 @@ function syncEndMonthFromStart(startMonth: string) {
                   />
                 </el-form-item>
               </el-col>
-              <el-col :xs="24" :md="6">
-                <el-form-item>
-                  <template #label>
-                    <span class="label-with-help">
-                      台账状态
-                      <el-tooltip placement="top" :show-after="150" :content="billingFieldHelp.status">
-                        <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                      </el-tooltip>
-                    </span>
-                  </template>
-                  <el-select :model-value="item.status" @update:model-value="setStringField(index, 'status', $event)">
-                    <el-option
-                      v-for="statusItem in billingStatusOptions"
-                      :key="`billing-status-${index}-${statusItem.value}`"
-                      :label="statusItem.label"
-                      :value="statusItem.value"
-                    />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="6">
-                <el-form-item>
-                  <template #label>
-                    <span class="label-with-help">
-                      已收金额
-                      <el-tooltip placement="top" :show-after="150" :content="billingFieldHelp.received_amount">
-                        <el-icon class="help-icon"><QuestionFilled /></el-icon>
-                      </el-tooltip>
-                    </span>
-                  </template>
-                  <el-input-number
-                    :model-value="item.received_amount"
-                    :min="0"
-                    :controls="false"
-                    style="width: 100%"
-                    @update:model-value="setNumberField(index, 'received_amount', $event)"
-                  />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="6">
+              <el-col :xs="24" :md="8">
                 <el-form-item>
                   <template #label>
                     <span class="label-with-help">
@@ -623,6 +579,13 @@ function syncEndMonthFromStart(startMonth: string) {
                     />
                   </el-select>
                 </el-form-item>
+              </el-col>
+              <el-col :xs="24" :md="8">
+                <div class="billing-draft-advanced-hint">
+                  <el-text type="info" size="small">
+                    实收金额不在这里填写。新增收费项目后，如已当场收款，请去“收款单”登记并分摊。
+                  </el-text>
+                </div>
               </el-col>
             </el-row>
 
@@ -647,7 +610,7 @@ function syncEndMonthFromStart(startMonth: string) {
     </el-card>
 
     <div v-if="allowMultiple" class="billing-draft-editor__actions">
-      <el-button :icon="Plus" type="primary" plain @click="addRow">新增收费项</el-button>
+      <el-button :icon="Plus" type="primary" plain @click="addRow">新增收费项目</el-button>
     </div>
   </div>
 </template>
@@ -693,6 +656,12 @@ function syncEndMonthFromStart(startMonth: string) {
 
 .billing-draft-advanced {
   margin-top: 8px;
+}
+
+.billing-draft-advanced-hint {
+  display: flex;
+  align-items: center;
+  min-height: 72px;
 }
 
 .label-with-help {

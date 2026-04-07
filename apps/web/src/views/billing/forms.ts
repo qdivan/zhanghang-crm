@@ -1,6 +1,7 @@
 export type BillingFilters = {
   keyword: string;
   customer_id: number | null;
+  accountant_id: number | null;
   billing_month: string;
   receipt_account: string;
   contact_name: string;
@@ -42,6 +43,7 @@ export type BillingSplitPaymentForm = {
   amount: number;
   strategy: "DUE_DATE_ASC" | "SERIAL_ASC" | "AMOUNT_DESC";
   receipt_account: string;
+  is_prepay: boolean;
   note: string;
 };
 
@@ -64,6 +66,7 @@ export function createBillingFilters(): BillingFilters {
   return {
     keyword: "",
     customer_id: null,
+    accountant_id: null,
     billing_month: "",
     receipt_account: "",
     contact_name: "",
@@ -113,6 +116,7 @@ export function createBillingSplitPaymentForm(today: string): BillingSplitPaymen
     amount: 0,
     strategy: "DUE_DATE_ASC",
     receipt_account: "未指定",
+    is_prepay: false,
     note: "",
   };
 }

@@ -215,6 +215,11 @@ class BillingPaymentCreate(BaseModel):
     strategy: Literal["DUE_DATE_ASC", "SERIAL_ASC", "AMOUNT_DESC"] = "DUE_DATE_ASC"
     receipt_account: str = ""
     note: str = ""
+    is_prepay: bool = False
+    allocations: list[BillingPaymentAllocationInput] = Field(default_factory=list)
+
+
+class BillingPaymentAllocateRequest(BaseModel):
     allocations: list[BillingPaymentAllocationInput] = Field(min_length=1)
 
 
@@ -226,11 +231,20 @@ class BillingPaymentAllocationOut(BaseModel):
 
 class BillingPaymentOut(BaseModel):
     id: int
+    payment_no: str
     customer_id: int
+    customer_name: str
+    customer_contact_name: str
+    accountant_username: str
     occurred_at: date
     amount: float
     strategy: str
     receipt_account: str
+    summary: str
+    is_prepay: bool
+    allocated_amount: float
+    unallocated_amount: float
+    allocation_status: Literal["UNALLOCATED", "PARTIAL", "ALLOCATED"]
     note: str
     created_by_user_id: int
     created_at: datetime
@@ -308,6 +322,7 @@ class BillingReceiptAccountEntryOut(BaseModel):
     receipt_account: str
     customer_name: str
     summary: str
+    amount: float
     debit_amount: float
     credit_amount: float
     balance: float

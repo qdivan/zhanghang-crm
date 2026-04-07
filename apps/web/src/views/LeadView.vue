@@ -111,7 +111,7 @@ const leadForm = reactive<LeadCreateForm>(createLeadForm());
 const followupForm = reactive<LeadFollowupForm>(createLeadFollowupForm(todayInBrowserTimeZone()));
 
 const canConvert = computed(
-  () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
+  () => auth.user?.role === "OWNER" || auth.user?.role === "MANAGER",
 );
 const canDeleteLead = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
@@ -174,7 +174,7 @@ const leadRowActionItems = computed(() => {
           key: "delete",
           label: "删除线索",
           description:
-            row.status === "CONVERTED" ? "已转化线索需先撤销转化后再删除。" : "删除前需要输入线索名称确认。",
+            row.status === "CONVERTED" ? "已转化线索需先撤销转化后再删除。" : "删除后会移除这条线索记录。",
           danger: true,
         }
       : null,
@@ -441,6 +441,7 @@ async function openConvertDialog(lead: LeadItem) {
     customer_name: lead.name,
     customer_contact_name: lead.contact_name,
     customer_phone: lead.phone,
+    customer_code_suffix: lead.source === "Sally直播" ? "S" : lead.intro === "麦总" ? "M" : "A",
     conversion_mode: "NEW_CUSTOMER_LINKED",
   });
   showConvertDialog.value = true;
@@ -476,6 +477,8 @@ async function performConvert(): Promise<{ id: number; name: string } | null> {
         customer_name: convertForm.customer_name.trim(),
         customer_contact_name: convertForm.customer_contact_name.trim(),
         customer_phone: convertForm.customer_phone.trim(),
+        customer_code_seq: convertForm.customer_code_seq || undefined,
+        customer_code_suffix: convertForm.customer_code_suffix.trim() || undefined,
         conversion_mode: convertForm.conversion_mode,
       },
     );
@@ -562,25 +565,17 @@ async function removeLead(lead: LeadItem) {
     ElMessage.warning("只有老板和管理员可以删除线索");
     return;
   }
-  const expectedName = (lead.name || "").trim() || (lead.contact_name || "").trim() || `线索#${lead.id}`;
   try {
-    const resp = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这条线索。`,
+    await ElMessageBox.confirm(
+      "删除线索后会进入回收站。已转化线索需要先撤销转化，再删除。",
       "删除线索",
       {
         type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
       },
-    )) as { value: string };
-    if ((resp.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
-    await apiClient.delete(`/leads/${lead.id}`, {
-      params: { confirm_name: expectedName },
-    });
+    );
+    await apiClient.delete(`/leads/${lead.id}`);
     ElMessage.success("线索已删除");
     await fetchLeads();
   } catch (error: any) {

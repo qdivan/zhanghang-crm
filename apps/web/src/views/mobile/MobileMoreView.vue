@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, CollectionTag, Files, Location, Money, Setting, SwitchButton } from "@element-plus/icons-vue";
+import { ArrowRight, CollectionTag, Files, Location, Money, Notification, Setting, SwitchButton } from "@element-plus/icons-vue";
 import { ElMessageBox } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -19,6 +19,7 @@ const router = useRouter();
 
 const entryIcons = {
   "receipt-reconciliation": Money,
+  "customer-matters": Notification,
   "common-library": Files,
   "address-resources": Location,
   "admin-users": Setting,

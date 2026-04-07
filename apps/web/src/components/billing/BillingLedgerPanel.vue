@@ -17,7 +17,6 @@ const emit = defineEmits<{
   query: [];
   reset: [];
   clear: [];
-  "drill-month": [monthText: string];
 }>();
 
 const dateRangeModel = computed({
@@ -34,9 +33,9 @@ const panelTitle = computed(() => `往来账 - ${props.targetRecord?.customer_na
       <div class="ledger-panel-header">
         <div>
           <div class="ledger-panel-title">{{ panelTitle }}</div>
-          <div class="ledger-panel-subtitle">这里展示该客户的应收、实收和余额变化。</div>
+          <div class="ledger-panel-subtitle">这里只显示当前客户的往来流水，不再混入其他客户内容。</div>
         </div>
-        <el-button text @click="emit('clear')">收起</el-button>
+        <el-button text @click="emit('clear')">返回全部收费</el-button>
       </div>
     </template>
 
@@ -83,20 +82,6 @@ const panelTitle = computed(() => `往来账 - ${props.targetRecord?.customer_na
       </el-col>
     </el-row>
 
-    <el-divider content-position="left">按月汇总</el-divider>
-    <el-table v-loading="props.loading" :data="props.data?.monthly_summaries || []" stripe border>
-      <el-table-column prop="month" label="月份" width="110" />
-      <el-table-column prop="receivable_total" label="当月应收" width="120" />
-      <el-table-column prop="received_total" label="当月实收" width="120" />
-      <el-table-column prop="net_change" label="净变动(应收-实收)" width="160" />
-      <el-table-column prop="ending_balance" label="月末余额" width="120" />
-      <el-table-column label="操作" width="90">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="emit('drill-month', row.month)">下钻</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
     <el-divider content-position="left">客户往来流水</el-divider>
     <el-table v-loading="props.loading" :data="props.data?.entries || []" stripe border>
       <el-table-column prop="occurred_at" label="日期" width="110" />
@@ -109,8 +94,8 @@ const panelTitle = computed(() => `往来账 - ${props.targetRecord?.customer_na
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="receivable_amount" label="借方(应收)" width="110" />
-      <el-table-column prop="received_amount" label="贷方(实收)" width="110" />
+      <el-table-column prop="receivable_amount" label="应收" width="110" />
+      <el-table-column prop="received_amount" label="实收" width="110" />
       <el-table-column label="方向" width="80">
         <template #default="{ row }">
           {{ row.source_type === "PAYMENT" ? "平" : "借" }}

@@ -291,15 +291,12 @@ def create_address_resource_company(
 def delete_address_resource_company(
     resource_id: int,
     company_id: int,
-    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     resource = _get_resource_or_404(db, resource_id)
     item = _get_company_item_or_404(db, resource.id, company_id)
     expected_name = (item.company_name or "").strip() or item.customer_name
-    if (confirm_name or "").strip() != expected_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="确认名称不匹配")
     mark_deleted(item, current_user.id)
     db.flush()
     resource = _get_resource_or_404(db, resource.id)
@@ -324,14 +321,11 @@ def delete_address_resource_company(
 )
 def delete_address_resource(
     resource_id: int,
-    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     resource = _get_resource_or_404(db, resource_id)
     expected_name = _build_resource_primary_name(resource)
-    if (confirm_name or "").strip() != expected_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="确认名称不匹配")
     mark_deleted(resource, current_user.id)
     write_operation_log(
         db,

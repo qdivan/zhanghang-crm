@@ -38,6 +38,12 @@ REMINDER_DAY_MAP = {
     "不跟进": None,
 }
 
+CUSTOMER_CODE_SUFFIX_MAP = {
+    "SALLY直播": "S",
+    "SALLY LIVE": "S",
+    "麦总": "M",
+}
+
 
 def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
     lead = db.execute(select(Lead).where(Lead.id == lead_id, active_filter(Lead))).scalar_one_or_none()
@@ -48,6 +54,33 @@ def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
 
 def _default_reminder_value_for_grade(grade: str) -> str:
     return GRADE_REMINDER_MAP.get((grade or "").strip(), "")
+
+
+def _default_customer_code_suffix(source: str, intro: str) -> str:
+    source_key = (source or "").strip()
+    intro_key = (intro or "").strip()
+    for candidate in [source_key, intro_key]:
+        if not candidate:
+            continue
+        upper_key = candidate.upper()
+        if upper_key in CUSTOMER_CODE_SUFFIX_MAP:
+            return CUSTOMER_CODE_SUFFIX_MAP[upper_key]
+        if candidate in CUSTOMER_CODE_SUFFIX_MAP:
+            return CUSTOMER_CODE_SUFFIX_MAP[candidate]
+    return "A"
+
+
+def _format_customer_code(seq: Optional[int], suffix: str) -> str:
+    if not seq:
+        return ""
+    postfix = (suffix or "").strip().upper()
+    base = str(int(seq)).zfill(4)
+    return f"{base}{postfix}" if postfix else base
+
+
+def _next_customer_code_seq(db: Session) -> int:
+    current_max = db.execute(select(func.max(Customer.customer_code_seq))).scalar() or 0
+    return int(current_max) + 1
 
 
 def _next_reminder_date(base_date: Optional[date], reminder_value: str) -> Optional[date]:
@@ -411,14 +444,10 @@ def update_lead(
 )
 def delete_lead(
     lead_id: int,
-    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     lead = _get_lead_or_404(db, lead_id)
-    expected_name = (lead.name or "").strip() or (lead.contact_name or "").strip() or f"线索#{lead.id}"
-    if (confirm_name or "").strip() != expected_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
     if lead.status == "CONVERTED" or lead.customer_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -432,7 +461,7 @@ def delete_lead(
         action="LEAD_DELETED",
         entity_type="LEAD",
         entity_id=lead.id,
-        detail=f"name={expected_name}",
+        detail=f"name={(lead.name or '').strip() or (lead.contact_name or '').strip()}",
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -510,7 +539,7 @@ def list_followups(
 @router.post(
     "/{lead_id}/convert",
     response_model=ConvertLeadResponse,
-    dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))],
+    dependencies=[Depends(require_roles("OWNER", "MANAGER"))],
 )
 def convert_lead(
     lead_id: int,
@@ -526,6 +555,8 @@ def convert_lead(
     requested_name = (payload.customer_name or "").strip()
     requested_contact_name = (payload.customer_contact_name or "").strip()
     requested_phone = (payload.customer_phone or "").strip()
+    requested_code_seq = payload.customer_code_seq
+    requested_code_suffix = (payload.customer_code_suffix or "").strip().upper()
     conversion_mode = (payload.conversion_mode or "NEW_CUSTOMER_LINKED").strip().upper()
     if conversion_mode not in {"NEW_CUSTOMER_LINKED", "REUSE_CUSTOMER"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid conversion mode")
@@ -576,6 +607,18 @@ def convert_lead(
             for record in customer.billing_records:
                 record.customer_name = customer.name
     else:
+        default_seq = requested_code_seq or _next_customer_code_seq(db)
+        existing_code_owner = db.execute(
+            select(Customer.id).where(
+                Customer.customer_code_seq == default_seq,
+                active_filter(Customer),
+                Customer.source_lead_id != lead.id,
+            )
+        ).scalar_one_or_none()
+        if existing_code_owner is not None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="客户编号已被使用")
+        default_suffix = requested_code_suffix or _default_customer_code_suffix(lead.source, lead.intro)
+        default_code = _format_customer_code(default_seq, default_suffix)
         customer_name = requested_name or lead.name
         customer_contact_name = requested_contact_name or lead.contact_name
         customer_phone = requested_phone or lead.phone
@@ -587,12 +630,21 @@ def convert_lead(
             customer.phone = customer_phone
             customer.assigned_accountant_id = assigned_accountant_id
             customer.source_customer_id = lead.related_customer_id
+            customer.customer_code_seq = customer.customer_code_seq or default_seq
+            customer.customer_code_suffix = (customer.customer_code_suffix or default_suffix).upper()
+            customer.customer_code = customer.customer_code or _format_customer_code(
+                customer.customer_code_seq,
+                customer.customer_code_suffix,
+            )
         else:
             customer = Customer(
                 name=customer_name,
                 contact_name=customer_contact_name,
                 phone=customer_phone,
                 assigned_accountant_id=assigned_accountant_id,
+                customer_code_seq=default_seq,
+                customer_code_suffix=default_suffix,
+                customer_code=default_code,
                 source_customer_id=lead.related_customer_id,
                 source_lead_id=lead.id,
             )
@@ -610,7 +662,8 @@ def convert_lead(
         detail=(
             f"customer={customer.name},accountant_id={assigned_accountant_id},"
             f"reused_customer={'Y' if conversion_mode == 'REUSE_CUSTOMER' else 'N'},"
-            f"source_customer_id={lead.related_customer_id or ''}"
+            f"source_customer_id={lead.related_customer_id or ''},"
+            f"customer_code={customer.customer_code or ''}"
         ),
     )
     db.commit()
@@ -622,7 +675,7 @@ def convert_lead(
 @router.post(
     "/{lead_id}/unconvert",
     response_model=LeadOut,
-    dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))],
+    dependencies=[Depends(require_roles("OWNER", "MANAGER"))],
 )
 def unconvert_lead(
     lead_id: int,

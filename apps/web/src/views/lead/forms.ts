@@ -54,6 +54,8 @@ export type LeadConvertForm = {
   customer_name: string;
   customer_contact_name: string;
   customer_phone: string;
+  customer_code_seq: number | null;
+  customer_code_suffix: string;
   conversion_mode: "NEW_CUSTOMER_LINKED" | "REUSE_CUSTOMER";
 };
 
@@ -133,6 +135,8 @@ export function createLeadConvertForm(): LeadConvertForm {
     customer_name: "",
     customer_contact_name: "",
     customer_phone: "",
+    customer_code_seq: null,
+    customer_code_suffix: "A",
     conversion_mode: "NEW_CUSTOMER_LINKED",
   };
 }

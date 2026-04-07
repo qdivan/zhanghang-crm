@@ -131,6 +131,8 @@ class ConvertLeadRequest(BaseModel):
     customer_name: Optional[str] = None
     customer_contact_name: Optional[str] = None
     customer_phone: Optional[str] = None
+    customer_code_seq: Optional[int] = Field(default=None, gt=0)
+    customer_code_suffix: Optional[str] = Field(default=None, max_length=8)
     conversion_mode: Literal["NEW_CUSTOMER_LINKED", "REUSE_CUSTOMER"] = "NEW_CUSTOMER_LINKED"
 
 
@@ -138,6 +140,9 @@ class CustomerOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    customer_code_seq: Optional[int]
+    customer_code_suffix: str
+    customer_code: str
     name: str
     contact_name: str
     phone: str

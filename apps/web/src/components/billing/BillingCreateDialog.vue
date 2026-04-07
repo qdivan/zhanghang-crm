@@ -20,7 +20,7 @@ const emit = defineEmits<{
 <template>
   <el-dialog
     :model-value="props.visible"
-    title="新增收费记录"
+    title="新增收费项目"
     width="760px"
     @update:model-value="emit('update:visible', $event)"
   >

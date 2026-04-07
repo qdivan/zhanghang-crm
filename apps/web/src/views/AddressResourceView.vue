@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 
 import { apiClient } from "../api/client";
@@ -39,6 +39,12 @@ const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 const dialogTitle = computed(() => (form.id ? "编辑挂靠地址" : "新增挂靠地址"));
 const showAddressInitialSkeleton = computed(() => !resourcesHydrated.value);
 const canDelete = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const customerNameOptions = computed(() =>
+  customers.value.map((item) => ({
+    value: item.name,
+    label: item.contact_name ? `${item.name} / ${item.contact_name}` : item.name,
+  })),
+);
 
 const form = reactive<ResourceForm>({
   id: null,
@@ -180,24 +186,17 @@ async function removeResource(row: AddressResource) {
     ElMessage.warning("只有老板和管理员可以删除地址资源");
     return;
   }
-  const expectedName = row.category || row.contact_info || `地址资源#${row.id}`;
   try {
-    const resp = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这条地址资源。`,
+    await ElMessageBox.confirm(
+      `确认删除这条地址资源吗？\n${row.category || row.contact_info || `地址资源#${row.id}`}`,
       "删除地址资源",
       {
+        type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
       },
-    )) as { value: string };
-    if ((resp.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
-    await apiClient.delete(`/address-resources/${row.id}`, {
-      params: { confirm_name: expectedName },
-    });
+    );
+    await apiClient.delete(`/address-resources/${row.id}`);
     ElMessage.success("地址资源已删除");
     if (activeResource.value?.id === row.id) {
       showCompaniesDialog.value = false;
@@ -216,24 +215,17 @@ async function removeCompany(item: AddressResourceCompanyItem) {
     ElMessage.warning("只有老板和管理员可以删除已服务公司记录");
     return;
   }
-  const expectedName = item.company_name || item.customer_name || `公司记录#${item.id}`;
   try {
-    const resp = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这条已服务公司记录。`,
+    await ElMessageBox.confirm(
+      `确认删除这条已服务公司记录吗？\n${item.company_name || item.customer_name || `公司记录#${item.id}`}`,
       "删除已服务公司",
       {
+        type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
       },
-    )) as { value: string };
-    if ((resp.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
-    await apiClient.delete(`/address-resources/${activeResource.value.id}/companies/${item.id}`, {
-      params: { confirm_name: expectedName },
-    });
+    );
+    await apiClient.delete(`/address-resources/${activeResource.value.id}/companies/${item.id}`);
     ElMessage.success("已服务公司记录已删除");
     await fetchResources();
   } catch (error: any) {
@@ -245,6 +237,25 @@ async function removeCompany(item: AddressResourceCompanyItem) {
 onMounted(async () => {
   await Promise.all([fetchResources(), fetchCustomers()]);
 });
+
+watch(
+  () => companyForm.customer_id,
+  (value) => {
+    const selectedCustomer = customers.value.find((item) => item.id === value) || null;
+    if (selectedCustomer && !companyForm.company_name.trim()) {
+      companyForm.company_name = selectedCustomer.name;
+    }
+  },
+);
+
+function fetchCompanyNameSuggestions(queryString: string, callback: (items: Array<{ value: string }>) => void) {
+  const keywordValue = queryString.trim().toLowerCase();
+  if (!keywordValue) {
+    callback(customerNameOptions.value);
+    return;
+  }
+  callback(customerNameOptions.value.filter((item) => item.value.toLowerCase().includes(keywordValue)));
+}
 </script>
 
 <template>
@@ -468,7 +479,13 @@ onMounted(async () => {
         </el-select>
       </el-form-item>
       <el-form-item label="公司名称">
-        <el-input v-model="companyForm.company_name" placeholder="如未选客户，可直接手填公司名称" />
+        <el-autocomplete
+          v-model="companyForm.company_name"
+          class="wide-field"
+          :fetch-suggestions="fetchCompanyNameSuggestions"
+          placeholder="可联想已转化客户，也可手填未建档公司"
+          clearable
+        />
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="companyForm.notes" type="textarea" :rows="3" placeholder="例如：挂靠期限、特殊约定、联系人" />
@@ -581,7 +598,8 @@ onMounted(async () => {
 .resource-filter-form :deep(.el-input__wrapper),
 .resource-filter-form :deep(.el-select__wrapper),
 .resource-filter-form :deep(.el-date-editor.el-input__wrapper),
-.wide-field :deep(.el-select__wrapper) {
+.wide-field :deep(.el-select__wrapper),
+.wide-field :deep(.el-input__wrapper) {
   min-width: 220px;
 }
 

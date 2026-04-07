@@ -500,6 +500,7 @@ onMounted(fetchDetail);
           <div>
             <div class="customer-detail-mobile-eyebrow">客户档案</div>
             <div class="customer-detail-mobile-title">{{ detail?.name || "客户档案" }}</div>
+            <div v-if="detail?.customer_code" class="customer-detail-mobile-code">编号 {{ detail.customer_code }}</div>
             <div class="customer-detail-mobile-copy">{{ customerHeroCopy }}</div>
           </div>
           <div class="customer-detail-mobile-primary-actions">
@@ -677,6 +678,7 @@ onMounted(fetchDetail);
             <div class="customer-overview-title-row">
               <div class="customer-overview-title">{{ detail.name }}</div>
               <el-space class="customer-overview-tags" wrap :size="8">
+                <el-tag v-if="detail.customer_code" size="small" type="warning" effect="plain">编号 {{ detail.customer_code }}</el-tag>
                 <el-tag size="small" type="success" effect="plain">客户ID {{ detail.id }}</el-tag>
                 <el-tag size="small" type="info" effect="plain">会计 {{ detail.accountant_username || "未分配" }}</el-tag>
                 <el-tag size="small" effect="plain">{{ templateLabel(detail.lead.template_type) }}</el-tag>
@@ -1169,6 +1171,13 @@ onMounted(fetchDetail);
   margin-top: 3px;
   font-size: 12px;
   color: var(--app-text-muted);
+}
+
+.customer-detail-mobile-code {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a5b12;
 }
 
 .customer-detail-mobile-section-copy {

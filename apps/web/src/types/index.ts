@@ -188,6 +188,9 @@ export interface LeadItem {
 
 export interface CustomerListItem {
   id: number;
+  customer_code_seq: number | null;
+  customer_code_suffix: string;
+  customer_code: string;
   name: string;
   contact_name: string;
   phone: string;
@@ -217,6 +220,9 @@ export interface CustomerListItem {
 
 export interface CustomerDetail {
   id: number;
+  customer_code_seq: number | null;
+  customer_code_suffix: string;
+  customer_code: string;
   name: string;
   contact_name: string;
   phone: string;
@@ -471,6 +477,34 @@ export interface BillingPaymentSuggestion {
   allocations: BillingPaymentSuggestedAllocation[];
 }
 
+export interface BillingPaymentAllocationItem {
+  id: number;
+  billing_record_id: number;
+  allocated_amount: number;
+}
+
+export interface BillingPaymentItem {
+  id: number;
+  payment_no: string;
+  customer_id: number;
+  customer_name: string;
+  customer_contact_name: string;
+  accountant_username: string;
+  occurred_at: string;
+  amount: number;
+  strategy: BillingPaymentStrategy | string;
+  receipt_account: string;
+  summary: string;
+  is_prepay: boolean;
+  allocated_amount: number;
+  unallocated_amount: number;
+  allocation_status: "UNALLOCATED" | "PARTIAL" | "ALLOCATED";
+  note: string;
+  created_by_user_id: number;
+  created_at: string;
+  allocations: BillingPaymentAllocationItem[];
+}
+
 export interface BillingLedgerEntryItem {
   occurred_at: string;
   summary: string;
@@ -541,6 +575,7 @@ export interface BillingReceiptAccountEntryItem {
   receipt_account: string;
   customer_name: string;
   summary: string;
+  amount: number;
   debit_amount: number;
   credit_amount: number;
   balance: number;
@@ -560,6 +595,51 @@ export interface BillingReceiptAccountLedgerData {
   payment_count: number;
   account_summaries: BillingReceiptAccountSummaryItem[];
   entries: BillingReceiptAccountEntryItem[];
+}
+
+export interface CustomerDeleteBlockerItem {
+  type: string;
+  count: number;
+  label: string;
+  message: string;
+  href: string;
+  filters: Record<string, unknown>;
+}
+
+export interface CustomerSuggestItem {
+  id: number;
+  name: string;
+  contact_name: string;
+  phone: string;
+  customer_code: string;
+  label: string;
+}
+
+export interface CustomerMatterSummaryItem {
+  customer_id: number;
+  customer_name: string;
+  customer_code: string;
+  customer_contact_name: string;
+  service_start_display: string;
+  current_service_summary: string;
+  open_item_count: number;
+  latest_reminder_at: string | null;
+  latest_progress: string;
+}
+
+export interface CustomerImportRowResultItem {
+  row_number: number;
+  company_name: string;
+  action: string;
+  message: string;
+}
+
+export interface CustomerImportResultItem {
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  error_count: number;
+  rows: CustomerImportRowResultItem[];
 }
 
 export type TodoPriority = "HIGH" | "MEDIUM" | "LOW";

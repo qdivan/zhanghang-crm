@@ -7,6 +7,7 @@ import {
   Management,
   Menu as MenuIcon,
   Money,
+  Notification,
   Setting,
   User,
 } from "@element-plus/icons-vue";
@@ -40,6 +41,7 @@ const menuItems = computed(() => {
     { path: "/leads", label: "客户开发", icon: Management },
     { path: "/customers", label: "客户列表", icon: User },
     { path: "/billing", label: "收费明细", icon: Money },
+    { path: "/customer-matters", label: "重要事项", icon: Notification },
   ];
   if (canOpenReceiptReconciliation.value) {
     items.push({ path: "/receipt-reconciliation", label: "到账核对", icon: Money });
@@ -65,6 +67,7 @@ const activeMenu = computed(() => {
   if (route.path.startsWith("/leads")) return "/leads";
   if (route.path.startsWith("/customers")) return "/customers";
   if (route.path.startsWith("/billing")) return "/billing";
+  if (route.path.startsWith("/customer-matters")) return "/customer-matters";
   if (route.path.startsWith("/receipt-reconciliation")) return "/receipt-reconciliation";
   if (route.path.startsWith("/common-library")) return "/common-library";
   if (route.path.startsWith("/costs")) return "/costs";

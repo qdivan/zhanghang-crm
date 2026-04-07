@@ -17,6 +17,7 @@ const emit = defineEmits<{
   "query-summary": [];
   "open-receipt-ledger": [];
   "open-payment": [row?: BillingCustomerSummaryItem];
+  "open-payment-list": [];
   "open-customer-ledger": [row: BillingCustomerSummaryItem];
 }>();
 
@@ -77,6 +78,7 @@ const summaryCards = computed(() => [
           <el-button class="billing-primary-action" type="primary" size="large" @click="emit('open-payment')">
             收款
           </el-button>
+          <el-button size="small" plain @click="emit('open-payment-list')">收款列表</el-button>
           <el-button v-if="props.canViewReceiptLedger" size="small" plain @click="emit('open-receipt-ledger')">
             到账核对
           </el-button>

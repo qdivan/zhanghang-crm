@@ -15,6 +15,7 @@ const LeadView = () => import("../views/LeadView.vue");
 const LeadDetailView = () => import("../views/LeadDetailView.vue");
 const CustomersView = () => import("../views/CustomersView.vue");
 const CustomerDetailView = () => import("../views/CustomerDetailView.vue");
+const CustomerMattersView = () => import("../views/CustomerMattersView.vue");
 const BillingView = () => import("../views/BillingView.vue");
 const ReceiptReconciliationView = () => import("../views/ReceiptReconciliationView.vue");
 const CommonLibraryView = () => import("../views/CommonLibraryView.vue");
@@ -82,6 +83,11 @@ const router = createRouter({
           path: "customers/:id",
           name: "customer-detail",
           component: CustomerDetailView,
+        },
+        {
+          path: "customer-matters",
+          name: "customer-matters",
+          component: CustomerMattersView,
         },
         {
           path: "billing",
@@ -179,6 +185,17 @@ const router = createRouter({
             mobileSubtitle: "成单后信息、时间线和客户事项。",
             mobileBackTo: "/m/customers",
             mobileIconKey: "customers",
+          },
+        },
+        {
+          path: "customer-matters",
+          name: "mobile-customer-matters",
+          component: CustomerMattersView,
+          meta: {
+            mobileTitle: "重要事项",
+            mobileSubtitle: "集中维护客户的重要提醒和办理进度。",
+            mobileBackTo: "/m/customers",
+            mobileSectionKey: "customer-matters",
           },
         },
         {

@@ -154,6 +154,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         select(
             BillingRecord.id,
             BillingRecord.customer_name,
+            BillingRecord.customer_id,
             BillingRecord.due_month,
             BillingRecord.outstanding_amount,
             Customer.assigned_accountant_id,
@@ -165,7 +166,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         .order_by(BillingRecord.id.asc())
     )
     billing_rows = db.execute(_apply_billing_system_todo_scope(billing_stmt, db, current_user)).all()
-    for record_id, customer_name, due_month, outstanding_amount, assignee_user_id, assignee_username in billing_rows:
+    for record_id, customer_name, customer_id, due_month, outstanding_amount, assignee_user_id, assignee_username in billing_rows:
         due_date = _parse_due_month(due_month)
         if due_date is None or due_date > due_window_end:
             continue
@@ -178,8 +179,8 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 title=f"{due_label}催收：{customer_name}",
                 description=f"到期日 {due_date.isoformat()}，当前未收 {float(outstanding_amount):.2f}",
                 due_date=due_date,
-                action_path="/billing",
-                action_label="查看收费台账",
+                action_path=f"/billing?view=ledger&customer_id={customer_id}&customer_name={customer_name}" if customer_id else "/billing",
+                action_label="查看客户往来账",
                 assignee_user_id=assignee_user_id,
                 assignee_username=assignee_username or "-",
             )

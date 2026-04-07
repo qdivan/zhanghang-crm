@@ -1,12 +1,27 @@
 import os
 from datetime import date, timedelta
+from io import BytesIO
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook, load_workbook
 
 from app.main import app
+from app.services.customer_spreadsheet import CUSTOMER_SHEET_COLUMNS
 
 DEMO_PASSWORD = os.environ.get("BOOTSTRAP_DEMO_PASSWORD", "Daizhang#2026!")
+
+
+def build_customer_import_bytes(rows: list[dict[str, str]]) -> bytes:
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "客户导入模板"
+    ws.append([item.header for item in CUSTOMER_SHEET_COLUMNS])
+    for row in rows:
+        ws.append([row.get(item.key, "") for item in CUSTOMER_SHEET_COLUMNS])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 def test_health():
@@ -2412,6 +2427,15 @@ def test_ldap_settings_permission_and_sync_guard():
             },
         )
         assert admin_update.status_code == 200
+        assert admin_update.json()["default_role"] == "ACCOUNTANT"
+
+        admin_update_manager = client.put(
+            "/api/v1/admin/ldap/settings",
+            headers=admin_headers,
+            json={"default_role": "MANAGER"},
+        )
+        assert admin_update_manager.status_code == 200
+        assert admin_update_manager.json()["default_role"] == "MANAGER"
 
         sync_response = client.post("/api/v1/admin/ldap/sync", headers=admin_headers, json={})
         assert sync_response.status_code == 400
@@ -2569,7 +2593,7 @@ def test_todo_delete_requires_admin_and_confirm_name():
         assert any(item["action"] == "TODO_RESTORED" for item in restore_logs.json())
 
 
-def test_lead_delete_requires_admin_confirm_and_blocks_converted():
+def test_lead_delete_uses_simple_confirm_and_blocks_converted():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
@@ -2606,21 +2630,12 @@ def test_lead_delete_requires_admin_confirm_and_blocks_converted():
         forbidden_resp = client.delete(
             f"/api/v1/leads/{lead_id}",
             headers=accountant_headers,
-            params={"confirm_name": "线索删除测试-A"},
         )
         assert forbidden_resp.status_code == 403
-
-        mismatch_resp = client.delete(
-            f"/api/v1/leads/{lead_id}",
-            headers=owner_headers,
-            params={"confirm_name": "错误名称"},
-        )
-        assert mismatch_resp.status_code == 400
 
         delete_resp = client.delete(
             f"/api/v1/leads/{lead_id}",
             headers=owner_headers,
-            params={"confirm_name": "线索删除测试-A"},
         )
         assert delete_resp.status_code == 204
 
@@ -2669,7 +2684,6 @@ def test_lead_delete_requires_admin_confirm_and_blocks_converted():
         converted_delete_resp = client.delete(
             f"/api/v1/leads/{converted_lead_id}",
             headers=owner_headers,
-            params={"confirm_name": "线索删除测试-B"},
         )
         assert converted_delete_resp.status_code == 400
         assert converted_delete_resp.json()["detail"] == "该线索已转化，请先撤销转化再删除"
@@ -2843,7 +2857,150 @@ def test_unconvert_then_reconvert_reuses_soft_deleted_customer():
         assert second_convert_resp.json()["customer"]["name"] == "反复成交测试-A（再次成交）"
 
 
-def test_billing_record_delete_requires_admin_confirm_and_blocks_paid_record():
+def test_customer_delete_returns_structured_blockers():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "删除阻塞客户",
+                "contact_name": "阻塞联系人",
+                "phone": "13950002101",
+                "source": "Sally直播",
+                "main_business": "代账服务",
+            },
+        )
+        assert lead_resp.status_code == 201
+        lead_id = lead_resp.json()["id"]
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_id}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "删除阻塞收费项目",
+                "total_fee": 600,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-07",
+                "due_month": "2026-04-07",
+                "payment_method": "后收",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        payment_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-04-07",
+                "amount": 600,
+                "strategy": "DUE_DATE_ASC",
+                "receipt_account": "一帆光大",
+                "note": "删除阻塞收款单",
+                "allocations": [{"billing_record_id": record_id, "allocated_amount": 600}],
+            },
+        )
+        assert payment_resp.status_code == 201
+
+        matter_resp = client.post(
+            f"/api/v1/customers/{customer_id}/timeline-events",
+            headers=owner_headers,
+            json={
+                "occurred_at": "2026-04-07",
+                "event_type": "DELIVERY",
+                "status": "OPEN",
+                "reminder_at": "2026-04-10",
+                "content": "客户需要补充资料",
+                "note": "删除前不应允许丢失事项",
+                "result": "",
+                "amount": None,
+            },
+        )
+        assert matter_resp.status_code == 201
+
+        delete_resp = client.delete(
+            f"/api/v1/customers/{customer_id}",
+            headers=owner_headers,
+            params={"confirm_name": "删除阻塞客户"},
+        )
+        assert delete_resp.status_code == 400
+        detail = delete_resp.json()["detail"]
+        assert detail["reason"] == "DEPENDENCY_BLOCKED"
+        blocker_types = {item["type"] for item in detail["blockers"]}
+        assert "BILLING_RECORD" in blocker_types
+        assert "BILLING_PAYMENT" in blocker_types
+        assert "CUSTOMER_MATTER" in blocker_types
+
+
+def test_lead_convert_generates_customer_code_and_suffix():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "编号客户-S",
+                "contact_name": "编号联系人",
+                "phone": "13950002102",
+                "source": "Sally直播",
+                "main_business": "咨询",
+            },
+        )
+        assert lead_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer = convert_resp.json()["customer"]
+        assert customer["customer_code_seq"] is not None
+        assert customer["customer_code_suffix"] == "S"
+        assert customer["customer_code"].endswith("S")
+
+        list_resp = client.get("/api/v1/customers", headers=owner_headers, params={"keyword": customer["customer_code"]})
+        assert list_resp.status_code == 200
+        assert any(item["id"] == customer["id"] for item in list_resp.json())
+
+
+def test_billing_record_delete_uses_simple_confirm_and_blocks_paid_record():
     with TestClient(app) as client:
         owner_login = client.post(
             "/api/v1/auth/login",
@@ -2907,21 +3064,12 @@ def test_billing_record_delete_requires_admin_confirm_and_blocks_paid_record():
         forbidden_resp = client.delete(
             f"/api/v1/billing-records/{record_id}",
             headers=accountant_headers,
-            params={"confirm_name": "收费删除测试-A · 收费删除测试-未收"},
         )
         assert forbidden_resp.status_code == 403
-
-        mismatch_resp = client.delete(
-            f"/api/v1/billing-records/{record_id}",
-            headers=owner_headers,
-            params={"confirm_name": "错误名称"},
-        )
-        assert mismatch_resp.status_code == 400
 
         delete_resp = client.delete(
             f"/api/v1/billing-records/{record_id}",
             headers=owner_headers,
-            params={"confirm_name": "收费删除测试-A · 收费删除测试-未收"},
         )
         assert delete_resp.status_code == 204
 
@@ -2986,10 +3134,124 @@ def test_billing_record_delete_requires_admin_confirm_and_blocks_paid_record():
         paid_delete_resp = client.delete(
             f"/api/v1/billing-records/{paid_record_id}",
             headers=owner_headers,
-            params={"confirm_name": "收费删除测试-A · 收费删除测试-已收"},
         )
         assert paid_delete_resp.status_code == 400
-        assert paid_delete_resp.json()["detail"] == "当前收费单已有收款核销记录，不能删除"
+        detail = paid_delete_resp.json()["detail"]
+        assert detail["reason"] == "DEPENDENCY_BLOCKED"
+        assert detail["blockers"][0]["type"] == "BILLING_PAYMENT"
+
+
+def test_billing_payment_supports_prepay_list_and_manual_allocate():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "template_type": "CONVERSION",
+                "name": "预收款测试客户",
+                "contact_name": "预收联系人",
+                "phone": "13950003111",
+                "source": "Sally直播",
+                "main_business": "代账",
+            },
+        )
+        assert lead_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        plain_payment_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-04-07",
+                "amount": 500,
+                "strategy": "DUE_DATE_ASC",
+                "receipt_account": "一帆光大",
+                "note": "无应收普通收款",
+                "allocations": [],
+            },
+        )
+        assert plain_payment_resp.status_code == 400
+        assert plain_payment_resp.json()["detail"]["reason"] == "NO_ALLOCATIONS"
+
+        prepay_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-04-07",
+                "amount": 500,
+                "strategy": "DUE_DATE_ASC",
+                "receipt_account": "一帆光大",
+                "note": "客户先付预收款",
+                "is_prepay": True,
+                "allocations": [],
+            },
+        )
+        assert prepay_resp.status_code == 201
+        payment_id = prepay_resp.json()["id"]
+        assert prepay_resp.json()["allocation_status"] == "UNALLOCATED"
+        assert prepay_resp.json()["unallocated_amount"] == 500
+
+        list_resp = client.get(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            params={"customer_id": customer_id, "unallocated_only": True},
+        )
+        assert list_resp.status_code == 200
+        assert any(item["id"] == payment_id for item in list_resp.json())
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "后续形成应收",
+                "total_fee": 500,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-08",
+                "due_month": "2026-04-08",
+                "payment_method": "后收",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        allocate_resp = client.post(
+            f"/api/v1/billing-records/payments/{payment_id}/allocate",
+            headers=owner_headers,
+            json={"allocations": [{"billing_record_id": record_id, "allocated_amount": 500}]},
+        )
+        assert allocate_resp.status_code == 200
+        assert allocate_resp.json()["allocation_status"] == "ALLOCATED"
+        assert allocate_resp.json()["unallocated_amount"] == 0
+
+        records_resp = client.get("/api/v1/billing-records", headers=owner_headers, params={"customer_id": customer_id})
+        assert records_resp.status_code == 200
+        target = next(item for item in records_resp.json() if item["id"] == record_id)
+        assert target["received_amount"] == 500
+        assert target["status"] == "CLEARED"
 
 
 def test_user_delete_requires_confirm_and_supports_restore():
@@ -4103,3 +4365,120 @@ def test_followup_updates_grade_and_reminder_defaults():
         assert lost_lead["reminder_value"] == "不跟进"
         assert lost_lead["next_reminder_at"] is None
         assert lost_lead["status"] == "LOST"
+
+
+def test_customer_import_template_and_export_workbook():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        template_resp = client.get("/api/v1/customers/import-template", headers=headers)
+        assert template_resp.status_code == 200
+        template_wb = load_workbook(BytesIO(template_resp.content))
+        assert template_wb.sheetnames == ["客户导入模板", "填写说明"]
+        template_headers = [cell.value for cell in template_wb["客户导入模板"][1]]
+        assert template_headers[:5] == ["客户ID", "客户编号", "公司名称", "联系人", "联系电话"]
+        assert "会计账号" in template_headers
+
+        export_resp = client.get("/api/v1/customers/export", headers=headers)
+        assert export_resp.status_code == 200
+        export_wb = load_workbook(BytesIO(export_resp.content))
+        assert export_wb.active.title == "客户列表导出"
+        export_headers = [cell.value for cell in export_wb.active[1]]
+        assert export_headers == template_headers
+        assert export_wb.active.max_row >= 2
+
+
+def test_customer_import_creates_and_updates_customer():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        create_file = build_customer_import_bytes(
+            [
+                {
+                    "name": "客户导入测试-A",
+                    "contact_name": "导入联系人",
+                    "phone": "13950004101",
+                    "status": "ACTIVE",
+                    "accountant_username": "accountant",
+                    "grade": "A",
+                    "region": "青岛",
+                    "service_start_text": "2026-04-07",
+                    "main_business": "代账服务",
+                    "source": "Sally直播",
+                    "intro": "麦总",
+                    "fee_standard": "3600/年",
+                    "first_billing_period": "2026-04",
+                    "reminder_value": "7天",
+                    "notes": "首次整表导入测试",
+                }
+            ]
+        )
+
+        import_resp = client.post(
+            "/api/v1/customers/import",
+            headers=owner_headers,
+            files={
+                "file": (
+                    "customer-import.xlsx",
+                    create_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert import_resp.status_code == 200
+        import_result = import_resp.json()
+        assert import_result["created_count"] == 1
+        assert import_result["error_count"] == 0
+
+        list_resp = client.get("/api/v1/customers", headers=owner_headers, params={"keyword": "客户导入测试-A"})
+        assert list_resp.status_code == 200
+        created_customer = next(item for item in list_resp.json() if item["name"] == "客户导入测试-A")
+        assert created_customer["customer_code"].endswith("S")
+
+        update_file = build_customer_import_bytes(
+            [
+                {
+                    "customer_id": str(created_customer["id"]),
+                    "customer_code": created_customer["customer_code"],
+                    "name": "客户导入测试-A",
+                    "contact_name": "导入联系人",
+                    "phone": "13950004199",
+                    "accountant_username": "accountant",
+                    "fee_standard": "4200/年",
+                    "notes": "导入更新成功",
+                }
+            ]
+        )
+
+        update_resp = client.post(
+            "/api/v1/customers/import",
+            headers=owner_headers,
+            files={
+                "file": (
+                    "customer-import-update.xlsx",
+                    update_file,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert update_resp.status_code == 200
+        update_result = update_resp.json()
+        assert update_result["updated_count"] == 1
+        assert update_result["error_count"] == 0
+
+        detail_resp = client.get(f"/api/v1/customers/{created_customer['id']}", headers=owner_headers)
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        assert detail["phone"] == "13950004199"
+        assert detail["lead"]["fee_standard"] == "4200/年"
+        assert detail["lead"]["notes"] == "导入更新成功"

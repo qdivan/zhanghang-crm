@@ -18,7 +18,6 @@ const emit = defineEmits<{
   "update:dateRange": [value: [string, string] | null];
   query: [];
   reset: [];
-  "drill-month": [monthText: string];
 }>();
 
 const dialogVisible = computed({
@@ -79,20 +78,6 @@ const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_n
       </el-col>
     </el-row>
 
-    <el-divider content-position="left">按月汇总</el-divider>
-    <el-table v-loading="props.loading" :data="props.data?.monthly_summaries || []" stripe border>
-      <el-table-column prop="month" label="月份" width="110" />
-      <el-table-column prop="receivable_total" label="当月应收" width="120" />
-      <el-table-column prop="received_total" label="当月实收" width="120" />
-      <el-table-column prop="net_change" label="净变动(应收-实收)" width="160" />
-      <el-table-column prop="ending_balance" label="月末余额" width="120" />
-      <el-table-column label="操作" width="90">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="emit('drill-month', row.month)">下钻</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-
     <el-divider content-position="left">客户往来流水</el-divider>
     <el-table v-loading="props.loading" :data="props.data?.entries || []" stripe border>
       <el-table-column prop="occurred_at" label="时间" width="110" />
@@ -105,8 +90,8 @@ const dialogTitle = computed(() => `往来账 - ${props.targetRecord?.customer_n
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="receivable_amount" label="借方(应收)" width="110" />
-      <el-table-column prop="received_amount" label="贷方(实收)" width="110" />
+      <el-table-column prop="receivable_amount" label="应收" width="110" />
+      <el-table-column prop="received_amount" label="实收" width="110" />
       <el-table-column label="方向" width="80">
         <template #default="{ row }">
           {{ row.source_type === "PAYMENT" ? "平" : "借" }}

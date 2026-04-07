@@ -8,6 +8,9 @@ from app.schemas.lead import LeadOut, LeadFollowupOut
 
 class CustomerListOut(BaseModel):
     id: int
+    customer_code_seq: Optional[int]
+    customer_code_suffix: str
+    customer_code: str
     name: str
     contact_name: str
     phone: str
@@ -37,6 +40,9 @@ class CustomerListOut(BaseModel):
 
 class CustomerDetailOut(BaseModel):
     id: int
+    customer_code_seq: Optional[int]
+    customer_code_suffix: str
+    customer_code: str
     name: str
     contact_name: str
     phone: str
@@ -109,6 +115,51 @@ class CustomerTimelineEntryOut(BaseModel):
     result: str = ""
     actor_username: str = ""
     extra: str = ""
+
+
+class CustomerDeleteBlockerOut(BaseModel):
+    type: str
+    count: int
+    label: str
+    message: str
+    href: str
+    filters: dict[str, object] = Field(default_factory=dict)
+
+
+class CustomerSuggestOut(BaseModel):
+    id: int
+    name: str
+    contact_name: str
+    phone: str
+    customer_code: str
+    label: str
+
+
+class CustomerMatterSummaryOut(BaseModel):
+    customer_id: int
+    customer_name: str
+    customer_code: str
+    customer_contact_name: str
+    service_start_display: str
+    current_service_summary: str
+    open_item_count: int
+    latest_reminder_at: Optional[date]
+    latest_progress: str
+
+
+class CustomerImportRowResultOut(BaseModel):
+    row_number: int
+    company_name: str
+    action: str
+    message: str
+
+
+class CustomerImportResultOut(BaseModel):
+    created_count: int
+    updated_count: int
+    skipped_count: int
+    error_count: int
+    rows: list[CustomerImportRowResultOut] = Field(default_factory=list)
 
 
 class CustomerUpdate(BaseModel):

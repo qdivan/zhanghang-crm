@@ -151,7 +151,6 @@ def update_common_library_item(
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_common_library_item(
     item_id: int,
-    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("OWNER", "ADMIN")),
 ):
@@ -162,8 +161,6 @@ def delete_common_library_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="常用资料不存在")
 
     title = item.title or item.category
-    if (confirm_name or "").strip() != title:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
     mark_deleted(item, current_user.id)
     write_operation_log(
         db,

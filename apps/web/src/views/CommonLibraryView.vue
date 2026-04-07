@@ -54,6 +54,7 @@ const showMobileFilters = ref(false);
 const showLibraryActionSheet = ref(false);
 const selectedLibraryRow = ref<CommonLibraryItem | null>(null);
 const desktopSelectedRowId = ref<number | null>(null);
+const selectedRowIds = ref<number[]>([]);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
@@ -294,34 +295,77 @@ async function removeItem(row: CommonLibraryItem) {
     ElMessage.warning("只有老板和管理员可以删除资料");
     return;
   }
-  const expectedName = row.title || row.category || "该条资料";
   try {
-    const result = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这条资料。`,
+    await ElMessageBox.confirm(
+      `确认删除这条资料吗？\n${row.title || row.category || "未命名资料"}`,
       "删除确认",
       {
         type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
       },
-    )) as { value: string };
-    if ((result.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
+    );
   } catch {
     return;
   }
 
   try {
-    await apiClient.delete(`/common-library-items/${row.id}`, {
-      params: { confirm_name: expectedName },
-    });
+    await apiClient.delete(`/common-library-items/${row.id}`);
     ElMessage.success("已删除");
+    selectedRowIds.value = selectedRowIds.value.filter((item) => item !== row.id);
     await fetchItems();
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || "删除失败");
+  }
+}
+
+async function copyItem(row: CommonLibraryItem) {
+  const text = [row.title, row.content, row.phone, row.address, row.notes].filter(Boolean).join("\n");
+  if (!text.trim()) {
+    ElMessage.warning("这条资料还没有可复制的内容");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success("已复制到剪贴板");
+  } catch {
+    ElMessage.error("复制失败，请稍后再试");
+  }
+}
+
+function toggleRowSelection(rowId: number) {
+  if (selectedRowIds.value.includes(rowId)) {
+    selectedRowIds.value = selectedRowIds.value.filter((item) => item !== rowId);
+    return;
+  }
+  selectedRowIds.value = [...selectedRowIds.value, rowId];
+}
+
+const hasSelectedRows = computed(() => selectedRowIds.value.length > 0);
+
+async function removeSelectedItems() {
+  if (!canDelete.value || !selectedRowIds.value.length) return;
+  try {
+    await ElMessageBox.confirm(
+      `确认批量删除已勾选的 ${selectedRowIds.value.length} 条资料吗？`,
+      "批量删除资料",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  try {
+    await Promise.all(selectedRowIds.value.map((id) => apiClient.delete(`/common-library-items/${id}`)));
+    ElMessage.success(`已删除 ${selectedRowIds.value.length} 条资料`);
+    selectedRowIds.value = [];
+    await fetchItems();
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || "批量删除失败");
   }
 }
 
@@ -355,6 +399,13 @@ function workspaceListHint(row: CommonLibraryItem) {
     return [row.phone, row.address].filter(Boolean).join(" · ") || "补充电话或地址后会显示在这里。";
   }
   return row.content || row.notes || "还没有填写内容。";
+}
+
+function workspaceListTitle(row: CommonLibraryItem) {
+  const title = (row.title || "").trim();
+  const category = (row.category || "").trim();
+  if (title && category && title === category) return title;
+  return title || category || activeMeta.value.label;
 }
 
 function visibilityLabel(value: CommonLibraryVisibility) {
@@ -391,11 +442,13 @@ watch(rows, () => {
 watch(visibleRows, (items) => {
   if (!items.length) {
     desktopSelectedRowId.value = null;
+    selectedRowIds.value = [];
     return;
   }
   if (!items.some((item) => item.id === desktopSelectedRowId.value)) {
     desktopSelectedRowId.value = items[0].id;
   }
+  selectedRowIds.value = selectedRowIds.value.filter((item) => items.some((row) => row.id === item));
 });
 
 watch(visibilityFilter, () => {
@@ -687,6 +740,15 @@ onMounted(() => {
             </div>
             <div class="library-main-head-actions">
               <el-tag type="info" effect="plain">{{ visibleRows.length }} 条</el-tag>
+              <el-button
+                v-if="canDelete && hasSelectedRows"
+                size="small"
+                type="danger"
+                plain
+                @click="removeSelectedItems"
+              >
+                批量删除 {{ selectedRowIds.length }} 条
+              </el-button>
               <el-button size="small" plain :icon="Plus" @click="openCreateDialog()">
                 当前分类新增
               </el-button>
@@ -709,26 +771,35 @@ onMounted(() => {
                   <el-tag effect="plain">{{ visibleRows.length }}</el-tag>
                 </div>
                 <div class="library-entry-list">
-                  <button
+                  <article
                     v-for="row in visibleRows"
                     :key="row.id"
-                    type="button"
-                    class="library-entry-button"
+                    class="library-entry-item"
                     :class="{ active: activeWorkspaceRow?.id === row.id }"
-                    @click="desktopSelectedRowId = row.id"
                   >
-                    <div class="library-entry-button-head">
-                      <div class="library-entry-button-title">{{ row.title || row.category || activeMeta.label }}</div>
-                      <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
-                        {{ visibilityLabel(row.visibility) }}
-                      </el-tag>
+                    <button
+                      type="button"
+                      class="library-entry-button"
+                      @click="desktopSelectedRowId = row.id"
+                    >
+                      <div class="library-entry-button-head">
+                        <div class="library-entry-button-title">{{ workspaceListTitle(row) }}</div>
+                        <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
+                          {{ visibilityLabel(row.visibility) }}
+                        </el-tag>
+                      </div>
+                      <div class="library-entry-button-meta">
+                        <span>{{ row.category || "未分类" }}</span>
+                        <span v-if="row.module_type === 'DIRECTORY' && row.phone">{{ row.phone }}</span>
+                      </div>
+                      <div class="library-entry-button-copy">{{ workspaceListHint(row) }}</div>
+                    </button>
+                    <div class="library-entry-inline-actions">
+                      <el-checkbox :model-value="selectedRowIds.includes(row.id)" @change="toggleRowSelection(row.id)" />
+                      <el-button link type="primary" @click="copyItem(row)">复制</el-button>
+                      <el-button v-if="canDelete" link type="danger" @click="removeItem(row)">删除</el-button>
                     </div>
-                    <div class="library-entry-button-meta">
-                      <span>{{ row.category || "未分类" }}</span>
-                      <span v-if="row.module_type === 'DIRECTORY' && row.phone">{{ row.phone }}</span>
-                    </div>
-                    <div class="library-entry-button-copy">{{ workspaceListHint(row) }}</div>
-                  </button>
+                  </article>
                 </div>
               </section>
 
@@ -744,6 +815,7 @@ onMounted(() => {
                     </div>
                   </div>
                   <div class="library-preview-actions">
+                    <el-button size="small" plain @click="copyItem(activeWorkspaceRow)">复制</el-button>
                     <el-button size="small" plain @click="openEditDialog(activeWorkspaceRow)">编辑</el-button>
                     <el-button
                       v-if="canDelete"
@@ -1169,6 +1241,13 @@ onMounted(() => {
   overflow: auto;
 }
 
+.library-entry-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .library-entry-button {
   width: 100%;
   padding: 11px 12px;
@@ -1183,12 +1262,22 @@ onMounted(() => {
     transform 0.2s ease;
 }
 
+.library-entry-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
 .library-entry-button:hover {
   border-color: #cbd5e1;
   transform: translateY(-1px);
 }
 
-.library-entry-button.active {
+.library-entry-item.active .library-entry-button {
   border-color: #8fb2be;
   background: rgba(143, 178, 190, 0.12);
 }

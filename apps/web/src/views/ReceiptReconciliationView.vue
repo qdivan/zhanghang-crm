@@ -268,7 +268,7 @@ watch(
             <strong>{{ formatAmount(data?.opening_balance ?? 0) }}</strong>
           </article>
           <article class="receipt-mobile-stat-card">
-            <span>借方合计</span>
+            <span>本期收款</span>
             <strong>{{ formatAmount(data?.total_received ?? 0) }}</strong>
           </article>
           <article class="receipt-mobile-stat-card">
@@ -342,7 +342,7 @@ watch(
         <template v-else>
           <article
             v-for="row in visibleEntries"
-            :key="`${row.occurred_at}-${row.customer_name}-${row.debit_amount}`"
+            :key="`${row.occurred_at}-${row.customer_name}-${row.amount}`"
             class="receipt-mobile-item"
           >
             <div class="receipt-mobile-top">
@@ -350,13 +350,12 @@ watch(
                 <div class="receipt-mobile-company">{{ row.customer_name }}</div>
                 <div class="receipt-mobile-summary">{{ row.summary }}</div>
               </div>
-              <div class="receipt-mobile-amount">{{ formatAmount(row.debit_amount - row.credit_amount) }}</div>
+              <div class="receipt-mobile-amount">{{ formatAmount(row.amount) }}</div>
             </div>
             <div class="receipt-mobile-meta">
               <span>{{ row.occurred_at }}</span>
               <span>{{ buildVoucherNo(row) }}</span>
               <span>{{ row.receipt_account }}</span>
-              <span>余额 {{ formatAmount(row.balance) }}</span>
               <span>{{ row.actor_username || "-" }}</span>
             </div>
           </article>
@@ -424,16 +423,16 @@ watch(
       </div>
       <div class="receipt-header-stats">
         <div class="receipt-stat-block">
-          <span class="receipt-stat-label">期初借方</span>
-          <strong class="receipt-stat-value">{{ formatAmount(data?.opening_debit ?? 0) }}</strong>
-        </div>
-        <div class="receipt-stat-block">
-          <span class="receipt-stat-label">期初贷方</span>
-          <strong class="receipt-stat-value">{{ formatAmount(data?.opening_credit ?? 0) }}</strong>
-        </div>
-        <div class="receipt-stat-block">
           <span class="receipt-stat-label">期初余额</span>
           <strong class="receipt-stat-value">{{ formatAmount(data?.opening_balance ?? 0) }}</strong>
+        </div>
+        <div class="receipt-stat-block">
+          <span class="receipt-stat-label">本期收款</span>
+          <strong class="receipt-stat-value">{{ formatAmount(data?.total_received ?? 0) }}</strong>
+        </div>
+        <div class="receipt-stat-block">
+          <span class="receipt-stat-label">收款笔数</span>
+          <strong class="receipt-stat-value">{{ data?.payment_count ?? 0 }}</strong>
         </div>
       </div>
     </section>
@@ -502,25 +501,24 @@ watch(
         <div class="receipt-main-head">
           <div>
             <div class="receipt-main-title">{{ selectedAccountLabel }}</div>
-            <div class="receipt-main-copy">按银行日记账口径查看借方、贷方和运行余额。</div>
+            <div class="receipt-main-copy">这里只看收款流水，金额和入账账户会更直接。</div>
           </div>
           <el-tag size="small" type="success" effect="plain">{{ visibleEntries.length }} 条流水</el-tag>
         </div>
 
         <div v-if="isMobile" v-loading="loading" class="receipt-mobile-list">
-          <article v-for="row in visibleEntries" :key="`${row.occurred_at}-${row.customer_name}-${row.debit_amount}`" class="receipt-mobile-item">
+          <article v-for="row in visibleEntries" :key="`${row.occurred_at}-${row.customer_name}-${row.amount}`" class="receipt-mobile-item">
             <div class="receipt-mobile-top">
               <div>
                 <div class="receipt-mobile-company">{{ row.customer_name }}</div>
                 <div class="receipt-mobile-summary">{{ row.summary }}</div>
               </div>
-              <div class="receipt-mobile-amount">{{ formatAmount(row.debit_amount - row.credit_amount) }}</div>
+              <div class="receipt-mobile-amount">{{ formatAmount(row.amount) }}</div>
             </div>
             <div class="receipt-mobile-meta">
               <span>{{ row.occurred_at }}</span>
               <span>{{ buildVoucherNo(row) }}</span>
               <span>{{ row.receipt_account }}</span>
-              <span>余额 {{ formatAmount(row.balance) }}</span>
               <span>{{ row.actor_username || '-' }}</span>
             </div>
           </article>
@@ -535,10 +533,8 @@ watch(
           </el-table-column>
           <el-table-column prop="customer_name" label="公司名称" min-width="160" show-overflow-tooltip />
           <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
-          <el-table-column prop="debit_amount" label="借方" width="112" />
-          <el-table-column prop="credit_amount" label="贷方" width="112" />
+          <el-table-column prop="amount" label="金额" width="112" />
           <el-table-column prop="receipt_account" label="入账账户" width="180" show-overflow-tooltip />
-          <el-table-column prop="balance" label="余额" width="118" />
           <el-table-column prop="actor_username" label="记录人" width="92" />
         </el-table>
       </div>

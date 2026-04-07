@@ -49,6 +49,13 @@ const moreEntries: MobileMoreEntry[] = [
       Boolean(user?.granted_read_modules.includes("BILLING")),
   },
   {
+    key: "customer-matters",
+    label: "重要事项",
+    description: "跟收费并行的客户提醒和办理事项。",
+    path: "/m/customer-matters",
+    group: "resources",
+  },
+  {
     key: "common-library",
     label: "常用资料",
     description: "查模板、资料和公开内容。",
@@ -166,6 +173,10 @@ const mobileMappings: RouteMapping[] = [
   {
     match: /^\/customers\/(\d+)$/,
     build: (match, search) => `/m/customers/${match[1]}${search}`,
+  },
+  {
+    match: /^\/customer-matters$/,
+    build: (_match, search) => `/m/customer-matters${search}`,
   },
   {
     match: /^\/billing$/,

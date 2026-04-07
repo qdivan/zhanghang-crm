@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,7 +22,12 @@ from app.models import (
 )
 from app.schemas.customer import (
     CustomerDetailOut,
+    CustomerDeleteBlockerOut,
+    CustomerImportResultOut,
+    CustomerImportRowResultOut,
     CustomerListOut,
+    CustomerMatterSummaryOut,
+    CustomerSuggestOut,
     CustomerTimelineEntryOut,
     CustomerTimelineEventCreate,
     CustomerTimelineEventOut,
@@ -30,6 +35,11 @@ from app.schemas.customer import (
     CustomerUpdate,
 )
 from app.services.audit import write_operation_log
+from app.services.customer_spreadsheet import (
+    build_customer_export_bytes,
+    build_customer_template_bytes,
+    parse_customer_import_file,
+)
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
 from app.services.soft_delete import active_filter, mark_deleted
@@ -42,6 +52,257 @@ def _get_customer_or_404(db: Session, customer_id: int) -> Customer:
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     return customer
+
+
+def _apply_customer_scope_stmt(stmt, db: Session, current_user: User):
+    has_customer_read_grant = False
+    if current_user.role == "ACCOUNTANT":
+        has_customer_read_grant = has_module_read_grant(db, current_user.id, "CUSTOMER")
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+    elif current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
+        stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
+    return stmt
+
+
+def _customer_service_start_display(lead: Lead) -> str:
+    return (lead.service_start_text or "").strip() or (lead.contact_start_date.isoformat() if lead.contact_start_date else "")
+
+
+def _format_customer_code(seq: Optional[int], suffix: str) -> str:
+    if not seq:
+        return ""
+    token = str(int(seq)).zfill(4)
+    postfix = (suffix or "").strip().upper()
+    return f"{token}{postfix}" if postfix else token
+
+
+def _default_customer_code_suffix(source: str, intro: str) -> str:
+    normalized_source = (source or "").strip()
+    normalized_intro = (intro or "").strip()
+    if normalized_source == "Sally直播":
+        return "S"
+    if normalized_source == "麦总":
+        return "M"
+    if normalized_intro == "麦总":
+        return "M"
+    return "A"
+
+
+def _next_customer_code_seq(db: Session) -> int:
+    current_max = db.execute(select(func.max(Customer.customer_code_seq))).scalar() or 0
+    return int(current_max) + 1
+
+
+def _normalize_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _parse_date_text(value: str) -> Optional[date]:
+    raw = _normalize_text(value)
+    if not raw:
+        return None
+    normalized = raw.replace(".", "-").replace("/", "-")
+    if len(normalized) == 7:
+        normalized = f"{normalized}-01"
+    if len(normalized) >= 10:
+        normalized = normalized[:10]
+    try:
+        return date.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(f"日期格式不正确：{raw}") from exc
+
+
+def _parse_customer_code(value: str) -> tuple[int, str]:
+    raw = _normalize_text(value).upper()
+    if not raw:
+        raise ValueError("客户编号不能为空")
+    digit_part = ""
+    suffix_part = ""
+    for char in raw:
+        if char.isdigit() and not suffix_part:
+            digit_part += char
+            continue
+        suffix_part += char
+    if not digit_part:
+        raise ValueError(f"客户编号格式不正确：{raw}")
+    return int(digit_part), suffix_part
+
+
+def _resolve_import_accountant_id(
+    db: Session,
+    current_user: User,
+    username: str,
+    *,
+    existing_customer: Optional[Customer] = None,
+) -> int:
+    normalized = _normalize_text(username)
+    if not normalized:
+        if existing_customer is not None:
+            return existing_customer.assigned_accountant_id
+        raise ValueError("新增客户必须填写会计账号")
+    accountant = db.execute(
+        select(User).where(
+            User.username == normalized,
+            active_filter(User),
+        )
+    ).scalar_one_or_none()
+    if accountant is None or not accountant.is_active:
+        raise ValueError(f"会计账号不存在或已停用：{normalized}")
+    if accountant.role != "ACCOUNTANT":
+        raise ValueError(f"该账号不是会计：{normalized}")
+    if current_user.role == "MANAGER":
+        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+        if accountant.id not in managed_ids:
+            raise ValueError(f"部门经理不能把客户导入给非直属会计：{normalized}")
+    return accountant.id
+
+
+def _find_customer_for_import(
+    db: Session,
+    *,
+    customer_id_text: str,
+    customer_code_text: str,
+) -> Optional[Customer]:
+    normalized_id = _normalize_text(customer_id_text)
+    normalized_code = _normalize_text(customer_code_text).upper()
+
+    customer_by_id: Optional[Customer] = None
+    customer_by_code: Optional[Customer] = None
+
+    if normalized_id:
+        if not normalized_id.isdigit():
+            raise ValueError(f"客户ID不是有效数字：{normalized_id}")
+        customer_by_id = db.execute(
+            select(Customer).where(Customer.id == int(normalized_id), active_filter(Customer))
+        ).scalar_one_or_none()
+        if customer_by_id is None:
+            raise ValueError(f"客户ID不存在或已删除：{normalized_id}")
+
+    if normalized_code:
+        customer_by_code = db.execute(
+            select(Customer).where(Customer.customer_code == normalized_code, active_filter(Customer))
+        ).scalar_one_or_none()
+        if customer_by_id is not None and customer_by_code is not None and customer_by_id.id != customer_by_code.id:
+            raise ValueError("客户ID与客户编号对应的不是同一位客户")
+
+    return customer_by_id or customer_by_code
+
+
+def _serialize_customer_export_row(customer: Customer, lead: Lead, accountant_username: str) -> dict[str, object]:
+    return {
+        "customer_id": customer.id,
+        "customer_code": customer.customer_code or _format_customer_code(customer.customer_code_seq, customer.customer_code_suffix),
+        "name": customer.name,
+        "contact_name": customer.contact_name,
+        "phone": customer.phone,
+        "status": customer.status,
+        "accountant_username": accountant_username,
+        "grade": lead.grade or "",
+        "region": lead.region or "",
+        "country": lead.country or "",
+        "service_start_text": lead.service_start_text or "",
+        "company_nature": lead.company_nature or "",
+        "service_mode": lead.service_mode or "",
+        "contact_wechat": lead.contact_wechat or "",
+        "other_contact": lead.other_contact or "",
+        "main_business": lead.main_business or "",
+        "source": lead.source or "",
+        "intro": lead.intro or "",
+        "fee_standard": lead.fee_standard or "",
+        "first_billing_period": lead.first_billing_period or "",
+        "reminder_value": lead.reminder_value or "",
+        "next_reminder_at": lead.next_reminder_at,
+        "notes": lead.notes or "",
+    }
+
+
+def _build_customer_delete_blockers(db: Session, customer: Customer) -> list[CustomerDeleteBlockerOut]:
+    blockers: list[CustomerDeleteBlockerOut] = []
+
+    billing_count = (
+        db.execute(
+            select(func.count(BillingRecord.id)).where(
+                BillingRecord.customer_id == customer.id,
+                active_filter(BillingRecord),
+            )
+        ).scalar()
+        or 0
+    )
+    if billing_count > 0:
+        blockers.append(
+            CustomerDeleteBlockerOut(
+                type="BILLING_RECORD",
+                count=int(billing_count),
+                label="收费项目",
+                message="该客户下还有收费项目，请先删除或处理收费项目后再删除客户。",
+                href=f"/billing?view=records&customerId={customer.id}",
+                filters={"view": "records", "customerId": customer.id},
+            )
+        )
+
+    payment_count = (
+        db.execute(
+            select(func.count(BillingPayment.id)).where(
+                BillingPayment.customer_id == customer.id,
+                active_filter(BillingPayment),
+            )
+        ).scalar()
+        or 0
+    )
+    if payment_count > 0:
+        blockers.append(
+            CustomerDeleteBlockerOut(
+                type="BILLING_PAYMENT",
+                count=int(payment_count),
+                label="收款单",
+                message="该客户下还有收款单，请先删除或冲正收款单后再删除客户。",
+                href=f"/billing?view=payments&customerId={customer.id}",
+                filters={"view": "payments", "customerId": customer.id},
+            )
+        )
+
+    matter_count = (
+        db.execute(
+            select(func.count(CustomerTimelineEvent.id)).where(CustomerTimelineEvent.customer_id == customer.id)
+        ).scalar()
+        or 0
+    )
+    if matter_count > 0:
+        blockers.append(
+            CustomerDeleteBlockerOut(
+                type="CUSTOMER_MATTER",
+                count=int(matter_count),
+                label="重要事项",
+                message="该客户还有重要事项或客户记录，请先处理后再删除客户。",
+                href=f"/customer-matters?customerId={customer.id}",
+                filters={"customerId": customer.id},
+            )
+        )
+
+    address_count = (
+        db.execute(
+            select(func.count(AddressResourceCompany.id)).where(
+                AddressResourceCompany.customer_id == customer.id,
+                active_filter(AddressResourceCompany),
+            )
+        ).scalar()
+        or 0
+    )
+    if address_count > 0:
+        blockers.append(
+            CustomerDeleteBlockerOut(
+                type="ADDRESS_RESOURCE_COMPANY",
+                count=int(address_count),
+                label="挂靠地址服务公司",
+                message="该客户仍关联挂靠地址服务公司，请先移除地址关联后再删除客户。",
+                href=f"/address-resources?customerId={customer.id}",
+                filters={"customerId": customer.id},
+            )
+        )
+
+    return blockers
 
 
 def _ensure_customer_access(
@@ -433,10 +694,6 @@ def list_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    has_customer_read_grant = False
-    if current_user.role == "ACCOUNTANT":
-        has_customer_read_grant = has_module_read_grant(db, current_user.id, "CUSTOMER")
-
     stmt = (
         select(
             Customer,
@@ -470,14 +727,11 @@ def list_customers(
                 Customer.name.ilike(key),
                 Customer.contact_name.ilike(key),
                 Customer.phone.ilike(key),
+                Customer.customer_code.ilike(key),
                 User.username.ilike(key),
             )
         )
-    if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
-    elif current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
-        stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
+    stmt = _apply_customer_scope_stmt(stmt, db, current_user)
 
     rows = db.execute(stmt).all()
     result: list[CustomerListOut] = []
@@ -508,6 +762,9 @@ def list_customers(
         result.append(
             CustomerListOut(
                 id=customer.id,
+                customer_code_seq=customer.customer_code_seq,
+                customer_code_suffix=customer.customer_code_suffix or "",
+                customer_code=customer.customer_code or _format_customer_code(customer.customer_code_seq, customer.customer_code_suffix),
                 name=customer.name,
                 contact_name=customer.contact_name,
                 phone=customer.phone,
@@ -533,6 +790,468 @@ def list_customers(
                 source_last_followup_date=last_followup_date,
                 source_reminder_value=reminder_value or "",
                 created_at=customer.created_at,
+            )
+        )
+    return result
+
+
+@router.get("/import-template", dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))])
+def download_customer_import_template(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    content = build_customer_template_bytes()
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMER_IMPORT_TEMPLATE_DOWNLOADED",
+        entity_type="CUSTOMER_IMPORT",
+        entity_id="template",
+        detail="customer-import-template.xlsx",
+    )
+    db.commit()
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="customer-import-template.xlsx"'},
+    )
+
+
+@router.get("/export")
+def export_customers(
+    keyword: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Customer, User.username, Lead)
+        .join(User, Customer.assigned_accountant_id == User.id)
+        .join(Lead, Customer.source_lead_id == Lead.id)
+        .where(active_filter(Customer), active_filter(Lead))
+        .order_by(Customer.id.desc())
+    )
+    if keyword:
+        key = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Customer.name.ilike(key),
+                Customer.contact_name.ilike(key),
+                Customer.phone.ilike(key),
+                Customer.customer_code.ilike(key),
+                User.username.ilike(key),
+            )
+        )
+    stmt = _apply_customer_scope_stmt(stmt, db, current_user)
+
+    export_rows = [
+        _serialize_customer_export_row(customer, lead, accountant_username)
+        for customer, accountant_username, lead in db.execute(stmt).all()
+    ]
+    content = build_customer_export_bytes(export_rows)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMERS_EXPORTED",
+        entity_type="CUSTOMER",
+        entity_id="export",
+        detail=f"count={len(export_rows)},keyword={keyword or ''}",
+    )
+    db.commit()
+    filename = f"customers-export-{date.today().isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/import",
+    response_model=CustomerImportResultOut,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN", "MANAGER"))],
+)
+async def import_customers(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先选择导入文件")
+    if not filename.lower().endswith((".xlsx", ".csv")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅支持 .xlsx 或 .csv 文件")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="导入文件为空")
+
+    try:
+        parsed_rows = parse_customer_import_file(filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if not parsed_rows:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模板里没有可导入的数据行")
+
+    created_count = 0
+    updated_count = 0
+    skipped_count = 0
+    error_count = 0
+    row_results: list[CustomerImportRowResultOut] = []
+
+    for row_number, row in parsed_rows:
+        company_name = _normalize_text(row.get("name", ""))
+        try:
+            with db.begin_nested():
+                existing_customer = _find_customer_for_import(
+                    db,
+                    customer_id_text=row.get("customer_id", ""),
+                    customer_code_text=row.get("customer_code", ""),
+                )
+                if existing_customer is not None:
+                    _ensure_customer_access(existing_customer, current_user, db, for_write=True)
+                    lead = db.execute(
+                        select(Lead).where(Lead.id == existing_customer.source_lead_id, active_filter(Lead))
+                    ).scalar_one_or_none()
+                    if lead is None:
+                        raise ValueError("来源线索不存在，无法更新该客户")
+
+                    changed = False
+                    imported_name = company_name
+                    if imported_name and imported_name != existing_customer.name:
+                        existing_customer.name = imported_name
+                        lead.name = imported_name
+                        for record in existing_customer.billing_records:
+                            record.customer_name = imported_name
+                        changed = True
+
+                    imported_contact_name = _normalize_text(row.get("contact_name", ""))
+                    if imported_contact_name and imported_contact_name != existing_customer.contact_name:
+                        existing_customer.contact_name = imported_contact_name
+                        lead.contact_name = imported_contact_name
+                        changed = True
+
+                    imported_phone = _normalize_text(row.get("phone", ""))
+                    if imported_phone and imported_phone != existing_customer.phone:
+                        existing_customer.phone = imported_phone
+                        lead.phone = imported_phone
+                        changed = True
+
+                    imported_status = _normalize_text(row.get("status", "")).upper()
+                    if imported_status:
+                        if current_user.role == "MANAGER" and imported_status != existing_customer.status:
+                            raise ValueError("部门经理不能通过导入修改客户状态")
+                        if imported_status != existing_customer.status:
+                            existing_customer.status = imported_status
+                            changed = True
+
+                    accountant_id = _resolve_import_accountant_id(
+                        db,
+                        current_user,
+                        row.get("accountant_username", ""),
+                        existing_customer=existing_customer,
+                    )
+                    if accountant_id != existing_customer.assigned_accountant_id:
+                        existing_customer.assigned_accountant_id = accountant_id
+                        changed = True
+
+                    imported_code = _normalize_text(row.get("customer_code", "")).upper()
+                    if imported_code:
+                        seq, suffix = _parse_customer_code(imported_code)
+                        normalized_code = _format_customer_code(seq, suffix)
+                        duplicate = db.execute(
+                            select(Customer).where(
+                                Customer.customer_code == normalized_code,
+                                Customer.id != existing_customer.id,
+                                active_filter(Customer),
+                            )
+                        ).scalar_one_or_none()
+                        if duplicate is not None:
+                            raise ValueError(f"客户编号已被其他客户使用：{normalized_code}")
+                        if existing_customer.customer_code and existing_customer.customer_code != normalized_code:
+                            raise ValueError(
+                                f"当前客户已有编号 {existing_customer.customer_code}，如需修改请单独处理"
+                            )
+                        if not existing_customer.customer_code:
+                            existing_customer.customer_code_seq = seq
+                            existing_customer.customer_code_suffix = suffix
+                            existing_customer.customer_code = normalized_code
+                            changed = True
+
+                    text_field_pairs = [
+                        ("lead_grade", "grade"),
+                        ("lead_region", "region"),
+                        ("lead_country", "country"),
+                        ("lead_service_start_text", "service_start_text"),
+                        ("lead_company_nature", "company_nature"),
+                        ("lead_service_mode", "service_mode"),
+                        ("lead_contact_wechat", "contact_wechat"),
+                        ("lead_other_contact", "other_contact"),
+                        ("lead_main_business", "main_business"),
+                        ("lead_source", "source"),
+                        ("lead_intro", "intro"),
+                        ("lead_fee_standard", "fee_standard"),
+                        ("lead_first_billing_period", "first_billing_period"),
+                        ("lead_reminder_value", "reminder_value"),
+                        ("lead_notes", "notes"),
+                    ]
+                    for _, field_name in text_field_pairs:
+                        imported_value = _normalize_text(row.get(field_name, ""))
+                        if not imported_value:
+                            continue
+                        current_value = _normalize_text(getattr(lead, field_name))
+                        if imported_value != current_value:
+                            setattr(lead, field_name, imported_value)
+                            changed = True
+
+                    imported_next_reminder = _normalize_text(row.get("next_reminder_at", ""))
+                    if imported_next_reminder:
+                        parsed_next_reminder = _parse_date_text(imported_next_reminder)
+                        if parsed_next_reminder != lead.next_reminder_at:
+                            lead.next_reminder_at = parsed_next_reminder
+                            changed = True
+
+                    if changed:
+                        updated_count += 1
+                        row_results.append(
+                            CustomerImportRowResultOut(
+                                row_number=row_number,
+                                company_name=existing_customer.name,
+                                action="UPDATED",
+                                message="客户信息已更新",
+                            )
+                        )
+                    else:
+                        skipped_count += 1
+                        row_results.append(
+                            CustomerImportRowResultOut(
+                                row_number=row_number,
+                                company_name=existing_customer.name,
+                                action="SKIPPED",
+                                message="没有检测到变化，已跳过",
+                            )
+                        )
+                    continue
+
+                if not company_name:
+                    raise ValueError("新增客户必须填写公司名称")
+                contact_name = _normalize_text(row.get("contact_name", "")) or company_name
+                phone = _normalize_text(row.get("phone", ""))
+                source = _normalize_text(row.get("source", "")) or "Excel导入"
+                intro = _normalize_text(row.get("intro", ""))
+                accountant_id = _resolve_import_accountant_id(
+                    db,
+                    current_user,
+                    row.get("accountant_username", ""),
+                    existing_customer=None,
+                )
+                imported_code = _normalize_text(row.get("customer_code", "")).upper()
+                if imported_code:
+                    code_seq, code_suffix = _parse_customer_code(imported_code)
+                else:
+                    code_seq = _next_customer_code_seq(db)
+                    code_suffix = _default_customer_code_suffix(source, intro)
+                normalized_code = _format_customer_code(code_seq, code_suffix)
+                duplicate_code = db.execute(
+                    select(Customer).where(Customer.customer_code == normalized_code, active_filter(Customer))
+                ).scalar_one_or_none()
+                if duplicate_code is not None:
+                    raise ValueError(f"客户编号已存在：{normalized_code}")
+
+                parsed_service_date = _parse_date_text(row.get("service_start_text", ""))
+                parsed_next_reminder = _parse_date_text(row.get("next_reminder_at", ""))
+
+                lead = Lead(
+                    template_type="CONVERSION",
+                    name=company_name,
+                    contact_name=contact_name,
+                    phone=phone,
+                    region=_normalize_text(row.get("region", "")),
+                    country=_normalize_text(row.get("country", "")),
+                    source=source,
+                    contact_wechat=_normalize_text(row.get("contact_wechat", "")),
+                    other_contact=_normalize_text(row.get("other_contact", "")),
+                    contact_start_date=parsed_service_date or date.today(),
+                    service_start_text=_normalize_text(row.get("service_start_text", "")),
+                    company_nature=_normalize_text(row.get("company_nature", "")),
+                    service_mode=_normalize_text(row.get("service_mode", "")),
+                    main_business=_normalize_text(row.get("main_business", "")),
+                    intro=intro,
+                    fee_standard=_normalize_text(row.get("fee_standard", "")),
+                    first_billing_period=_normalize_text(row.get("first_billing_period", "")),
+                    status="CONVERTED",
+                    next_reminder_at=parsed_next_reminder,
+                    reminder_value=_normalize_text(row.get("reminder_value", "")),
+                    notes=_normalize_text(row.get("notes", "")),
+                    grade=_normalize_text(row.get("grade", "")),
+                    owner_id=current_user.id,
+                )
+                db.add(lead)
+                db.flush()
+
+                customer = Customer(
+                    name=company_name,
+                    contact_name=contact_name,
+                    phone=phone,
+                    status=_normalize_text(row.get("status", "")).upper() or "ACTIVE",
+                    assigned_accountant_id=accountant_id,
+                    customer_code_seq=code_seq,
+                    customer_code_suffix=code_suffix,
+                    customer_code=normalized_code,
+                    source_lead_id=lead.id,
+                )
+                db.add(customer)
+                db.flush()
+
+                created_count += 1
+                row_results.append(
+                    CustomerImportRowResultOut(
+                        row_number=row_number,
+                        company_name=company_name,
+                        action="CREATED",
+                        message=f"客户已新增，编号 {normalized_code}",
+                    )
+                )
+        except (HTTPException, ValueError) as exc:
+            error_count += 1
+            message = exc.detail if isinstance(exc, HTTPException) else str(exc)
+            row_results.append(
+                CustomerImportRowResultOut(
+                    row_number=row_number,
+                    company_name=company_name or f"第 {row_number} 行",
+                    action="ERROR",
+                    message=str(message),
+                )
+            )
+
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMERS_IMPORTED",
+        entity_type="CUSTOMER",
+        entity_id=filename,
+        detail=(
+            f"created={created_count},updated={updated_count},"
+            f"skipped={skipped_count},error={error_count}"
+        ),
+    )
+    db.commit()
+    return CustomerImportResultOut(
+        created_count=created_count,
+        updated_count=updated_count,
+        skipped_count=skipped_count,
+        error_count=error_count,
+        rows=row_results,
+    )
+
+
+@router.get("/suggest", response_model=list[CustomerSuggestOut])
+def suggest_customers(
+    keyword: str = Query(default="", min_length=1),
+    limit: int = Query(default=12, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    key = keyword.strip()
+    if not key:
+        return []
+    stmt = (
+        select(Customer)
+        .where(active_filter(Customer))
+        .where(
+            or_(
+                Customer.name.ilike(f"%{key}%"),
+                Customer.contact_name.ilike(f"%{key}%"),
+                Customer.phone.ilike(f"%{key}%"),
+                Customer.customer_code.ilike(f"%{key}%"),
+            )
+        )
+        .order_by(Customer.created_at.desc(), Customer.id.desc())
+        .limit(limit)
+    )
+    stmt = _apply_customer_scope_stmt(stmt, db, current_user)
+    rows = db.execute(stmt).scalars().all()
+    return [
+        CustomerSuggestOut(
+            id=item.id,
+            name=item.name,
+            contact_name=item.contact_name,
+            phone=item.phone,
+            customer_code=item.customer_code or _format_customer_code(item.customer_code_seq, item.customer_code_suffix),
+            label=" / ".join(
+                [
+                    part
+                    for part in [
+                        (item.customer_code or _format_customer_code(item.customer_code_seq, item.customer_code_suffix)),
+                        item.name,
+                        item.contact_name,
+                        item.phone,
+                    ]
+                    if part
+                ]
+            ),
+        )
+        for item in rows
+    ]
+
+
+@router.get("/matters/summary", response_model=list[CustomerMatterSummaryOut])
+def list_customer_matter_summaries(
+    keyword: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    stmt = (
+        select(Customer, Lead)
+        .join(Lead, Customer.source_lead_id == Lead.id)
+        .where(active_filter(Customer), active_filter(Lead))
+        .order_by(Customer.id.desc())
+    )
+    if keyword:
+        key = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Customer.name.ilike(key),
+                Customer.contact_name.ilike(key),
+                Customer.phone.ilike(key),
+                Customer.customer_code.ilike(key),
+                Lead.main_business.ilike(key),
+            )
+        )
+    stmt = _apply_customer_scope_stmt(stmt, db, current_user)
+
+    rows = db.execute(stmt).all()
+    customer_ids = [customer.id for customer, _ in rows]
+    event_rows = db.execute(
+        select(CustomerTimelineEvent)
+        .where(CustomerTimelineEvent.customer_id.in_(customer_ids))
+        .order_by(CustomerTimelineEvent.occurred_at.desc(), CustomerTimelineEvent.id.desc())
+    ).scalars().all() if customer_ids else []
+
+    event_map: dict[int, list[CustomerTimelineEvent]] = {}
+    for item in event_rows:
+        event_map.setdefault(item.customer_id, []).append(item)
+
+    result: list[CustomerMatterSummaryOut] = []
+    for customer, lead in rows:
+        events = event_map.get(customer.id, [])
+        open_events = [item for item in events if (item.status or "").upper() == "OPEN"]
+        latest_reminder = max((item.reminder_at for item in open_events if item.reminder_at is not None), default=None)
+        latest_progress_row = events[0] if events else None
+        latest_progress = ""
+        if latest_progress_row is not None:
+            latest_progress = (latest_progress_row.result or "").strip() or (latest_progress_row.content or "").strip()
+        result.append(
+            CustomerMatterSummaryOut(
+                customer_id=customer.id,
+                customer_name=customer.name,
+                customer_code=customer.customer_code or _format_customer_code(customer.customer_code_seq, customer.customer_code_suffix),
+                customer_contact_name=customer.contact_name,
+                service_start_display=_customer_service_start_display(lead),
+                current_service_summary=(lead.main_business or "").strip() or (lead.fee_standard or "").strip() or "-",
+                open_item_count=len(open_events),
+                latest_reminder_at=latest_reminder,
+                latest_progress=latest_progress,
             )
         )
     return result
@@ -569,6 +1288,9 @@ def get_customer_detail(
 
     return CustomerDetailOut(
         id=customer.id,
+        customer_code_seq=customer.customer_code_seq,
+        customer_code_suffix=customer.customer_code_suffix or "",
+        customer_code=customer.customer_code or _format_customer_code(customer.customer_code_seq, customer.customer_code_suffix),
         name=customer.name,
         contact_name=customer.contact_name,
         phone=customer.phone,
@@ -600,21 +1322,16 @@ def delete_customer(
     expected_name = (customer.name or "").strip() or (customer.contact_name or "").strip() or f"客户#{customer.id}"
     if (confirm_name or "").strip() != expected_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
-
-    billing_count = (
-        db.execute(
-            select(func.count(BillingRecord.id)).where(BillingRecord.customer_id == customer.id, active_filter(BillingRecord))
-        ).scalar()
-        or 0
-    )
-    if billing_count > 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer has billing records, cannot delete")
-
-    payment_count = (
-        db.execute(select(func.count(BillingPayment.id)).where(BillingPayment.customer_id == customer.id)).scalar() or 0
-    )
-    if payment_count > 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer has payment records, cannot delete")
+    blockers = _build_customer_delete_blockers(db, customer)
+    if blockers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "reason": "DEPENDENCY_BLOCKED",
+                "message": "该客户还有关联记录，需先处理这些记录后才能删除。",
+                "blockers": [item.model_dump() for item in blockers],
+            },
+        )
 
     for item in db.execute(
         select(AddressResourceCompany).where(
@@ -633,6 +1350,42 @@ def delete_customer(
         entity_type="CUSTOMER",
         entity_id=customer.id,
         detail=f"name={expected_name}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{customer_id}/timeline-events/{event_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_customer_timeline_event(
+    customer_id: int,
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    customer = _get_customer_or_404(db, customer_id)
+    _ensure_customer_access(customer, current_user, db, for_write=True)
+
+    event = db.execute(
+        select(CustomerTimelineEvent).where(
+            CustomerTimelineEvent.id == event_id,
+            CustomerTimelineEvent.customer_id == customer_id,
+        )
+    ).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="客户记录不存在")
+
+    db.delete(event)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="CUSTOMER_TIMELINE_EVENT_DELETED",
+        entity_type="CUSTOMER_TIMELINE",
+        entity_id=event.id,
+        detail=f"customer_id={customer.id},content={(event.content or '').strip()}",
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

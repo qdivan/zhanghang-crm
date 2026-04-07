@@ -166,6 +166,9 @@ class Customer(SoftDeleteMixin, Base):
     phone: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
     assigned_accountant_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    customer_code_seq: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    customer_code_suffix: Mapped[str] = mapped_column(String(8), default="")
+    customer_code: Mapped[str] = mapped_column(String(32), default="", index=True)
     source_customer_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     source_lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -451,7 +454,7 @@ class BillingExecutionLog(Base):
         return self.actor.username
 
 
-class BillingPayment(Base):
+class BillingPayment(SoftDeleteMixin, Base):
     __tablename__ = "billing_payments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -460,6 +463,7 @@ class BillingPayment(Base):
     amount: Mapped[float] = mapped_column(Float, default=0)
     strategy: Mapped[str] = mapped_column(String(32), default="DUE_DATE_ASC")
     receipt_account: Mapped[str] = mapped_column(String(64), default="")
+    is_prepay: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -470,6 +474,10 @@ class BillingPayment(Base):
         back_populates="payment",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def payment_no(self) -> str:
+        return f"SK{self.id:04d}"
 
 
 class BillingPaymentAllocation(Base):

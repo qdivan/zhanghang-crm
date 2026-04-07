@@ -10,7 +10,7 @@ from app.core.security import hash_password
 from app.models import LdapSetting, User
 from app.services.soft_delete import restore_deleted
 
-VALID_ROLES = {"OWNER", "ADMIN", "ACCOUNTANT"}
+VALID_ROLES = {"OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"}
 
 
 def get_or_create_ldap_setting(db: Session) -> LdapSetting:

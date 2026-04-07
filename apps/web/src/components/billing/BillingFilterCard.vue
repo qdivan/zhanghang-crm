@@ -16,6 +16,7 @@ const props = defineProps<{
   filters: BillingFilters;
   canManageGrant: boolean;
   customers: CustomerListItem[];
+  accountantOptions: Array<{ id: number; username: string }>;
   receiptAccountOptions: Array<{ value: string; label: string }>;
 }>();
 
@@ -27,7 +28,7 @@ const emit = defineEmits<{
 
 const showAdvancedFilters = ref(false);
 const hasAdvancedValue = computed(() =>
-  Boolean(props.filters.contact_name || props.filters.payment_method || props.filters.status),
+  Boolean(props.filters.contact_name || props.filters.payment_method || props.filters.status || props.filters.accountant_id),
 );
 </script>
 
@@ -120,6 +121,16 @@ const hasAdvancedValue = computed(() =>
           @keyup.enter="emit('query')"
         />
       </el-form-item>
+      <el-form-item v-show="showAdvancedFilters" label="会计">
+        <el-select v-model="props.filters.accountant_id" placeholder="全部会计" clearable filterable>
+          <el-option
+            v-for="item in props.accountantOptions"
+            :key="`filter-accountant-${item.id}`"
+            :label="item.username"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
       <el-form-item v-show="showAdvancedFilters">
         <template #label>
           <span class="label-with-help">
@@ -165,7 +176,7 @@ const hasAdvancedValue = computed(() =>
       <el-form-item class="billing-filter-actions">
         <div class="action-group">
           <el-button size="small" @click="emit('query')">查询</el-button>
-          <el-button size="small" type="primary" @click="emit('create')">新增收费单</el-button>
+          <el-button size="small" type="primary" @click="emit('create')">新增收费项目</el-button>
           <el-button v-if="props.canManageGrant" size="small" type="primary" plain @click="emit('grant')">
             数据授权配置
           </el-button>

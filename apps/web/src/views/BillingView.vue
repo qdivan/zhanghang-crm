@@ -14,6 +14,7 @@ import BillingExecutionDrawer from "../components/billing/BillingExecutionDrawer
 import BillingFilterCard from "../components/billing/BillingFilterCard.vue";
 import BillingLedgerDialog from "../components/billing/BillingLedgerDialog.vue";
 import BillingLedgerPanel from "../components/billing/BillingLedgerPanel.vue";
+import BillingPaymentsCard from "../components/billing/BillingPaymentsCard.vue";
 import BillingRecordsCard from "../components/billing/BillingRecordsCard.vue";
 import BillingRenewDialog from "../components/billing/BillingRenewDialog.vue";
 import BillingSplitPaymentDialog from "../components/billing/BillingSplitPaymentDialog.vue";
@@ -30,6 +31,7 @@ import type {
   BillingCustomerSummaryItem,
   BillingExecutionLogItem,
   BillingLedgerData,
+  BillingPaymentItem,
   BillingPaymentSuggestion,
   BillingRecord,
   BillingSummaryData,
@@ -60,7 +62,6 @@ import {
   type BillingTerminateForm,
 } from "./billing/forms";
 import {
-  getMonthDateRange,
   isPaymentActivityType,
   normalizeActivityType,
   normalizePaymentMethod,
@@ -75,6 +76,7 @@ type UserLite = {
 };
 
 type BillingQuickView = "ALL" | "OVERDUE" | "DUE_SOON" | "OPEN" | "CLEARED";
+type BillingPrimaryView = "SUMMARY" | "RECORDS" | "PAYMENTS" | "LEDGER";
 
 type BillingRowInsights = {
   visibleOutstandingTotal: number;
@@ -110,6 +112,12 @@ const summary = ref<BillingSummaryData>({
   customer_summaries: [],
 });
 const summaryDateRange = ref<[string, string] | null>(null);
+const billingPrimaryView = ref<BillingPrimaryView>("SUMMARY");
+const paymentRows = ref<BillingPaymentItem[]>([]);
+const paymentLoading = ref(false);
+const paymentListHydrated = ref(false);
+const paymentUnallocatedOnly = ref(false);
+const allocatingPaymentRow = ref<BillingPaymentItem | null>(null);
 
 const billingQuickView = ref<BillingQuickView>("ALL");
 const filters = reactive(createBillingFilters());
@@ -118,6 +126,15 @@ const billingMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.bill
   quick_view: "ALL",
 });
 const customerFilterOptions = computed(() => customers.value);
+const accountantFilterOptions = computed(() => {
+  const seen = new Map<number, string>();
+  customers.value.forEach((item) => {
+    if (item.assigned_accountant_id && item.accountant_username) {
+      seen.set(item.assigned_accountant_id, item.accountant_username);
+    }
+  });
+  return Array.from(seen.entries()).map(([id, username]) => ({ id, username }));
+});
 
 const showCreateDialog = ref(false);
 const createCustomerId = ref<number | null>(null);
@@ -169,6 +186,7 @@ const canManageBillingLifecycle = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
 const canDeleteBillingRecord = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canDeletePayment = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const showTerminateDialog = ref(false);
 const terminating = ref(false);
 const terminateTargetRecord = ref<BillingRecord | null>(null);
@@ -380,16 +398,18 @@ const mobileHeadlineStats = computed(() => [
 
 const billingFilterChips = computed(() => {
   const selectedCustomer = customers.value.find((item) => item.id === filters.customer_id)?.name;
+  const selectedAccountant = accountantFilterOptions.value.find((item) => item.id === filters.accountant_id)?.username;
   return [
     filters.keyword ? { key: "keyword", label: `关键词：${filters.keyword}` } : null,
     selectedCustomer ? { key: "customer_id", label: `客户：${selectedCustomer}` } : null,
+    selectedAccountant ? { key: "accountant_id", label: `会计：${selectedAccountant}` } : null,
     filters.billing_month ? { key: "billing_month", label: `月份：${filters.billing_month}` } : null,
     filters.receipt_account ? { key: "receipt_account", label: `账户：${filters.receipt_account}` } : null,
     filters.contact_name ? { key: "contact_name", label: `联系人：${filters.contact_name}` } : null,
     filters.payment_method ? { key: "payment_method", label: `收款方式：${filters.payment_method}` } : null,
     filters.status ? { key: "status", label: `状态：${statusLabel(filters.status)}` } : null,
   ].filter(Boolean) as Array<{
-    key: "keyword" | "customer_id" | "billing_month" | "receipt_account" | "contact_name" | "payment_method" | "status";
+    key: "keyword" | "customer_id" | "accountant_id" | "billing_month" | "receipt_account" | "contact_name" | "payment_method" | "status";
     label: string;
   }>;
 });
@@ -401,6 +421,7 @@ function currentBillingFilterSnapshot() {
   return {
     keyword: filters.keyword,
     customer_id: filters.customer_id,
+    accountant_id: filters.accountant_id,
     billing_month: filters.billing_month,
     receipt_account: filters.receipt_account,
     contact_name: filters.contact_name,
@@ -484,6 +505,7 @@ async function fetchRecords() {
       params: {
         keyword: filters.keyword || undefined,
         customer_id: filters.customer_id || undefined,
+        accountant_id: filters.accountant_id || undefined,
         receipt_account: filters.receipt_account || undefined,
         contact_name: filters.contact_name || undefined,
       },
@@ -528,6 +550,7 @@ async function fetchSummary() {
     const params: Record<string, string | number | undefined> = {
       keyword: filters.keyword || undefined,
       customer_id: filters.customer_id || undefined,
+      accountant_id: filters.accountant_id || undefined,
       receipt_account: filters.receipt_account || undefined,
       billing_month: filters.billing_month || undefined,
       contact_name: filters.contact_name || undefined,
@@ -551,11 +574,34 @@ async function fetchSummary() {
   }
 }
 
+async function fetchPayments() {
+  paymentLoading.value = true;
+  try {
+    const params: Record<string, string | number | boolean | undefined> = {
+      keyword: filters.keyword || undefined,
+      customer_id: filters.customer_id || undefined,
+      accountant_id: filters.accountant_id || undefined,
+      receipt_account: filters.receipt_account || undefined,
+      date_from: summaryDateRange.value?.[0] || undefined,
+      date_to: summaryDateRange.value?.[1] || undefined,
+      unallocated_only: paymentUnallocatedOnly.value || undefined,
+    };
+    const resp = await apiClient.get<BillingPaymentItem[]>("/billing-records/payments", { params });
+    paymentRows.value = resp.data;
+  } catch (error: any) {
+    paymentRows.value = [];
+    ElMessage.error(error?.response?.data?.detail ?? "获取收款列表失败");
+  } finally {
+    paymentLoading.value = false;
+    paymentListHydrated.value = true;
+  }
+}
+
 async function runBillingQuery() {
   if (isMobileWorkflow.value) {
     billingMobileFilterMemory.saveState(currentBillingFilterSnapshot());
   }
-  await Promise.all([fetchRecords(), fetchSummary()]);
+  await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
 }
 
 const billingQuickFilters = computed(() => [
@@ -630,7 +676,7 @@ const billingRowActionItems = computed(() => {
       ? { key: "terminate", label: "提前终止", description: "按提前结束情况冲减费用。", danger: true }
       : null,
     canDeleteBillingRecord.value
-      ? { key: "delete", label: "删除收费单", description: "删除前需要输入客户名和摘要确认。", danger: true }
+      ? { key: "delete", label: "删除收费单", description: "删除后会移除这条收费项目；若已有收款会提示先处理收款单。", danger: true }
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
 });
@@ -773,6 +819,23 @@ function openCustomerLedgerSummary(row: BillingCustomerSummaryItem) {
   void openLedgerView(createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name));
 }
 
+function openPaymentCustomerLedger(row: BillingPaymentItem) {
+  void openLedgerView(createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name));
+}
+
+function openPaymentListView() {
+  billingPrimaryView.value = "PAYMENTS";
+  void fetchPayments();
+}
+
+function openRecordsView() {
+  billingPrimaryView.value = "RECORDS";
+}
+
+function openSummaryView() {
+  billingPrimaryView.value = "SUMMARY";
+}
+
 function openGrantSettings() {
   router.push({
     path: isMobileWorkflow.value ? "/m/admin/users" : "/admin/users",
@@ -848,6 +911,7 @@ function resetSplitPaymentForm(customerId: number | null = splitTargetRecord.val
   });
   splitAllocations.value = [];
   splitCustomerRecordCount.value = 0;
+  allocatingPaymentRow.value = null;
 }
 
 async function buildSplitSuggestions() {
@@ -895,6 +959,7 @@ async function openSplitPaymentDialog(record: BillingRecord) {
   }
   splitTargetRecord.value = record;
   showSplitPaymentDialog.value = true;
+  billingPrimaryView.value = "PAYMENTS";
   resetSplitPaymentForm(record.customer_id);
 }
 
@@ -903,7 +968,40 @@ function openSplitPaymentForCustomer(row?: BillingCustomerSummaryItem) {
     ? createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name)
     : null;
   showSplitPaymentDialog.value = true;
+  billingPrimaryView.value = "PAYMENTS";
   resetSplitPaymentForm(row?.customer_id ?? filters.customer_id ?? null);
+}
+
+function openSplitPaymentForCustomerId(customerId: number | null) {
+  if (!customerId) {
+    openSplitPaymentForCustomer();
+    return;
+  }
+  const fromSummary = summary.value.customer_summaries.find((item) => item.customer_id === customerId);
+  if (fromSummary) {
+    openSplitPaymentForCustomer(fromSummary);
+    return;
+  }
+  const matchedCustomer = customers.value.find((item) => item.id === customerId);
+  splitTargetRecord.value = matchedCustomer
+    ? createLedgerTargetRecord(customerId, matchedCustomer.name, matchedCustomer.contact_name)
+    : null;
+  showSplitPaymentDialog.value = true;
+  billingPrimaryView.value = "PAYMENTS";
+  resetSplitPaymentForm(customerId);
+}
+
+function openAllocatePayment(row: BillingPaymentItem) {
+  splitTargetRecord.value = createLedgerTargetRecord(row.customer_id, row.customer_name, row.customer_contact_name);
+  showSplitPaymentDialog.value = true;
+  billingPrimaryView.value = "PAYMENTS";
+  resetSplitPaymentForm(row.customer_id);
+  allocatingPaymentRow.value = row;
+  splitForm.occurred_at = row.occurred_at;
+  splitForm.amount = Number(row.unallocated_amount || 0);
+  splitForm.receipt_account = row.receipt_account;
+  splitForm.note = row.note || `预收款 ${row.payment_no} 手动分摊`;
+  splitForm.is_prepay = true;
 }
 
 function normalizeSplitAllocationValue(row: BillingSplitAllocationRow) {
@@ -915,8 +1013,8 @@ async function submitSplitPayment() {
     ElMessage.warning("请先选择收款单位");
     return;
   }
-  if (!splitAllocations.value.length) {
-    ElMessage.warning("请先生成分摊建议");
+  if (!splitForm.receipt_account.trim()) {
+    ElMessage.warning("请选择入账账户");
     return;
   }
   const validAllocations = splitAllocations.value
@@ -925,36 +1023,44 @@ async function submitSplitPayment() {
       billing_record_id: item.billing_record_id,
       allocated_amount: Number(item.allocated_amount),
     }));
-  if (!validAllocations.length) {
-    ElMessage.warning("请至少给一个项目分配金额");
+  if (allocatingPaymentRow.value && !validAllocations.length) {
+    ElMessage.warning("请至少选择一条应收单后再分摊预收款");
     return;
   }
-  if (Math.abs(splitRemainingAmount.value) > 0.01) {
+  if (!validAllocations.length && !splitForm.is_prepay) {
+    ElMessage.warning("当前没有可保存的分摊记录。如需先登记预收款，请打开“预收款”开关。");
+    return;
+  }
+  if (!splitForm.is_prepay && Math.abs(splitRemainingAmount.value) > 0.01) {
     ElMessage.warning("分摊金额合计必须等于收款总额");
-    return;
-  }
-  if (!splitForm.receipt_account.trim()) {
-    ElMessage.warning("请选择入账账户");
     return;
   }
 
   splitSubmitting.value = true;
   try {
-    await apiClient.post("/billing-records/payments", {
-      customer_id: splitForm.customer_id,
-      occurred_at: splitForm.occurred_at,
-      amount: splitForm.amount,
-      strategy: splitForm.strategy,
-      receipt_account: splitForm.receipt_account,
-      note: splitForm.note,
-      allocations: validAllocations,
-    });
-    ElMessage.success("收款分摊已保存");
+    if (allocatingPaymentRow.value) {
+      await apiClient.post(`/billing-records/payments/${allocatingPaymentRow.value.id}/allocate`, {
+        allocations: validAllocations,
+      });
+      ElMessage.success("预收款已分摊");
+    } else {
+      await apiClient.post("/billing-records/payments", {
+        customer_id: splitForm.customer_id,
+        occurred_at: splitForm.occurred_at,
+        amount: splitForm.amount,
+        strategy: splitForm.strategy,
+        receipt_account: splitForm.receipt_account,
+        is_prepay: splitForm.is_prepay,
+        note: splitForm.note,
+        allocations: validAllocations,
+      });
+      ElMessage.success(splitForm.is_prepay && !validAllocations.length ? "预收款已保存，后续可手动分摊" : "收款单已保存");
+    }
     showSplitPaymentDialog.value = false;
-    await fetchRecords();
-    await fetchSummary();
+    await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail ?? "保存收款分摊失败");
+    const detail = error?.response?.data?.detail;
+    ElMessage.error(detail?.message ?? detail ?? "保存收款单失败");
   } finally {
     splitSubmitting.value = false;
   }
@@ -981,32 +1087,63 @@ async function removeBillingRecord(row: BillingRecord) {
   }
   const expectedName = getBillingDeleteConfirmName(row);
   try {
-    const result = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这条收费单。`,
+    await ElMessageBox.confirm(
+      `确认删除这条收费项目吗？\n${expectedName}`,
       "删除收费单",
       {
         type: "warning",
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
       },
-    )) as { value: string };
-    if ((result.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
-    await apiClient.delete(`/billing-records/${row.id}`, {
-      params: { confirm_name: expectedName },
-    });
-    ElMessage.success("收费单已删除");
+    );
+    await apiClient.delete(`/billing-records/${row.id}`);
+    ElMessage.success("收费项目已删除");
     if (ledgerTargetRecord.value?.id === row.id) {
       clearLedgerPanel();
     }
-    await fetchRecords();
-    await fetchSummary();
+    await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
   } catch (error: any) {
     if (error === "cancel" || error?.message === "cancel") return;
-    ElMessage.error(error?.response?.data?.detail ?? "删除收费单失败");
+    const detail = error?.response?.data?.detail;
+    if (detail?.reason === "DEPENDENCY_BLOCKED" && Array.isArray(detail.blockers) && detail.blockers[0]?.href) {
+      try {
+        await ElMessageBox.confirm(
+          `${detail.message}\n是否现在跳到相关收款单处理？`,
+          "收费项目暂时不能删除",
+          {
+            type: "warning",
+            confirmButtonText: "去处理收款单",
+            cancelButtonText: "稍后处理",
+          },
+        );
+        router.push(detail.blockers[0].href);
+        billingPrimaryView.value = "PAYMENTS";
+      } catch {
+        // user cancelled follow-up navigation
+      }
+      return;
+    }
+    ElMessage.error(detail ?? "删除收费项目失败");
+  }
+}
+
+async function removePaymentRow(row: BillingPaymentItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除收款单 ${row.payment_no} 吗？删除后会撤回本次入账与分摊。`,
+      "删除收款单",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+      },
+    );
+    await apiClient.delete(`/billing-records/payments/${row.id}`);
+    ElMessage.success("收款单已删除");
+    await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
+  } catch (error: any) {
+    if (error === "cancel" || error?.message === "cancel") return;
+    ElMessage.error(error?.response?.data?.detail ?? "删除收款单失败");
   }
 }
 
@@ -1091,16 +1228,6 @@ function openReceiptReconciliation() {
   });
 }
 
-async function drillDownLedgerMonth(monthText: string) {
-  const range = getMonthDateRange(monthText);
-  if (!range) {
-    ElMessage.warning("月份格式无效，无法下钻");
-    return;
-  }
-  ledgerDateRange.value = range;
-  await fetchLedgerData();
-}
-
 async function resetLedgerDateFilter() {
   ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   await fetchLedgerData();
@@ -1112,6 +1239,7 @@ async function openLedgerView(row: BillingRecord) {
     return;
   }
   ledgerTargetRecord.value = row;
+  billingPrimaryView.value = "LEDGER";
   ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   ledgerData.value = null;
   await fetchLedgerData();
@@ -1128,9 +1256,18 @@ async function openLedgerDialog(row: BillingRecord) {
 }
 
 function clearLedgerPanel() {
+  billingPrimaryView.value = "SUMMARY";
   ledgerTargetRecord.value = null;
   ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
   ledgerData.value = null;
+  if (String(route.query.view || "").trim().toLowerCase() === "ledger") {
+    const nextQuery = { ...route.query };
+    delete nextQuery.view;
+    delete nextQuery.customer_id;
+    delete nextQuery.customerId;
+    delete nextQuery.customer_name;
+    void router.replace({ path: route.path, query: nextQuery });
+  }
 }
 
 function resetMobileFilters() {
@@ -1159,10 +1296,19 @@ function setBillingQuickView(view: BillingQuickView) {
 }
 
 function removeBillingFilterChip(
-  key: "keyword" | "customer_id" | "billing_month" | "receipt_account" | "contact_name" | "payment_method" | "status",
+  key:
+    | "keyword"
+    | "customer_id"
+    | "accountant_id"
+    | "billing_month"
+    | "receipt_account"
+    | "contact_name"
+    | "payment_method"
+    | "status",
 ) {
   if (key === "keyword") filters.keyword = "";
   if (key === "customer_id") filters.customer_id = null;
+  if (key === "accountant_id") filters.accountant_id = null;
   if (key === "billing_month") filters.billing_month = "";
   if (key === "receipt_account") filters.receipt_account = "";
   if (key === "contact_name") filters.contact_name = "";
@@ -1251,6 +1397,58 @@ function openBillingRowActions(row: BillingRecord) {
 function handleBillingRowActionSelect(action: string) {
   if (!selectedBillingActionRow.value) return;
   handleBillingMenuCommand(action, selectedBillingActionRow.value);
+}
+
+async function applyBillingRouteViewState() {
+  const queryView = String(route.query.view || "").trim().toLowerCase();
+  if (queryView === "records") billingPrimaryView.value = "RECORDS";
+  else if (queryView === "payments") billingPrimaryView.value = "PAYMENTS";
+  else if (queryView === "ledger") billingPrimaryView.value = "LEDGER";
+  else billingPrimaryView.value = "SUMMARY";
+
+  const customerToken = String(route.query.customer_id || route.query.customerId || "").trim();
+  const nextCustomerId = customerToken ? Number(customerToken) : null;
+  const normalizedCustomerId = nextCustomerId && Number.isFinite(nextCustomerId) ? nextCustomerId : null;
+  const unallocatedOnly = String(route.query.unallocated || "").trim() === "1";
+  let shouldQuery = false;
+
+  if (filters.customer_id !== normalizedCustomerId) {
+    filters.customer_id = normalizedCustomerId;
+    shouldQuery = true;
+  }
+  if (paymentUnallocatedOnly.value !== unallocatedOnly) {
+    paymentUnallocatedOnly.value = unallocatedOnly;
+    shouldQuery = true;
+  }
+
+  if (shouldQuery) {
+    await runBillingQuery();
+  }
+
+  if (billingPrimaryView.value === "LEDGER" && normalizedCustomerId) {
+    const matchedRow =
+      rows.value.find((item) => item.customer_id === normalizedCustomerId) ||
+      createLedgerTargetRecord(
+        normalizedCustomerId,
+        String(route.query.customer_name || "").trim() ||
+          customers.value.find((item) => item.id === normalizedCustomerId)?.name ||
+          summary.value.customer_summaries.find((item) => item.customer_id === normalizedCustomerId)?.customer_name ||
+          `客户#${normalizedCustomerId}`,
+        customers.value.find((item) => item.id === normalizedCustomerId)?.contact_name ||
+          summary.value.customer_summaries.find((item) => item.customer_id === normalizedCustomerId)?.customer_contact_name ||
+          "",
+      );
+    ledgerTargetRecord.value = matchedRow;
+    ledgerDateRange.value = copyDateRange(defaultLedgerDateRange.value);
+    await fetchLedgerData();
+  }
+
+  if (String(route.query.open_payment || "").trim() === "1") {
+    openSplitPaymentForCustomerId(normalizedCustomerId);
+    const nextQuery = { ...route.query };
+    delete nextQuery.open_payment;
+    await router.replace({ path: route.path, query: nextQuery });
+  }
 }
 
 async function handleRouteAction() {
@@ -1480,7 +1678,8 @@ onMounted(async () => {
     restoreSavedBillingFilters();
   }
   await runBillingQuery();
-  void fetchCustomers();
+  await fetchCustomers();
+  await applyBillingRouteViewState();
   await handleRouteAction();
   await handleBillingRouteQueue();
 });
@@ -1488,6 +1687,7 @@ onMounted(async () => {
 watch(
   () => route.fullPath,
   () => {
+    void applyBillingRouteViewState();
     void handleRouteAction();
     void handleBillingRouteQueue();
   },
@@ -1580,7 +1780,7 @@ watch(
             <el-button class="mobile-row-secondary-button" plain :icon="Filter" @click="showMobileFilters = true">
               筛选
             </el-button>
-            <el-button class="mobile-row-primary-button" type="primary" @click="openCreateDialog">新增收费单</el-button>
+            <el-button class="mobile-row-primary-button" type="primary" @click="openCreateDialog">新增收费项目</el-button>
           </div>
         </div>
         <div class="mobile-filter-presets">
@@ -1833,7 +2033,25 @@ watch(
   </template>
 
   <el-space v-else direction="vertical" fill :size="12">
+    <el-card shadow="never" class="billing-view-switch-card">
+      <div class="billing-view-switch">
+        <div>
+          <div class="billing-view-switch-title">收费工作台</div>
+          <div class="billing-view-switch-copy">把客户汇总、收费项目、收款列表和单客户往来账拆开看，页面会更干净。</div>
+        </div>
+        <div class="billing-view-switch-actions">
+          <el-button :type="billingPrimaryView === 'SUMMARY' ? 'primary' : 'default'" @click="openSummaryView">单位汇总</el-button>
+          <el-button :type="billingPrimaryView === 'RECORDS' ? 'primary' : 'default'" @click="openRecordsView">收费项目序时</el-button>
+          <el-button :type="billingPrimaryView === 'PAYMENTS' ? 'primary' : 'default'" @click="openPaymentListView">收款列表</el-button>
+          <el-tag v-if="billingPrimaryView === 'LEDGER' && ledgerTargetRecord" type="success" effect="plain">
+            当前：{{ ledgerTargetRecord.customer_name }} 往来账
+          </el-tag>
+        </div>
+      </div>
+    </el-card>
+
     <BillingSummaryPanel
+      v-if="billingPrimaryView === 'SUMMARY'"
       :summary="summary"
       :loading="summaryLoading"
       v-model:date-range="summaryDateRange"
@@ -1843,19 +2061,24 @@ watch(
       @query-summary="fetchSummary"
       @open-receipt-ledger="openReceiptReconciliation"
       @open-payment="openSplitPaymentForCustomer"
+      @open-payment-list="openPaymentListView"
       @open-customer-ledger="openCustomerLedgerSummary"
     />
 
     <BillingFilterCard
+      v-if="billingPrimaryView !== 'LEDGER'"
       :filters="filters"
       :can-manage-grant="canManageGrant"
       :customers="customerFilterOptions"
+      :accountant-options="accountantFilterOptions"
       :receipt-account-options="receiptAccountOptions"
       @query="runBillingQuery"
       @create="openCreateDialog"
       @grant="openGrantSettings"
     />
+
     <BillingRecordsCard
+      v-if="billingPrimaryView === 'RECORDS'"
       :loading="loading"
       :rows="rows"
       :active-customer-id="ledgerTargetRecord?.customer_id ?? null"
@@ -1873,7 +2096,20 @@ watch(
       @terminate="openTerminateDialog"
       @delete="removeBillingRecord"
     />
-    <div ref="ledgerPanelAnchor">
+
+    <BillingPaymentsCard
+      v-else-if="billingPrimaryView === 'PAYMENTS'"
+      :loading="paymentLoading"
+      :rows="paymentRows"
+      :unallocated-only="paymentUnallocatedOnly"
+      :can-delete="canDeletePayment"
+      @toggle-unallocated="paymentUnallocatedOnly = $event; fetchPayments()"
+      @remove="removePaymentRow"
+      @allocate="openAllocatePayment"
+      @ledger="openPaymentCustomerLedger"
+    />
+
+    <div v-if="billingPrimaryView === 'LEDGER'" ref="ledgerPanelAnchor">
       <BillingLedgerPanel
         v-if="ledgerTargetRecord && !isMobile"
         v-model:date-range="ledgerDateRange"
@@ -1884,7 +2120,6 @@ watch(
         @query="fetchLedgerData"
         @reset="resetLedgerDateFilter"
         @clear="clearLedgerPanel"
-        @drill-month="drillDownLedgerMonth"
       />
     </div>
   </el-space>
@@ -1918,7 +2153,6 @@ watch(
     :data="ledgerData"
     @query="fetchLedgerData"
     @reset="resetLedgerDateFilter"
-    @drill-month="drillDownLedgerMonth"
   />
 
   <BillingSplitPaymentDialog
@@ -1932,6 +2166,8 @@ watch(
     :remaining-amount="splitRemainingAmount"
     :suggestion-loading="splitSuggestionLoading"
     :submitting="splitSubmitting"
+    :allocation-only="Boolean(allocatingPaymentRow)"
+    :allocation-target-label="allocatingPaymentRow?.payment_no || ''"
     @normalize-allocation="normalizeSplitAllocationValue"
     @build-suggestions="buildSplitSuggestions"
     @submit="submitSplitPayment"
@@ -1982,6 +2218,38 @@ watch(
 </template>
 
 <style scoped>
+.billing-view-switch-card {
+  border-color: #dfe6e8;
+}
+
+.billing-view-switch {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.billing-view-switch-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #172330;
+}
+
+.billing-view-switch-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #667085;
+}
+
+.billing-view-switch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .billing-mobile-page {
   gap: 12px;
 }
@@ -2304,6 +2572,10 @@ watch(
 }
 
 @media (max-width: 420px) {
+  .billing-view-switch {
+    flex-direction: column;
+  }
+
   .billing-mobile-stats,
   .billing-mobile-extra-grid {
     grid-template-columns: 1fr;

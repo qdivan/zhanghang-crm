@@ -27,6 +27,7 @@ from app.schemas.billing import (
     BillingExecutionLogCreate,
     BillingExecutionLogOut,
     BillingPaymentAllocationOut,
+    BillingPaymentAllocateRequest,
     BillingPaymentCreate,
     BillingPaymentOut,
     BillingReceiptAccountEntryOut,
@@ -608,10 +609,133 @@ def _default_summary_date_window(
     return resolved_date_from, resolved_date_to
 
 
+def _get_payment_or_404(db: Session, payment_id: int) -> BillingPayment:
+    payment = db.execute(
+        select(BillingPayment)
+        .options(
+            selectinload(BillingPayment.allocations).selectinload(BillingPaymentAllocation.billing_record),
+            selectinload(BillingPayment.customer).selectinload(Customer.accountant),
+        )
+        .where(BillingPayment.id == payment_id, active_filter(BillingPayment))
+    ).scalar_one_or_none()
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    return payment
+
+
+def _ensure_payment_access(payment: BillingPayment, db: Session, current_user: User, *, for_write: bool = False) -> None:
+    customer = payment.customer
+    if customer is None:
+        customer = db.execute(
+            select(Customer).where(Customer.id == payment.customer_id, active_filter(Customer))
+        ).scalar_one_or_none()
+    if customer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    if for_write:
+        _ensure_customer_billing_write_access(customer, db, current_user)
+        return
+    _ensure_customer_billing_read_access(customer, db, current_user)
+
+
+def _payment_allocation_totals(payment: BillingPayment) -> tuple[float, float, str]:
+    allocated_amount = float(sum(float(item.allocated_amount or 0) for item in payment.allocations))
+    unallocated_amount = max(float(payment.amount or 0) - allocated_amount, 0.0)
+    if allocated_amount <= 0.01:
+        status_value = "UNALLOCATED"
+    elif unallocated_amount <= 0.01:
+        status_value = "ALLOCATED"
+    else:
+        status_value = "PARTIAL"
+    return allocated_amount, unallocated_amount, status_value
+
+
+def _serialize_payment(payment: BillingPayment) -> BillingPaymentOut:
+    customer = payment.customer
+    allocated_amount, unallocated_amount, status_value = _payment_allocation_totals(payment)
+    payment_summary = (payment.note or "").strip()
+    if not payment_summary:
+        if payment.is_prepay and unallocated_amount > 0.01:
+            payment_summary = "预收款待分摊"
+        elif payment.allocations:
+            first_record = payment.allocations[0].billing_record
+            if first_record is not None:
+                payment_summary = _build_payment_summary(first_record, "", payment.payment_no)
+        if not payment_summary:
+            payment_summary = f"收款单 {payment.payment_no}"
+    return BillingPaymentOut(
+        id=payment.id,
+        payment_no=payment.payment_no,
+        customer_id=payment.customer_id,
+        customer_name=customer.name if customer is not None else "",
+        customer_contact_name=customer.contact_name if customer is not None else "",
+        accountant_username=customer.accountant.username if customer is not None and customer.accountant is not None else "",
+        occurred_at=payment.occurred_at,
+        amount=float(payment.amount or 0),
+        strategy=payment.strategy,
+        receipt_account=_normalize_receipt_account(payment.receipt_account),
+        summary=payment_summary,
+        is_prepay=bool(payment.is_prepay),
+        allocated_amount=float(allocated_amount),
+        unallocated_amount=float(unallocated_amount),
+        allocation_status=status_value,
+        note=payment.note,
+        created_by_user_id=payment.created_by_user_id,
+        created_at=payment.created_at,
+        allocations=[
+            BillingPaymentAllocationOut(
+                id=item.id,
+                billing_record_id=item.billing_record_id,
+                allocated_amount=float(item.allocated_amount or 0),
+            )
+            for item in payment.allocations
+        ],
+    )
+
+
+def _apply_payment_allocations(
+    db: Session,
+    *,
+    payment: BillingPayment,
+    allocation_map: dict[int, float],
+    target_record_map: dict[int, BillingRecord],
+    occurred_at: date,
+    note: str,
+    actor_id: int,
+) -> None:
+    for record_id, allocation_amount in allocation_map.items():
+        record = target_record_map[record_id]
+        amount_value = float(allocation_amount)
+        allocation = BillingPaymentAllocation(
+            payment_id=payment.id,
+            billing_record_id=record.id,
+            allocated_amount=amount_value,
+        )
+        db.add(allocation)
+        record.received_amount = float(record.received_amount or 0) + amount_value
+        _refresh_record_amounts(record)
+        db.add(
+            BillingActivity(
+                billing_record_id=record.id,
+                payment_id=payment.id,
+                activity_type="PAYMENT",
+                occurred_at=occurred_at,
+                actor_id=actor_id,
+                amount=amount_value,
+                payment_nature="ONE_OFF",
+                receipt_account=_normalize_receipt_account(payment.receipt_account),
+                is_prepay=bool(payment.is_prepay),
+                is_settlement=False,
+                content=f"客户统一收款分摊（{payment.payment_no}）",
+                note=note,
+            )
+        )
+
+
 @router.get("", response_model=list[BillingRecordOut])
 def list_billing_records(
     keyword: Optional[str] = Query(default=None),
     customer_id: Optional[int] = Query(default=None),
+    accountant_id: Optional[int] = Query(default=None),
     receipt_account: Optional[str] = Query(default=None),
     contact_name: Optional[str] = Query(default=None),
     payment_method: Optional[str] = Query(default=None),
@@ -639,6 +763,8 @@ def list_billing_records(
         stmt = stmt.where(or_(*conditions))
     if customer_id:
         stmt = stmt.where(BillingRecord.customer_id == customer_id)
+    if accountant_id:
+        stmt = stmt.where(BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == accountant_id)))
     if receipt_account:
         normalized_account = _normalize_receipt_account(receipt_account)
         account_conditions = [
@@ -802,23 +928,19 @@ def update_billing_record(
 )
 def delete_billing_record(
     record_id: int,
-    confirm_name: str = Query(default=""),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     record = _get_record_or_404(db, record_id)
-    summary_text = (record.summary or "").strip() or (record.charge_category or "").strip() or f"收费单#{record.serial_no or record.id}"
-    customer_text = (record.customer_name or "").strip() or "未命名客户"
-    expected_name = f"{customer_text} · {summary_text}"
-    if (confirm_name or "").strip() != expected_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="删除确认名称不匹配")
-
-    allocation_count = (
-        db.execute(
-            select(func.count(BillingPaymentAllocation.id)).where(BillingPaymentAllocation.billing_record_id == record.id)
-        ).scalar()
-        or 0
-    )
+    linked_payment_rows = db.execute(
+        select(BillingPayment.id, BillingPayment.customer_id)
+        .join(BillingPaymentAllocation, BillingPaymentAllocation.payment_id == BillingPayment.id)
+        .where(
+            active_filter(BillingPayment),
+            BillingPaymentAllocation.billing_record_id == record.id,
+        )
+    ).all()
+    allocation_count = len(linked_payment_rows)
     payment_activity_count = (
         db.execute(
             select(func.count(BillingActivity.id)).where(
@@ -831,7 +953,24 @@ def delete_billing_record(
     if allocation_count > 0 or payment_activity_count > 0 or float(record.received_amount or 0) > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前收费单已有收款核销记录，不能删除",
+            detail={
+                "reason": "DEPENDENCY_BLOCKED",
+                "message": "当前收费项目已有收款核销记录，不能直接删除。",
+                "blockers": [
+                    {
+                        "type": "BILLING_PAYMENT",
+                        "count": allocation_count or payment_activity_count,
+                        "label": "收款单",
+                        "message": "请先处理关联收款单后再删除收费项目。",
+                        "href": f"/billing?view=payments&customerId={record.customer_id or ''}",
+                        "filters": {
+                            "view": "payments",
+                            "customerId": record.customer_id,
+                            "recordId": record.id,
+                        },
+                    }
+                ],
+            },
         )
 
     mark_deleted(record, current_user.id)
@@ -841,7 +980,7 @@ def delete_billing_record(
         action="BILLING_RECORD_DELETED",
         entity_type="BILLING",
         entity_id=record.id,
-        detail=f"serial_no={record.serial_no},name={expected_name}",
+        detail=f"serial_no={record.serial_no},customer={record.customer_name}",
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -1024,6 +1163,74 @@ def suggest_billing_payment_allocations(
     )
 
 
+@router.get("/payments", response_model=list[BillingPaymentOut])
+def list_billing_payments(
+    keyword: Optional[str] = Query(default=None),
+    customer_id: Optional[int] = Query(default=None),
+    accountant_id: Optional[int] = Query(default=None),
+    receipt_account: Optional[str] = Query(default=None),
+    date_from: Optional[date] = Query(default=None),
+    date_to: Optional[date] = Query(default=None),
+    unallocated_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="date_from must be <= date_to")
+
+    has_billing_read_grant = current_user.role == "ACCOUNTANT" and has_module_read_grant(db, current_user.id, "BILLING")
+    stmt = (
+        select(BillingPayment)
+        .options(
+            selectinload(BillingPayment.allocations).selectinload(BillingPaymentAllocation.billing_record),
+            selectinload(BillingPayment.customer).selectinload(Customer.accountant),
+        )
+        .join(Customer, BillingPayment.customer_id == Customer.id)
+        .where(active_filter(BillingPayment), active_filter(Customer))
+        .order_by(BillingPayment.occurred_at.desc(), BillingPayment.id.desc())
+    )
+    if current_user.role == "MANAGER":
+        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+    elif current_user.role == "ACCOUNTANT" and not has_billing_read_grant:
+        stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
+    if customer_id:
+        stmt = stmt.where(BillingPayment.customer_id == customer_id)
+    if accountant_id:
+        stmt = stmt.where(Customer.assigned_accountant_id == accountant_id)
+    if receipt_account:
+        stmt = stmt.where(BillingPayment.receipt_account == _normalize_receipt_account(receipt_account))
+    if date_from:
+        stmt = stmt.where(BillingPayment.occurred_at >= date_from)
+    if date_to:
+        stmt = stmt.where(BillingPayment.occurred_at <= date_to)
+    if keyword:
+        raw_key = keyword.strip()
+        key = f"%{raw_key}%"
+        stmt = stmt.where(
+            or_(
+                Customer.name.ilike(key),
+                Customer.contact_name.ilike(key),
+                BillingPayment.note.ilike(key),
+            )
+        )
+    payments = db.execute(stmt).scalars().all()
+    result = [_serialize_payment(item) for item in payments]
+    if keyword:
+        raw_key = keyword.strip().upper()
+        result = [
+            item
+            for item in result
+            if raw_key in item.payment_no.upper()
+            or raw_key in item.customer_name.upper()
+            or raw_key in item.customer_contact_name.upper()
+            or raw_key in item.summary.upper()
+        ]
+    if unallocated_only:
+        result = [item for item in result if item.unallocated_amount > 0.01]
+    return result
+
+
 @router.post("/payments", response_model=BillingPaymentOut, status_code=status.HTTP_201_CREATED)
 def create_billing_payment(
     payload: BillingPaymentCreate,
@@ -1039,67 +1246,64 @@ def create_billing_payment(
     for item in payload.allocations:
         current = allocation_map.get(item.billing_record_id, 0.0)
         allocation_map[item.billing_record_id] = float(current) + float(item.allocated_amount)
-    if not allocation_map:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No allocations provided")
 
     allocated_total = float(sum(allocation_map.values()))
-    if abs(allocated_total - float(payload.amount)) > 0.01:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Allocated total must equal payment amount")
+    payment_amount = float(payload.amount)
+    if not allocation_map:
+        if not payload.is_prepay:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "reason": "NO_ALLOCATIONS",
+                    "message": "当前客户暂无可分摊的应收单。如需先登记预收款，请勾选“预收款”后保存。",
+                },
+            )
+    elif not payload.is_prepay and abs(allocated_total - payment_amount) > 0.01:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分摊金额合计必须等于收款金额")
+    elif payload.is_prepay and allocated_total - payment_amount > 0.01:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分摊金额不能大于收款金额")
 
-    target_records = db.execute(
-        select(BillingRecord).where(
-            BillingRecord.customer_id == customer.id,
-            active_filter(BillingRecord),
-            BillingRecord.id.in_(list(allocation_map.keys())),
-        )
-    ).scalars().all()
-    if len(target_records) != len(allocation_map):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid billing records in allocations")
-    target_record_map = {item.id: item for item in target_records}
+    target_record_map: dict[int, BillingRecord] = {}
+    if allocation_map:
+        target_records = db.execute(
+            select(BillingRecord).where(
+                BillingRecord.customer_id == customer.id,
+                active_filter(BillingRecord),
+                BillingRecord.id.in_(list(allocation_map.keys())),
+            )
+        ).scalars().all()
+        if len(target_records) != len(allocation_map):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid billing records in allocations")
+        target_record_map = {item.id: item for item in target_records}
 
-    for record in target_records:
-        _ensure_billing_access(record, db, current_user, for_write=True)
+        for record in target_records:
+            _ensure_billing_access(record, db, current_user, for_write=True)
+            requested_amount = float(allocation_map.get(record.id, 0))
+            if requested_amount - float(record.outstanding_amount or 0) > 0.01:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分摊金额不能大于该收费项目未收金额")
 
     payment = BillingPayment(
         customer_id=customer.id,
         occurred_at=payload.occurred_at,
-        amount=float(payload.amount),
+        amount=payment_amount,
         strategy=payload.strategy,
         receipt_account=_normalize_receipt_account(payload.receipt_account),
+        is_prepay=bool(payload.is_prepay),
         note=(payload.note or "").strip(),
         created_by_user_id=current_user.id,
     )
     db.add(payment)
     db.flush()
 
-    for record_id, allocation_amount in allocation_map.items():
-        record = target_record_map[record_id]
-        amount_value = float(allocation_amount)
-        allocation = BillingPaymentAllocation(
-            payment_id=payment.id,
-            billing_record_id=record.id,
-            allocated_amount=amount_value,
-        )
-        db.add(allocation)
-
-        record.received_amount = float(record.received_amount or 0) + amount_value
-        _refresh_record_amounts(record)
-
-        db.add(
-            BillingActivity(
-                billing_record_id=record.id,
-                payment_id=payment.id,
-                activity_type="PAYMENT",
-                occurred_at=payload.occurred_at,
-                actor_id=current_user.id,
-                amount=amount_value,
-                payment_nature="ONE_OFF",
-                receipt_account=payment.receipt_account,
-                is_prepay=False,
-                is_settlement=False,
-                content=f"客户统一收款分摊（支付单#{payment.id}）",
-                note=(payload.note or "").strip(),
-            )
+    if allocation_map:
+        _apply_payment_allocations(
+            db,
+            payment=payment,
+            allocation_map=allocation_map,
+            target_record_map=target_record_map,
+            occurred_at=payload.occurred_at,
+            note=(payload.note or "").strip(),
+            actor_id=current_user.id,
         )
 
     write_operation_log(
@@ -1110,34 +1314,109 @@ def create_billing_payment(
         entity_id=payment.id,
         detail=(
             f"customer_id={customer.id},amount={payment.amount},"
-            f"allocations={len(allocation_map)},receipt_account={payment.receipt_account}"
+            f"allocations={len(allocation_map)},receipt_account={payment.receipt_account},"
+            f"is_prepay={'Y' if payment.is_prepay else 'N'}"
         ),
     )
     db.commit()
-    db.refresh(payment)
-    payment_allocations = db.execute(
-        select(BillingPaymentAllocation).where(BillingPaymentAllocation.payment_id == payment.id)
-    ).scalars().all()
+    return _serialize_payment(_get_payment_or_404(db, payment.id))
 
-    return BillingPaymentOut(
-        id=payment.id,
-        customer_id=payment.customer_id,
+
+@router.post("/payments/{payment_id}/allocate", response_model=BillingPaymentOut)
+def allocate_billing_payment(
+    payment_id: int,
+    payload: BillingPaymentAllocateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    payment = _get_payment_or_404(db, payment_id)
+    _ensure_payment_access(payment, db, current_user, for_write=True)
+
+    allocation_map: dict[int, float] = {}
+    for item in payload.allocations:
+        allocation_map[item.billing_record_id] = allocation_map.get(item.billing_record_id, 0.0) + float(item.allocated_amount)
+    if not allocation_map:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请至少选择一条收费项目")
+
+    allocated_amount, unallocated_amount, _ = _payment_allocation_totals(payment)
+    request_total = float(sum(allocation_map.values()))
+    if request_total - unallocated_amount > 0.01:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分摊金额不能大于当前待分摊金额")
+
+    target_records = db.execute(
+        select(BillingRecord).where(
+            BillingRecord.customer_id == payment.customer_id,
+            active_filter(BillingRecord),
+            BillingRecord.id.in_(list(allocation_map.keys())),
+        )
+    ).scalars().all()
+    if len(target_records) != len(allocation_map):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="存在无效的收费项目")
+    target_record_map = {item.id: item for item in target_records}
+    for record in target_records:
+        _ensure_billing_access(record, db, current_user, for_write=True)
+        if float(allocation_map[record.id]) - float(record.outstanding_amount or 0) > 0.01:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="分摊金额不能大于该收费项目未收金额")
+
+    _apply_payment_allocations(
+        db,
+        payment=payment,
+        allocation_map=allocation_map,
+        target_record_map=target_record_map,
         occurred_at=payment.occurred_at,
-        amount=float(payment.amount),
-        strategy=payment.strategy,
-        receipt_account=payment.receipt_account,
-        note=payment.note,
-        created_by_user_id=payment.created_by_user_id,
-        created_at=payment.created_at,
-        allocations=[
-            BillingPaymentAllocationOut(
-                id=item.id,
-                billing_record_id=item.billing_record_id,
-                allocated_amount=float(item.allocated_amount),
-            )
-            for item in payment_allocations
-        ],
+        note=(payment.note or "").strip(),
+        actor_id=current_user.id,
     )
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="BILLING_PAYMENT_ALLOCATED",
+        entity_type="BILLING_PAYMENT",
+        entity_id=payment.id,
+        detail=f"allocated_amount={request_total},before_allocated={allocated_amount}",
+    )
+    db.commit()
+    return _serialize_payment(_get_payment_or_404(db, payment.id))
+
+
+@router.delete(
+    "/payments/{payment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_billing_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    payment = _get_payment_or_404(db, payment_id)
+
+    for allocation in list(payment.allocations):
+        record = allocation.billing_record or db.execute(
+            select(BillingRecord).where(BillingRecord.id == allocation.billing_record_id, active_filter(BillingRecord))
+        ).scalar_one_or_none()
+        if record is not None:
+            record.received_amount = max(float(record.received_amount or 0) - float(allocation.allocated_amount or 0), 0.0)
+            _refresh_record_amounts(record)
+        db.delete(allocation)
+
+    payment_activities = db.execute(
+        select(BillingActivity).where(BillingActivity.payment_id == payment.id)
+    ).scalars().all()
+    for activity in payment_activities:
+        db.delete(activity)
+
+    mark_deleted(payment, current_user.id)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="BILLING_PAYMENT_DELETED",
+        entity_type="BILLING_PAYMENT",
+        entity_id=payment.id,
+        detail=f"payment_no={payment.payment_no},customer_id={payment.customer_id}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/ledger", response_model=BillingLedgerOut)
@@ -1204,7 +1483,7 @@ def get_customer_billing_ledger(
 
     payment_rows = db.execute(
         select(BillingPayment)
-        .where(BillingPayment.customer_id == customer.id)
+        .where(BillingPayment.customer_id == customer.id, active_filter(BillingPayment))
         .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
     ).scalars().all()
     for payment in payment_rows:
@@ -1221,7 +1500,8 @@ def get_customer_billing_ledger(
                 payment.id,
                 BillingLedgerEntryOut(
                     occurred_at=payment.occurred_at,
-                    summary=(payment.note or "").strip() or f"统一收款入账（{receipt_account}）",
+                    summary=(payment.note or "").strip()
+                    or ("预收款待分摊" if payment.is_prepay else f"收款单 {payment.payment_no}"),
                     receivable_amount=0.0,
                     received_amount=float(payment.amount or 0),
                     balance=0.0,
@@ -1366,7 +1646,7 @@ def get_receipt_account_ledger(
     payment_rows = db.execute(
         select(BillingPayment, Customer, User.username)
         .join(Customer, BillingPayment.customer_id == Customer.id)
-        .where(active_filter(Customer))
+        .where(active_filter(BillingPayment), active_filter(Customer))
         .outerjoin(User, BillingPayment.created_by_user_id == User.id)
         .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
     ).all()
@@ -1390,7 +1670,8 @@ def get_receipt_account_ledger(
                     occurred_at=payment.occurred_at,
                     receipt_account=account_name,
                     customer_name=customer.name,
-                    summary=(payment.note or "").strip() or "统一收款入账",
+                    summary=(payment.note or "").strip() or ("预收款待分摊" if payment.is_prepay else f"收款单 {payment.payment_no}"),
+                    amount=float(payment.amount or 0),
                     debit_amount=float(payment.amount or 0),
                     credit_amount=0.0,
                     balance=0.0,
@@ -1431,6 +1712,7 @@ def get_receipt_account_ledger(
                     receipt_account=account_name,
                     customer_name=customer.name,
                     summary=_build_payment_summary(record, activity.content, account_name),
+                    amount=float(activity.amount or 0),
                     debit_amount=float(activity.amount or 0),
                     credit_amount=0.0,
                     balance=0.0,
@@ -1456,6 +1738,7 @@ def get_receipt_account_ledger(
                 receipt_account=item.receipt_account,
                 customer_name=item.customer_name,
                 summary=item.summary,
+                amount=debit_amount,
                 debit_amount=debit_amount,
                 credit_amount=credit_amount,
                 balance=float(running_balance),
@@ -1503,6 +1786,7 @@ def get_receipt_account_ledger(
 def billing_summary(
     keyword: Optional[str] = Query(default=None),
     customer_id: Optional[int] = Query(default=None),
+    accountant_id: Optional[int] = Query(default=None),
     receipt_account: Optional[str] = Query(default=None),
     billing_month: Optional[str] = Query(default=None),
     date_from: Optional[date] = Query(default=None),
@@ -1545,6 +1829,7 @@ def billing_summary(
             payment_method=payment_method,
             status_value=status_value,
         )
+        and (not accountant_id or (item.customer is not None and item.customer.assigned_accountant_id == accountant_id))
     ]
 
     payment_method_buckets: dict[str, int] = {}
@@ -1558,6 +1843,7 @@ def billing_summary(
 
     customer_summary_map: dict[int, dict[str, object]] = {}
     today_value = date.today()
+    customer_ids = sorted({item.customer_id for item in filtered_records if item.customer_id is not None})
     for record in filtered_records:
         if record.customer_id is None:
             continue
@@ -1589,15 +1875,59 @@ def billing_summary(
         if due_date is not None and due_date < today_value and float(record.outstanding_amount or 0) > 0:
             bucket["overdue_count"] = int(bucket["overdue_count"]) + 1
 
-        for activity in record.activities:
-            if activity.activity_type != "PAYMENT" or float(activity.amount or 0) <= 0:
+    if customer_ids:
+        payment_rows = db.execute(
+            select(BillingPayment, Customer)
+            .join(Customer, BillingPayment.customer_id == Customer.id)
+            .where(
+                active_filter(BillingPayment),
+                active_filter(Customer),
+                BillingPayment.customer_id.in_(customer_ids),
+            )
+            .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
+        ).all()
+        for payment, customer in payment_rows:
+            if receipt_account and not _matches_receipt_account(payment.receipt_account or "", receipt_account):
+                continue
+            if accountant_id and customer.assigned_accountant_id != accountant_id:
+                continue
+            bucket = customer_summary_map.get(customer.id)
+            if bucket is None:
+                continue
+            amount_value = float(payment.amount or 0)
+            if payment.occurred_at < summary_date_from:
+                bucket["opening_arrears"] = float(bucket["opening_arrears"]) - amount_value
+            elif summary_date_from <= payment.occurred_at <= summary_date_to:
+                bucket["period_received"] = float(bucket["period_received"]) + amount_value
+
+            latest_at = bucket["latest_activity_at"]
+            if latest_at is None or payment.occurred_at >= latest_at:
+                bucket["latest_activity_at"] = payment.occurred_at
+                bucket["latest_activity_content"] = (payment.note or "").strip() or f"收款单 {payment.payment_no}"
+
+        direct_payment_rows = db.execute(
+            select(BillingActivity, BillingRecord)
+            .join(BillingRecord, BillingActivity.billing_record_id == BillingRecord.id)
+            .where(
+                BillingActivity.payment_id.is_(None),
+                BillingActivity.activity_type == "PAYMENT",
+                BillingActivity.amount > 0,
+                active_filter(BillingRecord),
+                BillingRecord.customer_id.in_(customer_ids),
+            )
+            .order_by(BillingActivity.occurred_at.asc(), BillingActivity.id.asc())
+        ).all()
+        for activity, record in direct_payment_rows:
+            if receipt_account and not _matches_receipt_account(activity.receipt_account or "", receipt_account):
+                continue
+            bucket = customer_summary_map.get(record.customer_id or 0)
+            if bucket is None:
                 continue
             amount_value = float(activity.amount or 0)
             if activity.occurred_at < summary_date_from:
                 bucket["opening_arrears"] = float(bucket["opening_arrears"]) - amount_value
             elif summary_date_from <= activity.occurred_at <= summary_date_to:
                 bucket["period_received"] = float(bucket["period_received"]) + amount_value
-
             latest_at = bucket["latest_activity_at"]
             if latest_at is None or activity.occurred_at >= latest_at:
                 bucket["latest_activity_at"] = activity.occurred_at
@@ -1607,6 +1937,7 @@ def billing_summary(
                     or _build_payment_summary(record, "", _normalize_receipt_account(activity.receipt_account))
                 )
 
+    for bucket in customer_summary_map.values():
         bucket["ending_outstanding"] = (
             float(bucket["opening_arrears"])
             + float(bucket["period_receivable"])
@@ -1616,28 +1947,42 @@ def billing_summary(
     receipt_account_distribution: list[dict[str, object]] = []
     if current_user.role in {"OWNER", "ADMIN", "MANAGER"}:
         account_totals: dict[str, dict[str, object]] = {}
-        counted_payment_ids: set[int] = set()
-
-        for record in filtered_records:
-            for activity in record.activities:
-                if activity.activity_type != "PAYMENT" or float(activity.amount or 0) <= 0:
+        if customer_ids:
+            payment_rows = db.execute(
+                select(BillingPayment, Customer)
+                .join(Customer, BillingPayment.customer_id == Customer.id)
+                .where(
+                    active_filter(BillingPayment),
+                    active_filter(Customer),
+                    BillingPayment.customer_id.in_(customer_ids),
+                )
+            ).all()
+            for payment, customer in payment_rows:
+                if accountant_id and customer.assigned_accountant_id != accountant_id:
                     continue
+                account_name = _normalize_receipt_account(payment.receipt_account)
+                if receipt_account and not _matches_receipt_account(account_name, receipt_account):
+                    continue
+                bucket = account_totals.setdefault(account_name, {"payment_count": 0, "total_amount": 0.0})
+                bucket["payment_count"] = int(bucket["payment_count"]) + 1
+                bucket["total_amount"] = float(bucket["total_amount"]) + float(payment.amount or 0)
+
+            direct_payment_rows = db.execute(
+                select(BillingActivity)
+                .join(BillingRecord, BillingActivity.billing_record_id == BillingRecord.id)
+                .where(
+                    BillingActivity.payment_id.is_(None),
+                    BillingActivity.activity_type == "PAYMENT",
+                    BillingActivity.amount > 0,
+                    active_filter(BillingRecord),
+                    BillingRecord.customer_id.in_(customer_ids),
+                )
+            ).scalars().all()
+            for activity in direct_payment_rows:
                 account_name = _normalize_receipt_account(activity.receipt_account)
                 if receipt_account and not _matches_receipt_account(account_name, receipt_account):
                     continue
-
-                bucket = account_totals.setdefault(
-                    account_name,
-                    {"payment_count": 0, "total_amount": 0.0},
-                )
-
-                if activity.payment_id:
-                    bucket["total_amount"] = float(bucket["total_amount"]) + float(activity.amount or 0)
-                    if activity.payment_id not in counted_payment_ids:
-                        counted_payment_ids.add(activity.payment_id)
-                        bucket["payment_count"] = int(bucket["payment_count"]) + 1
-                    continue
-
+                bucket = account_totals.setdefault(account_name, {"payment_count": 0, "total_amount": 0.0})
                 bucket["payment_count"] = int(bucket["payment_count"]) + 1
                 bucket["total_amount"] = float(bucket["total_amount"]) + float(activity.amount or 0)
 

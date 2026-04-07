@@ -126,12 +126,19 @@ def _ensure_schema_compatibility() -> None:
 
     if "billing_payments" in table_names:
         payment_columns = {item["name"] for item in inspector.get_columns("billing_payments")}
-        if "receipt_account" not in payment_columns:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "receipt_account" not in payment_columns:
                 conn.execute(
                     text(
                         "ALTER TABLE billing_payments "
                         "ADD COLUMN receipt_account VARCHAR(64) DEFAULT ''"
+                    )
+                )
+            if "is_prepay" not in payment_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE billing_payments "
+                        "ADD COLUMN is_prepay BOOLEAN DEFAULT 0"
                     )
                 )
 
@@ -160,9 +167,15 @@ def _ensure_schema_compatibility() -> None:
 
     if "customers" in table_names:
         customer_columns = {item["name"] for item in inspector.get_columns("customers")}
-        if "source_customer_id" not in customer_columns:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "source_customer_id" not in customer_columns:
                 conn.execute(text("ALTER TABLE customers ADD COLUMN source_customer_id INTEGER"))
+            if "customer_code_seq" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_seq INTEGER"))
+            if "customer_code_suffix" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_suffix VARCHAR(8) DEFAULT ''"))
+            if "customer_code" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code VARCHAR(32) DEFAULT ''"))
 
     if "customer_timeline_events" in table_names:
         timeline_columns = {item["name"] for item in inspector.get_columns("customer_timeline_events")}
@@ -251,6 +264,7 @@ def _ensure_schema_compatibility() -> None:
         "leads",
         "customers",
         "billing_records",
+        "billing_payments",
         "todo_items",
         "data_access_grants",
         "address_resources",

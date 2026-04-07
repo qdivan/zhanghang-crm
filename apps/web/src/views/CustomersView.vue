@@ -12,7 +12,14 @@ import { useMobileFilterMemory } from "../composables/useMobileFilterMemory";
 import { useResponsive } from "../composables/useResponsive";
 import { isMobileAppPath } from "../mobile/config";
 import { useAuthStore } from "../stores/auth";
-import type { BillingRecord, BillingCreatePayload, CustomerListItem } from "../types";
+import type {
+  BillingRecord,
+  BillingCreatePayload,
+  CustomerDeleteBlockerItem,
+  CustomerImportResultItem,
+  CustomerListItem,
+  CustomerSuggestItem,
+} from "../types";
 import {
   createEmptyBillingDraft,
   prepareBillingDraftsForSubmit,
@@ -35,6 +42,9 @@ const selectedCustomerActionRow = ref<CustomerListItem | null>(null);
 const customerMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.customers", { keyword: "" });
 const canManageGrant = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canDeleteCustomer = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canImportCustomers = computed(
+  () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
+);
 const canCreateBilling = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
 );
@@ -50,7 +60,7 @@ const customerRowActionItems = computed(() => {
   return [
     { key: "lead", label: "开发来源", description: "回看这位客户的开发来源与线索详情。" },
     canCreateBilling.value
-      ? { key: "billing", label: "新增收费", description: "直接给当前客户补收费单。" }
+      ? { key: "billing", label: "新增收费项目", description: "直接给当前客户补收费项目。" }
       : null,
     canDeleteCustomer.value
       ? { key: "delete", label: "删除客户", description: "删除前需要输入客户名称确认。", danger: true }
@@ -61,6 +71,14 @@ const showCreateBillingDialog = ref(false);
 const creatingBilling = ref(false);
 const selectedCustomerForBilling = ref<CustomerListItem | null>(null);
 const billingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)]);
+const keywordSuggestions = ref<CustomerSuggestItem[]>([]);
+const showDeleteBlockersDialog = ref(false);
+const deleteBlockers = ref<CustomerDeleteBlockerItem[]>([]);
+const deleteBlockedCustomer = ref<CustomerListItem | null>(null);
+const importFileInput = ref<HTMLInputElement | null>(null);
+const downloadingTemplate = ref(false);
+const exportingCustomers = ref(false);
+const importingCustomers = ref(false);
 
 function mobileMetrics(row: CustomerListItem) {
   return [
@@ -133,6 +151,143 @@ function openCreateBillingDialog(row: CustomerListItem) {
   showCreateBillingDialog.value = true;
 }
 
+async function fetchCustomerSuggestions(queryString: string, callback: (items: CustomerSuggestItem[]) => void) {
+  const keywordValue = queryString.trim();
+  if (!keywordValue) {
+    keywordSuggestions.value = [];
+    callback([]);
+    return;
+  }
+  try {
+    const resp = await apiClient.get<CustomerSuggestItem[]>("/customers/suggest", {
+      params: { keyword: keywordValue, limit: 8 },
+    });
+    keywordSuggestions.value = resp.data;
+    callback(resp.data);
+  } catch {
+    callback([]);
+  }
+}
+
+function applyKeywordSuggestion(item: CustomerSuggestItem) {
+  keyword.value = item.name;
+  void fetchCustomers();
+}
+
+function openDeleteBlockerTarget(blocker: CustomerDeleteBlockerItem) {
+  showDeleteBlockersDialog.value = false;
+  if (blocker.href) {
+    router.push(blocker.href);
+  }
+}
+
+function fileNameFromDisposition(disposition: string | undefined, fallback: string) {
+  const match = disposition?.match(/filename=\"?([^\";]+)\"?/i);
+  return match?.[1] || fallback;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+async function downloadCustomerTemplate() {
+  downloadingTemplate.value = true;
+  try {
+    const resp = await apiClient.get("/customers/import-template", { responseType: "blob" });
+    downloadBlob(
+      resp.data,
+      fileNameFromDisposition(resp.headers["content-disposition"], "customer-import-template.xlsx"),
+    );
+    ElMessage.success("客户导入模板已下载");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "下载客户导入模板失败");
+  } finally {
+    downloadingTemplate.value = false;
+  }
+}
+
+async function exportCustomers() {
+  exportingCustomers.value = true;
+  try {
+    const resp = await apiClient.get("/customers/export", {
+      params: {
+        keyword: keyword.value || undefined,
+      },
+      responseType: "blob",
+    });
+    downloadBlob(
+      resp.data,
+      fileNameFromDisposition(resp.headers["content-disposition"], "customers-export.xlsx"),
+    );
+    ElMessage.success("客户列表已导出");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "导出客户列表失败");
+  } finally {
+    exportingCustomers.value = false;
+  }
+}
+
+function triggerCustomerImport() {
+  importFileInput.value?.click();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildImportSummaryHtml(result: CustomerImportResultItem) {
+  const lines = [
+    `新增：${result.created_count}`,
+    `更新：${result.updated_count}`,
+    `跳过：${result.skipped_count}`,
+    `错误：${result.error_count}`,
+  ];
+  const errorRows = result.rows.filter((item) => item.action === "ERROR").slice(0, 12);
+  const errorHtml = errorRows.length
+    ? `<br/><br/><strong>出错行：</strong><br/>${errorRows
+        .map((item) => `第 ${item.row_number} 行 · ${escapeHtml(item.company_name)} · ${escapeHtml(item.message)}`)
+        .join("<br/>")}`
+    : "";
+  return `<div style="white-space:pre-wrap;line-height:1.7;">${lines.join("<br/>")}${errorHtml}</div>`;
+}
+
+async function handleCustomerImportChange(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  target.value = "";
+  if (!file) return;
+
+  importingCustomers.value = true;
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const resp = await apiClient.post<CustomerImportResultItem>("/customers/import", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    await fetchCustomers();
+    await ElMessageBox.alert(buildImportSummaryHtml(resp.data), "客户导入结果", {
+      dangerouslyUseHTMLString: true,
+      confirmButtonText: "知道了",
+    });
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "导入客户列表失败");
+  } finally {
+    importingCustomers.value = false;
+  }
+}
+
 async function removeCustomer(row: CustomerListItem) {
   if (!canDeleteCustomer.value) {
     ElMessage.warning("只有老板和管理员可以删除客户");
@@ -161,7 +316,14 @@ async function removeCustomer(row: CustomerListItem) {
     await fetchCustomers();
   } catch (error: any) {
     if (error === "cancel" || error?.message === "cancel") return;
-    ElMessage.error(error?.response?.data?.detail ?? "删除客户失败");
+    const detail = error?.response?.data?.detail;
+    if (detail?.reason === "DEPENDENCY_BLOCKED" && Array.isArray(detail.blockers)) {
+      deleteBlockedCustomer.value = row;
+      deleteBlockers.value = detail.blockers;
+      showDeleteBlockersDialog.value = true;
+      return;
+    }
+    ElMessage.error(detail ?? "删除客户失败");
   }
 }
 
@@ -227,11 +389,31 @@ async function createBillingRecordForCustomer() {
     const payload = prepareBillingDraftsForSubmit(billingRows.value);
     const resp = await apiClient.post<BillingRecord[]>("/billing-records/batch", { records: payload });
     showCreateBillingDialog.value = false;
-    ElMessage.success(`已创建 ${resp.data.length} 条收费记录`);
+    ElMessage.success(`已创建 ${resp.data.length} 条收费项目`);
     resetBillingRows();
+    const targetCustomer = selectedCustomerForBilling.value;
     selectedCustomerForBilling.value = null;
+    if (targetCustomer) {
+      try {
+        await ElMessageBox.confirm(
+          "收费项目已保存。接下来可以继续补收费项目，或立即登记这位客户的收款单。",
+          "下一步",
+          {
+            confirmButtonText: "立即登记收款",
+            cancelButtonText: "继续新增收费项目",
+            distinguishCancelAndClose: true,
+            type: "success",
+          },
+        );
+        router.push(`/billing?view=payments&customer_id=${targetCustomer.id}&open_payment=1`);
+      } catch (nextAction) {
+        if (nextAction === "cancel") {
+          openCreateBillingDialog(targetCustomer);
+        }
+      }
+    }
   } catch (error) {
-    ElMessage.error("创建收费记录失败");
+    ElMessage.error("创建收费项目失败");
   } finally {
     creatingBilling.value = false;
   }
@@ -251,10 +433,12 @@ onMounted(async () => {
       <section class="mobile-shell-panel">
         <div class="mobile-toolbar">
           <div class="mobile-toolbar-main">
-            <el-input
+            <el-autocomplete
               v-model="keyword"
+              :fetch-suggestions="fetchCustomerSuggestions"
               placeholder="客户 / 联系人 / 电话 / 会计"
               clearable
+              @select="applyKeywordSuggestion"
               @keyup.enter="applyCustomerFilters"
             />
           </div>
@@ -372,7 +556,7 @@ onMounted(async () => {
                   plain
                   @click="openCreateBillingDialog(row)"
                 >
-                  新增收费
+                  新增收费项目
                 </el-button>
                 <el-button
                   v-else
@@ -411,10 +595,12 @@ onMounted(async () => {
           <el-button text type="primary" @click="restoreSavedCustomerFilters">恢复上次已应用条件</el-button>
         </div>
         <el-form-item label="关键词">
-          <el-input
+          <el-autocomplete
             v-model="keyword"
+            :fetch-suggestions="fetchCustomerSuggestions"
             placeholder="客户 / 联系人 / 电话 / 会计"
             clearable
+            @select="applyKeywordSuggestion"
             @keyup.enter="applyCustomerFilters"
           />
         </el-form-item>
@@ -438,15 +624,22 @@ onMounted(async () => {
     <el-card shadow="never">
       <el-form inline @submit.prevent="fetchCustomers" class="customers-filter-form">
         <el-form-item label="关键词">
-          <el-input
+          <el-autocomplete
             v-model="keyword"
+            :fetch-suggestions="fetchCustomerSuggestions"
             placeholder="客户/联系人/电话/会计"
             clearable
+            @select="applyKeywordSuggestion"
             @keyup.enter="fetchCustomers"
           />
         </el-form-item>
         <el-form-item>
           <el-button @click="fetchCustomers">查询</el-button>
+          <el-button plain :loading="downloadingTemplate" @click="downloadCustomerTemplate">下载导入模板</el-button>
+          <el-button plain :loading="exportingCustomers" @click="exportCustomers">导出客户</el-button>
+          <el-button v-if="canImportCustomers" type="primary" plain :loading="importingCustomers" @click="triggerCustomerImport">
+            导入客户
+          </el-button>
           <el-button v-if="canManageGrant" type="primary" plain @click="openGrantSettings">数据授权配置</el-button>
         </el-form-item>
       </el-form>
@@ -491,7 +684,7 @@ onMounted(async () => {
           <div class="mobile-actions">
             <el-button size="small" type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
             <el-button v-if="canCreateBilling" size="small" type="success" plain @click="openCreateBillingDialog(row)">
-              新增收费
+              新增收费项目
             </el-button>
             <el-dropdown trigger="click" @command="onMobileMenuCommand">
               <el-button size="small" plain>
@@ -501,7 +694,7 @@ onMounted(async () => {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item :command="{ action: 'lead', row }">开发来源</el-dropdown-item>
-                  <el-dropdown-item v-if="canCreateBilling" :command="{ action: 'billing', row }">新增收费</el-dropdown-item>
+                  <el-dropdown-item v-if="canCreateBilling" :command="{ action: 'billing', row }">新增收费项目</el-dropdown-item>
                   <el-dropdown-item v-if="canDeleteCustomer" :command="{ action: 'delete', row }">删除客户</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -509,11 +702,14 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <el-table v-else v-loading="loading" :data="rows" stripe border>
+      <el-table v-else v-loading="loading" :data="rows" stripe border size="small" class="customer-table-compact">
         <el-table-column prop="id" label="序号" width="80" />
         <el-table-column label="客户号+公司名" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button link type="primary" @click="openCustomerDetail(row)">{{ row.name }}</el-button>
+            <div class="customer-name-cell">
+              <el-tag v-if="row.customer_code" size="small" effect="plain">{{ row.customer_code }}</el-tag>
+              <el-button link type="primary" @click="openCustomerDetail(row)">{{ row.name }}</el-button>
+            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -566,7 +762,7 @@ onMounted(async () => {
             <el-space class="table-action-wrap">
               <el-button link type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
               <el-button v-if="canCreateBilling" link type="success" @click="openCreateBillingDialog(row)">
-                新增收费
+                新增收费项目
               </el-button>
               <el-button link @click="openLeadDetail(row)">开发来源</el-button>
               <el-button v-if="canDeleteCustomer" link type="danger" @click="removeCustomer(row)">删除</el-button>
@@ -579,7 +775,7 @@ onMounted(async () => {
 
   <el-dialog
     v-model="showCreateBillingDialog"
-    title="新增收费记录"
+    title="新增收费项目"
     :width="isMobileWorkflow ? '94%' : '760px'"
     @closed="handleCreateBillingDialogClosed"
   >
@@ -602,6 +798,33 @@ onMounted(async () => {
       </el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="showDeleteBlockersDialog" title="客户暂时不能删除" width="620px">
+    <div class="customer-delete-blockers-copy">
+      <strong>{{ deleteBlockedCustomer?.name || "该客户" }}</strong>
+      还有关联记录。先处理下面这些内容，再回来删除客户会更安全。
+    </div>
+    <div class="customer-delete-blockers">
+      <article v-for="item in deleteBlockers" :key="`${item.type}-${item.href}`" class="customer-delete-blocker-card">
+        <div class="customer-delete-blocker-main">
+          <div class="customer-delete-blocker-title">{{ item.label }}<span> · {{ item.count }} 条</span></div>
+          <div class="customer-delete-blocker-text">{{ item.message }}</div>
+        </div>
+        <el-button type="primary" plain size="small" @click="openDeleteBlockerTarget(item)">去处理</el-button>
+      </article>
+    </div>
+    <template #footer>
+      <el-button @click="showDeleteBlockersDialog = false">知道了</el-button>
+    </template>
+  </el-dialog>
+
+  <input
+    ref="importFileInput"
+    type="file"
+    accept=".xlsx,.csv"
+    style="display: none"
+    @change="handleCustomerImportChange"
+  />
 </template>
 
 <style scoped>
@@ -623,6 +846,58 @@ onMounted(async () => {
 
 .customer-mobile-list-panel {
   padding-top: 12px;
+}
+
+.customer-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.customer-table-compact :deep(.el-table__cell) {
+  padding: 6px 0;
+}
+
+.customer-delete-blockers-copy {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--app-text-secondary);
+}
+
+.customer-delete-blockers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.customer-delete-blocker-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--app-border-soft);
+  background: var(--app-surface);
+}
+
+.customer-delete-blocker-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.customer-delete-blocker-title span {
+  font-weight: 500;
+  color: var(--app-text-muted);
+}
+
+.customer-delete-blocker-text {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--app-text-muted);
 }
 
 .customer-mobile-list {

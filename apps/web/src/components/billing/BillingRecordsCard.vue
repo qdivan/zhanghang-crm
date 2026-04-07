@@ -64,8 +64,8 @@ function dueReminderTagType(row: BillingRecord): "success" | "warning" | "danger
 function mobileMetrics(row: BillingRecord) {
   return [
     { label: "应收期间", value: row.receivable_period_text || "-" },
-    { label: "借方", value: String(row.total_fee) },
-    { label: "贷方", value: String(row.received_amount) },
+    { label: "应收", value: String(row.total_fee) },
+    { label: "实收", value: String(row.received_amount) },
     { label: "余额", value: String(row.outstanding_amount) },
     { label: "到期提醒", value: dueReminderText(row) },
     { label: "入账账户", value: row.latest_receipt_account || "-" },
@@ -99,7 +99,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
       <div class="table-head">
         <div>
           <div class="table-title">收费明细</div>
-          <div class="table-subtitle">当前只看收费单、到期提醒、实收与余额；点公司名称可直接展开往来账。</div>
+          <div class="table-subtitle">这里按收费项目序时查看。点公司名称可直接进入该客户往来账，办理进度和难点在右侧操作里继续维护。</div>
         </div>
         <el-tag size="small" type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
@@ -183,7 +183,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </el-button>
         </template>
       </el-table-column>
-      <el-table-column prop="receivable_period_text" label="应收期间" width="146" show-overflow-tooltip />
+      <el-table-column prop="receivable_period_text" label="应收期间" width="118" show-overflow-tooltip />
       <el-table-column label="摘要" min-width="250" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="summary-cell">
@@ -192,8 +192,8 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="total_fee" label="借方" width="94" />
-      <el-table-column prop="received_amount" label="贷方" width="94" />
+      <el-table-column prop="total_fee" label="应收" width="94" />
+      <el-table-column prop="received_amount" label="实收" width="94" />
       <el-table-column label="到期提醒" width="118">
         <template #default="{ row }">
           <el-tag size="small" :type="dueReminderTagType(row)" effect="plain">
@@ -211,7 +211,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button link type="info" @click="emit('ledger', row)">往来账</el-button>

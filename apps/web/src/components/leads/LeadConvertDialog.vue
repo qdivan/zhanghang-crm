@@ -27,10 +27,16 @@ const dialogVisible = computed({
   get: () => props.visible,
   set: (value: boolean) => emit("update:visible", value),
 });
+
+const customerCodePreview = computed(() => {
+  const seq = props.form.customer_code_seq ? String(props.form.customer_code_seq).padStart(4, "0") : "自动";
+  const suffix = (props.form.customer_code_suffix || "").trim().toUpperCase() || "A";
+  return `${seq}${suffix}`;
+});
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" title="转化并分配会计" width="560px">
+  <el-dialog v-model="dialogVisible" title="转化并分配会计" width="640px">
     <el-form label-position="top">
       <el-form-item label="线索">
         <el-input :model-value="props.targetLeadName" disabled />
@@ -61,6 +67,27 @@ const dialogVisible = computed({
       </el-row>
       <el-form-item label="转化后电话">
         <el-input v-model="props.form.customer_phone" placeholder="可选填" />
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="客户编号">
+            <el-input-number
+              v-model="props.form.customer_code_seq"
+              :min="1"
+              :controls="false"
+              style="width: 100%"
+              placeholder="留空则自动连续编号"
+            />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="编号后缀">
+            <el-input v-model="props.form.customer_code_suffix" maxlength="8" placeholder="默认按来源/介绍人带出" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item label="完整编号预览">
+        <el-input :model-value="customerCodePreview" disabled />
       </el-form-item>
       <el-form-item label="分配会计">
         <el-select v-model="props.form.accountant_id" placeholder="请选择会计">
