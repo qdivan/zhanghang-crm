@@ -39,11 +39,11 @@ def _ensure_schema_compatibility() -> None:
                 conn.execute(
                     text(
                         f"ALTER TABLE {table_name} "
-                        "ADD COLUMN is_deleted BOOLEAN DEFAULT 0"
+                        "ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
                     )
                 )
             if "deleted_at" not in columns:
-                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_at DATETIME"))
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_at TIMESTAMP"))
             if "deleted_by_user_id" not in columns:
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_by_user_id INTEGER"))
 
@@ -138,7 +138,7 @@ def _ensure_schema_compatibility() -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE billing_payments "
-                        "ADD COLUMN is_prepay BOOLEAN DEFAULT 0"
+                        "ADD COLUMN is_prepay BOOLEAN DEFAULT FALSE"
                     )
                 )
 
