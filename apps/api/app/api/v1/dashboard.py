@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models import BillingRecord, Customer, CustomerTimelineEvent, Lead, TodoItem, User
 from app.schemas.dashboard import DashboardSummaryOut, SystemTodoOut
 from app.services.data_access import has_module_read_grant
+from app.services.customer_scope import customer_owned_by_any_condition, customer_owned_by_user_condition
 from app.services.org_scope import get_manager_subordinate_ids
 from app.services.soft_delete import active_filter
 
@@ -50,11 +51,11 @@ def _parse_due_month(value: str) -> Optional[date]:
 def _apply_lead_scope(stmt, db: Session, current_user: User):
     stmt = stmt.where(active_filter(Lead))
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
         return stmt.where(
             or_(
                 Lead.owner_id.in_(managed_ids),
-                Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids))),
+                Lead.customer.has(and_(active_filter(Customer), customer_owned_by_any_condition(managed_ids))),
             )
         )
     if current_user.role != "ACCOUNTANT":
@@ -62,7 +63,7 @@ def _apply_lead_scope(stmt, db: Session, current_user: User):
     return stmt.where(
         or_(
             Lead.owner_id == current_user.id,
-            Lead.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id)),
+            Lead.customer.has(and_(active_filter(Customer), customer_owned_by_user_condition(current_user.id))),
         )
     )
 
@@ -70,40 +71,38 @@ def _apply_lead_scope(stmt, db: Session, current_user: User):
 def _apply_customer_scope(stmt, db: Session, current_user: User):
     stmt = stmt.where(active_filter(Customer))
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        return stmt.where(customer_owned_by_any_condition(managed_ids))
     if current_user.role != "ACCOUNTANT":
         return stmt
     if has_module_read_grant(db, current_user.id, "CUSTOMER"):
         return stmt
-    return stmt.where(Customer.assigned_accountant_id == current_user.id)
+    return stmt.where(customer_owned_by_user_condition(current_user.id))
 
 
 def _apply_billing_scope(stmt, db: Session, current_user: User):
     stmt = stmt.where(active_filter(BillingRecord))
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(
-            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids)))
-        )
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        return stmt.where(BillingRecord.customer.has(and_(active_filter(Customer), customer_owned_by_any_condition(managed_ids))))
     if current_user.role != "ACCOUNTANT":
         return stmt
     if has_module_read_grant(db, current_user.id, "BILLING"):
         return stmt
     return stmt.where(
-        BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id))
+        BillingRecord.customer.has(and_(active_filter(Customer), customer_owned_by_user_condition(current_user.id)))
     )
 
 
 def _apply_billing_system_todo_scope(stmt, db: Session, current_user: User):
     stmt = stmt.where(active_filter(Customer))
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        return stmt.where(customer_owned_by_any_condition(managed_ids))
     if current_user.role != "ACCOUNTANT":
         return stmt
     # 系统催收待办仅面向“自己负责客户”，不跟随临时只读授权放大范围。
-    return stmt.where(Customer.assigned_accountant_id == current_user.id)
+    return stmt.where(customer_owned_by_user_condition(current_user.id))
 
 
 def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> list[SystemTodoOut]:
@@ -117,10 +116,19 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
 
     lead_owner = aliased(User)
     lead_accountant = aliased(User)
+    lead_responsible = aliased(User)
     lead_stmt = (
-        select(Lead, lead_owner.username, Customer.assigned_accountant_id, lead_accountant.username)
+        select(
+            Lead,
+            lead_owner.username,
+            Customer.responsible_user_id,
+            lead_responsible.username,
+            Customer.assigned_accountant_id,
+            lead_accountant.username,
+        )
         .join(lead_owner, Lead.owner_id == lead_owner.id)
         .outerjoin(Customer, Customer.source_lead_id == Lead.id)
+        .outerjoin(lead_responsible, Customer.responsible_user_id == lead_responsible.id)
         .outerjoin(lead_accountant, Customer.assigned_accountant_id == lead_accountant.id)
         .where(
             Lead.status.in_(["NEW", "FOLLOWING"]),
@@ -130,10 +138,10 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         .order_by(Lead.next_reminder_at.asc(), Lead.id.asc())
     )
     lead_rows = db.execute(_apply_lead_scope(lead_stmt, db, current_user)).all()
-    for lead, owner_username, assigned_accountant_id, accountant_username in lead_rows:
+    for lead, owner_username, responsible_user_id, responsible_username, assigned_accountant_id, accountant_username in lead_rows:
         due_date = lead.next_reminder_at
-        assignee_user_id = assigned_accountant_id or lead.owner_id
-        assignee_username = accountant_username or owner_username
+        assignee_user_id = responsible_user_id or assigned_accountant_id or lead.owner_id
+        assignee_username = responsible_username or accountant_username or owner_username
         items.append(
             SystemTodoOut(
                 id=f"lead:{lead.id}",
@@ -150,6 +158,7 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
         )
 
     billing_accountant = aliased(User)
+    billing_responsible = aliased(User)
     billing_stmt = (
         select(
             BillingRecord.id,
@@ -157,16 +166,29 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
             BillingRecord.customer_id,
             BillingRecord.due_month,
             BillingRecord.outstanding_amount,
+            Customer.responsible_user_id,
+            billing_responsible.username,
             Customer.assigned_accountant_id,
             billing_accountant.username,
         )
         .outerjoin(Customer, BillingRecord.customer_id == Customer.id)
+        .outerjoin(billing_responsible, Customer.responsible_user_id == billing_responsible.id)
         .outerjoin(billing_accountant, Customer.assigned_accountant_id == billing_accountant.id)
         .where(BillingRecord.status != "CLEARED", BillingRecord.outstanding_amount > 0)
         .order_by(BillingRecord.id.asc())
     )
     billing_rows = db.execute(_apply_billing_system_todo_scope(billing_stmt, db, current_user)).all()
-    for record_id, customer_name, customer_id, due_month, outstanding_amount, assignee_user_id, assignee_username in billing_rows:
+    for (
+        record_id,
+        customer_name,
+        customer_id,
+        due_month,
+        outstanding_amount,
+        responsible_user_id,
+        responsible_username,
+        assigned_accountant_id,
+        accountant_username,
+    ) in billing_rows:
         due_date = _parse_due_month(due_month)
         if due_date is None or due_date > due_window_end:
             continue
@@ -181,8 +203,8 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 due_date=due_date,
                 action_path=f"/billing?view=ledger&customer_id={customer_id}&customer_name={customer_name}" if customer_id else "/billing",
                 action_label="查看客户往来账",
-                assignee_user_id=assignee_user_id,
-                assignee_username=assignee_username or "-",
+                assignee_user_id=responsible_user_id or assigned_accountant_id,
+                assignee_username=responsible_username or accountant_username or "-",
             )
         )
 
@@ -191,16 +213,19 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
             BillingRecord.id,
             BillingRecord.customer_name,
             BillingRecord.due_month,
+            Customer.responsible_user_id,
+            billing_responsible.username,
             Customer.assigned_accountant_id,
             billing_accountant.username,
         )
         .outerjoin(Customer, BillingRecord.customer_id == Customer.id)
+        .outerjoin(billing_responsible, Customer.responsible_user_id == billing_responsible.id)
         .outerjoin(billing_accountant, Customer.assigned_accountant_id == billing_accountant.id)
         .where(BillingRecord.charge_mode == "PERIODIC")
         .order_by(BillingRecord.id.asc())
     )
     renew_rows = db.execute(_apply_billing_system_todo_scope(renew_stmt, db, current_user)).all()
-    for record_id, customer_name, due_month, assignee_user_id, assignee_username in renew_rows:
+    for record_id, customer_name, due_month, responsible_user_id, responsible_username, assigned_accountant_id, accountant_username in renew_rows:
         due_date = _parse_due_month(due_month)
         if due_date is None or due_date < renew_window_start or due_date > renew_window_end:
             continue
@@ -214,12 +239,13 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 due_date=due_date,
                 action_path=f"/billing?action=renew&record_id={record_id}",
                 action_label="确认续费",
-                assignee_user_id=assignee_user_id,
-                assignee_username=assignee_username or "-",
+                assignee_user_id=responsible_user_id or assigned_accountant_id,
+                assignee_username=responsible_username or accountant_username or "-",
             )
         )
 
     customer_event_actor = aliased(User)
+    customer_event_responsible = aliased(User)
     customer_event_stmt = (
         select(
             CustomerTimelineEvent.id,
@@ -228,10 +254,13 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
             CustomerTimelineEvent.reminder_at,
             CustomerTimelineEvent.event_type,
             Customer.name,
+            Customer.responsible_user_id,
+            customer_event_responsible.username,
             Customer.assigned_accountant_id,
             customer_event_actor.username,
         )
         .join(Customer, CustomerTimelineEvent.customer_id == Customer.id)
+        .outerjoin(customer_event_responsible, Customer.responsible_user_id == customer_event_responsible.id)
         .outerjoin(customer_event_actor, Customer.assigned_accountant_id == customer_event_actor.id)
         .where(
             CustomerTimelineEvent.status == "OPEN",
@@ -243,7 +272,18 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
     customer_event_rows = db.execute(
         _apply_customer_scope(customer_event_stmt, db, current_user)
     ).all()
-    for event_id, customer_id, content, reminder_at, event_type, customer_name, assignee_user_id, assignee_username in customer_event_rows:
+    for (
+        event_id,
+        customer_id,
+        content,
+        reminder_at,
+        event_type,
+        customer_name,
+        responsible_user_id,
+        responsible_username,
+        assigned_accountant_id,
+        accountant_username,
+    ) in customer_event_rows:
         items.append(
             SystemTodoOut(
                 id=f"customer-event:{event_id}",
@@ -254,8 +294,8 @@ def _build_system_todos(db: Session, current_user: User, *, limit: int = 50) -> 
                 due_date=reminder_at,
                 action_path=f"/customers/{customer_id}",
                 action_label="查看客户",
-                assignee_user_id=assignee_user_id,
-                assignee_username=assignee_username or "-",
+                assignee_user_id=responsible_user_id or assigned_accountant_id,
+                assignee_username=responsible_username or accountant_username or "-",
             )
         )
 

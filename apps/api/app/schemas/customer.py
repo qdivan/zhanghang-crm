@@ -15,7 +15,9 @@ class CustomerListOut(BaseModel):
     contact_name: str
     phone: str
     status: str
-    assigned_accountant_id: int
+    responsible_user_id: Optional[int]
+    responsible_username: str
+    assigned_accountant_id: Optional[int]
     accountant_username: str
     source_customer_id: Optional[int]
     source_lead_id: int
@@ -47,7 +49,9 @@ class CustomerDetailOut(BaseModel):
     contact_name: str
     phone: str
     status: str
-    assigned_accountant_id: int
+    responsible_user_id: Optional[int]
+    responsible_username: str
+    assigned_accountant_id: Optional[int]
     accountant_username: str
     source_customer_id: Optional[int]
     source_lead_id: int

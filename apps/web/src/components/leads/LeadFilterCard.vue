@@ -60,21 +60,32 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
       </el-form-item>
       <el-form-item>
         <div class="action-group">
-          <el-button @click="emit('query')">查询</el-button>
-          <el-button type="primary" @click="emit('create')">新增线索</el-button>
-          <el-button type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
-          <el-button @click="emit('guide')">流程说明</el-button>
-          <el-button @click="emit('importExcel')">导入 Excel</el-button>
+          <el-button size="small" @click="emit('query')">查询</el-button>
+          <el-button size="small" type="primary" @click="emit('create')">新增线索</el-button>
+          <el-button size="small" type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
+          <el-button size="small" @click="emit('guide')">流程说明</el-button>
+          <el-button size="small" @click="emit('importExcel')">导入 Excel</el-button>
         </div>
       </el-form-item>
     </el-form>
     <el-text type="info">
-      这里仅显示未成单线索；已成单客户统一进入“客户列表”。当前排序：跟进中（按下次提醒） -> 新线索 -> 已丢失
+      这里仅显示未成单线索；已成单客户统一进入“客户列表”。默认按最新录入在前，可点表头按序号、名称或联络开始排序。
     </el-text>
   </el-card>
 </template>
 
 <style scoped>
+.lead-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.lead-filter-form :deep(.el-input),
+.lead-filter-form :deep(.el-select) {
+  min-width: 180px;
+}
+
 .action-group {
   display: flex;
   flex-wrap: wrap;

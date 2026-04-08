@@ -13,6 +13,7 @@ const props = defineProps<{
   visible: boolean;
   targetLeadName: string;
   form: LeadConvertForm;
+  userOptions: UserLite[];
   accountantOptions: UserLite[];
   loading: boolean;
 }>();
@@ -36,7 +37,7 @@ const customerCodePreview = computed(() => {
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" title="转化并分配会计" width="640px">
+  <el-dialog v-model="dialogVisible" title="转化并分配负责人员" width="680px">
     <el-form label-position="top">
       <el-form-item label="线索">
         <el-input :model-value="props.targetLeadName" disabled />
@@ -89,11 +90,21 @@ const customerCodePreview = computed(() => {
       <el-form-item label="完整编号预览">
         <el-input :model-value="customerCodePreview" disabled />
       </el-form-item>
-      <el-form-item label="分配会计">
-        <el-select v-model="props.form.accountant_id" placeholder="请选择会计">
+      <el-form-item label="负责人员">
+        <el-select v-model="props.form.responsible_user_id" placeholder="请选择负责人员" filterable>
+          <el-option
+            v-for="item in props.userOptions"
+            :key="item.id"
+            :label="`${item.username}（${item.role}）`"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="会计负责人（可选）">
+        <el-select v-model="props.form.assigned_accountant_id" placeholder="后续再指定也可以" clearable filterable>
           <el-option
             v-for="item in props.accountantOptions"
-            :key="item.id"
+            :key="`accountant-${item.id}`"
             :label="item.username"
             :value="item.id"
           />

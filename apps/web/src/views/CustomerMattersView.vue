@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ElMessage, ElMessageBox } from "element-plus";
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { ElMessage } from "element-plus";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
@@ -21,6 +21,8 @@ const rows = ref<CustomerMatterSummaryItem[]>([]);
 const detail = ref<CustomerDetail | null>(null);
 const keyword = ref("");
 const selectedCustomerId = ref<number | null>(null);
+const matterFormAnchor = ref<HTMLElement | null>(null);
+const matterContentInput = ref<{ focus?: () => void } | null>(null);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const form = reactive<CustomerTimelineEventCreatePayload>({
@@ -59,7 +61,10 @@ const matterRows = computed(() =>
 const canWriteCustomer = computed(() => {
   if (!detail.value) return false;
   if (auth.user?.role !== "ACCOUNTANT") return true;
-  return detail.value.accountant_username === auth.user.username;
+  return (
+    detail.value.accountant_username === auth.user.username
+    || detail.value.responsible_username === auth.user.username
+  );
 });
 
 const canDeleteMatter = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
@@ -196,23 +201,23 @@ async function markDone(item: CustomerTimelineEntry) {
 async function removeMatter(item: CustomerTimelineEntry) {
   if (!detail.value || !canDeleteMatter.value) return;
   try {
-    await ElMessageBox.confirm(
-      `确认删除这条重要事项吗？\n${item.content || item.title || "客户事项"}`,
-      "删除重要事项",
-      {
-        type: "warning",
-        confirmButtonText: "确认删除",
-        cancelButtonText: "取消",
-      },
-    );
     await apiClient.delete(`/customers/${detail.value.id}/timeline-events/${item.source_id}`);
     ElMessage.success("重要事项已删除");
     await fetchDetail(detail.value.id);
     await fetchSummary();
   } catch (error: any) {
-    if (error === "cancel" || error?.message === "cancel") return;
     ElMessage.error(error?.response?.data?.detail ?? "删除失败");
   }
+}
+
+async function focusMatterForm() {
+  if (!detail.value) {
+    ElMessage.warning("请先从左侧选择客户");
+    return;
+  }
+  await nextTick();
+  matterFormAnchor.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.setTimeout(() => matterContentInput.value?.focus?.(), 120);
 }
 
 function openCustomerDetail() {
@@ -243,27 +248,27 @@ watch(
           <div class="matter-title">重要事项</div>
           <div class="matter-copy">这里专门记录收费以外的重要提醒、客户需补资料和办理进度，作为会计维护客户的工作记事本。</div>
         </div>
-        <div class="matter-head-actions">
-          <el-input
-            v-model="keyword"
-            placeholder="客户 / 联系人 / 电话 / 编号 / 服务项目"
-            clearable
-            @keyup.enter="fetchSummary"
-          />
-          <el-button type="primary" @click="fetchSummary">查询</el-button>
-        </div>
       </div>
     </el-card>
 
     <section class="matter-workspace">
       <el-card shadow="never" class="matter-summary-card">
         <template #header>
-          <div class="matter-section-head">
-            <div>
+          <div class="matter-section-head matter-summary-head">
+            <div class="matter-section-copy-block">
               <div class="matter-section-title">客户列表 - 重要事项</div>
               <div class="matter-section-copy">先选客户，再在右侧集中处理这一户的事项。</div>
             </div>
-            <el-tag type="info" effect="plain">{{ rows.length }} 户</el-tag>
+            <div class="matter-summary-actions">
+              <el-input
+                v-model="keyword"
+                placeholder="客户 / 联系人 / 电话 / 编号 / 服务项目"
+                clearable
+                @keyup.enter="fetchSummary"
+              />
+              <el-button type="primary" @click="fetchSummary">查询</el-button>
+              <el-tag type="info" effect="plain">{{ rows.length }} 户</el-tag>
+            </div>
           </div>
         </template>
         <el-table
@@ -296,8 +301,8 @@ watch(
 
       <el-card shadow="never" class="matter-detail-card">
         <template #header>
-          <div class="matter-section-head">
-            <div>
+          <div class="matter-section-head matter-detail-head">
+            <div class="matter-section-copy-block">
               <div class="matter-section-title">
                 {{ selectedSummaryRow ? `${selectedSummaryRow.customer_name} 的重要事项` : "请选择客户" }}
               </div>
@@ -305,7 +310,10 @@ watch(
                 {{ selectedSummaryRow ? `${selectedSummaryRow.current_service_summary} · 服务开始 ${selectedSummaryRow.service_start_display}` : "左侧选中一位客户后，这里会只显示该客户的重要事项。" }}
               </div>
             </div>
-            <el-button v-if="detail" plain @click="openCustomerDetail">打开客户档案</el-button>
+            <div class="matter-detail-header-actions">
+              <el-button v-if="detail" type="primary" plain @click="focusMatterForm">新增重要事项</el-button>
+              <el-button v-if="detail" plain @click="openCustomerDetail">打开客户档案</el-button>
+            </div>
           </div>
         </template>
 
@@ -354,21 +362,24 @@ watch(
                   >
                     办结
                   </el-button>
-                  <el-button
+                  <el-popconfirm
                     v-if="canDeleteMatter"
-                    size="small"
-                    type="danger"
-                    plain
-                    @click="removeMatter(item)"
+                    title="确认删除这条重要事项吗？"
+                    confirm-button-text="删除"
+                    cancel-button-text="取消"
+                    @confirm="removeMatter(item)"
                   >
-                    删除
-                  </el-button>
+                    <template #reference>
+                      <el-button size="small" type="danger" plain>删除</el-button>
+                    </template>
+                  </el-popconfirm>
                 </div>
               </article>
             </div>
 
             <el-divider />
 
+            <div ref="matterFormAnchor">
             <el-form label-position="top" class="matter-form">
               <el-row :gutter="12">
                 <el-col :xs="24" :sm="8">
@@ -402,7 +413,13 @@ watch(
                 </el-col>
               </el-row>
               <el-form-item label="事项内容">
-                <el-input v-model="form.content" type="textarea" :rows="3" placeholder="例如：客户需发身份证、客户需去开房租发票、等审批局回执等" />
+                <el-input
+                  ref="matterContentInput"
+                  v-model="form.content"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="例如：客户需发身份证、客户需去开房租发票、等审批局回执等"
+                />
               </el-form-item>
               <el-form-item label="进度备注">
                 <el-input v-model="form.note" type="textarea" :rows="2" placeholder="补充过程中的难点、阻塞点或下一步动作" />
@@ -415,6 +432,7 @@ watch(
                 <el-button type="primary" :loading="submitting" :disabled="!canWriteCustomer" @click="submitMatter">保存事项</el-button>
               </div>
             </el-form>
+            </div>
           </div>
         </template>
       </el-card>
@@ -436,21 +454,39 @@ watch(
 }
 
 .matter-head,
-.matter-head-actions,
 .matter-section-head,
 .matter-item-head,
 .matter-item-actions,
 .matter-form-actions,
-.matter-detail-topline {
+.matter-detail-topline,
+.matter-summary-actions,
+.matter-detail-header-actions {
   display: flex;
   gap: 10px;
 }
 
 .matter-head,
-.matter-section-head,
 .matter-item-head {
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.matter-section-head {
+  align-items: flex-start;
+}
+
+.matter-summary-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.matter-detail-head {
+  align-items: flex-start;
+}
+
+.matter-section-copy-block {
+  min-width: 0;
 }
 
 .matter-title,
@@ -471,19 +507,38 @@ watch(
   color: #667085;
 }
 
-.matter-head-actions {
+.matter-summary-actions,
+.matter-detail-header-actions {
   align-items: center;
-  min-width: 360px;
+  flex-wrap: wrap;
+}
+
+.matter-summary-actions {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.matter-summary-actions :deep(.el-input) {
+  flex: 1 1 320px;
+}
+
+.matter-summary-actions :deep(.el-tag) {
+  margin-left: auto;
 }
 
 .matter-workspace {
   display: grid;
-  grid-template-columns: minmax(420px, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(500px, 0.98fr) minmax(0, 1.02fr);
   gap: 12px;
 }
 
+.matter-summary-card :deep(.el-card__header),
+.matter-detail-card :deep(.el-card__header) {
+  padding-bottom: 12px;
+}
+
 .matter-summary-table :deep(.el-table__cell) {
-  padding: 7px 0;
+  padding: 6px 0;
 }
 
 .matter-customer-cell {
@@ -552,9 +607,12 @@ watch(
     flex-direction: column;
   }
 
-  .matter-head-actions {
-    min-width: 0;
+  .matter-summary-actions {
     width: 100%;
+  }
+
+  .matter-summary-actions :deep(.el-tag) {
+    margin-left: 0;
   }
 }
 </style>

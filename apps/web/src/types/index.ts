@@ -195,7 +195,9 @@ export interface CustomerListItem {
   contact_name: string;
   phone: string;
   status: string;
-  assigned_accountant_id: number;
+  responsible_user_id: number | null;
+  responsible_username: string;
+  assigned_accountant_id: number | null;
   accountant_username: string;
   source_customer_id: number | null;
   source_lead_id: number;
@@ -227,7 +229,9 @@ export interface CustomerDetail {
   contact_name: string;
   phone: string;
   status: string;
-  assigned_accountant_id: number;
+  responsible_user_id: number | null;
+  responsible_username: string;
+  assigned_accountant_id: number | null;
   accountant_username: string;
   source_customer_id: number | null;
   source_lead_id: number;
@@ -425,6 +429,7 @@ export interface BillingActivity {
 }
 
 export type BillingAssignmentRole = "REGISTRATION" | "DELIVERY" | "OTHER";
+export type BillingAssignmentKind = "PRIMARY" | "CC";
 
 export interface BillingAssignmentItem {
   id: number;
@@ -432,6 +437,7 @@ export interface BillingAssignmentItem {
   assignee_user_id: number;
   assignee_username: string;
   assignee_role: UserRole | string;
+  assignment_kind: BillingAssignmentKind;
   assignment_role: BillingAssignmentRole;
   is_active: boolean;
   note: string;

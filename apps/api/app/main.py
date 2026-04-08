@@ -29,6 +29,7 @@ app.include_router(v1_router, prefix="/api/v1")
 def _ensure_schema_compatibility() -> None:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
+    dialect_name = engine.dialect.name
 
     def ensure_soft_delete_columns(table_name: str) -> None:
         if table_name not in table_names:
@@ -46,6 +47,163 @@ def _ensure_schema_compatibility() -> None:
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_at TIMESTAMP"))
             if "deleted_by_user_id" not in columns:
                 conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_by_user_id INTEGER"))
+
+    def ensure_customer_responsibility_columns() -> None:
+        if "customers" not in table_names:
+            return
+        customer_columns_info = inspector.get_columns("customers")
+        customer_columns = {item["name"]: item for item in customer_columns_info}
+
+        needs_sqlite_rebuild = dialect_name == "sqlite" and (
+            "responsible_user_id" not in customer_columns
+            or not customer_columns.get("assigned_accountant_id", {}).get("nullable", True)
+        )
+        if needs_sqlite_rebuild:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE customers RENAME TO customers__legacy"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE customers (
+                            id INTEGER NOT NULL PRIMARY KEY,
+                            name VARCHAR(200) NOT NULL,
+                            contact_name VARCHAR(100) NOT NULL,
+                            phone VARCHAR(32) NOT NULL,
+                            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                            responsible_user_id INTEGER,
+                            assigned_accountant_id INTEGER,
+                            customer_code_seq INTEGER,
+                            customer_code_suffix VARCHAR(8) DEFAULT '',
+                            customer_code VARCHAR(32) DEFAULT '',
+                            source_customer_id INTEGER,
+                            source_lead_id INTEGER NOT NULL UNIQUE,
+                            created_at DATETIME,
+                            is_deleted BOOLEAN DEFAULT FALSE,
+                            deleted_at TIMESTAMP,
+                            deleted_by_user_id INTEGER,
+                            FOREIGN KEY(responsible_user_id) REFERENCES users (id),
+                            FOREIGN KEY(assigned_accountant_id) REFERENCES users (id),
+                            FOREIGN KEY(source_lead_id) REFERENCES leads (id)
+                        )
+                        """
+                    )
+                )
+                responsible_select = (
+                    "COALESCE(responsible_user_id, assigned_accountant_id)"
+                    if "responsible_user_id" in customer_columns
+                    else "assigned_accountant_id"
+                )
+                source_customer_select = "source_customer_id" if "source_customer_id" in customer_columns else "NULL"
+                code_seq_select = "customer_code_seq" if "customer_code_seq" in customer_columns else "NULL"
+                code_suffix_select = "COALESCE(customer_code_suffix, '')" if "customer_code_suffix" in customer_columns else "''"
+                code_select = "COALESCE(customer_code, '')" if "customer_code" in customer_columns else "''"
+                is_deleted_select = "COALESCE(is_deleted, FALSE)" if "is_deleted" in customer_columns else "FALSE"
+                deleted_at_select = "deleted_at" if "deleted_at" in customer_columns else "NULL"
+                deleted_by_select = "deleted_by_user_id" if "deleted_by_user_id" in customer_columns else "NULL"
+                created_at_select = "COALESCE(created_at, CURRENT_TIMESTAMP)" if "created_at" in customer_columns else "CURRENT_TIMESTAMP"
+                conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO customers (
+                            id, name, contact_name, phone, status,
+                            responsible_user_id, assigned_accountant_id,
+                            customer_code_seq, customer_code_suffix, customer_code,
+                            source_customer_id, source_lead_id, created_at,
+                            is_deleted, deleted_at, deleted_by_user_id
+                        )
+                        SELECT
+                            id,
+                            name,
+                            contact_name,
+                            phone,
+                            COALESCE(status, 'ACTIVE'),
+                            {responsible_select},
+                            assigned_accountant_id,
+                            {code_seq_select},
+                            {code_suffix_select},
+                            {code_select},
+                            {source_customer_select},
+                            source_lead_id,
+                            {created_at_select},
+                            {is_deleted_select},
+                            {deleted_at_select},
+                            {deleted_by_select}
+                        FROM customers__legacy
+                        """
+                    )
+                )
+                conn.execute(text("DROP TABLE customers__legacy"))
+                for statement in [
+                    "CREATE INDEX IF NOT EXISTS ix_customers_name ON customers (name)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_phone ON customers (phone)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_responsible_user_id ON customers (responsible_user_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_assigned_accountant_id ON customers (assigned_accountant_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_customer_code_seq ON customers (customer_code_seq)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_customer_code ON customers (customer_code)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_source_customer_id ON customers (source_customer_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_created_at ON customers (created_at)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_is_deleted ON customers (is_deleted)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_deleted_at ON customers (deleted_at)",
+                    "CREATE INDEX IF NOT EXISTS ix_customers_deleted_by_user_id ON customers (deleted_by_user_id)",
+                ]:
+                    conn.execute(text(statement))
+            return
+
+        with engine.begin() as conn:
+            if "responsible_user_id" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN responsible_user_id INTEGER"))
+            if "source_customer_id" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN source_customer_id INTEGER"))
+            if "customer_code_seq" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_seq INTEGER"))
+            if "customer_code_suffix" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_suffix VARCHAR(8) DEFAULT ''"))
+            if "customer_code" not in customer_columns:
+                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code VARCHAR(32) DEFAULT ''"))
+            conn.execute(
+                text(
+                    "UPDATE customers "
+                    "SET responsible_user_id = assigned_accountant_id "
+                    "WHERE responsible_user_id IS NULL"
+                )
+            )
+            if dialect_name == "postgresql" and not customer_columns.get("assigned_accountant_id", {}).get("nullable", True):
+                conn.execute(text("ALTER TABLE customers ALTER COLUMN assigned_accountant_id DROP NOT NULL"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_customers_responsible_user_id ON customers (responsible_user_id)"))
+
+    def ensure_billing_assignment_kind() -> None:
+        if "billing_assignments" not in table_names:
+            return
+        assignment_columns = {item["name"] for item in inspector.get_columns("billing_assignments")}
+        with engine.begin() as conn:
+            if "assignment_kind" not in assignment_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE billing_assignments "
+                        "ADD COLUMN assignment_kind VARCHAR(16) DEFAULT 'CC'"
+                    )
+                )
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_billing_assignments_assignment_kind ON billing_assignments (assignment_kind)"))
+            rows = conn.execute(
+                text(
+                    "SELECT id, billing_record_id, is_active "
+                    "FROM billing_assignments "
+                    "ORDER BY billing_record_id ASC, is_active DESC, id DESC"
+                )
+            ).fetchall()
+            primary_record_ids: set[int] = set()
+            for row in rows:
+                assignment_id = int(row[0])
+                record_id = int(row[1])
+                is_active = bool(row[2])
+                expected_kind = "CC"
+                if is_active and record_id not in primary_record_ids:
+                    expected_kind = "PRIMARY"
+                    primary_record_ids.add(record_id)
+                conn.execute(
+                    text("UPDATE billing_assignments SET assignment_kind = :assignment_kind WHERE id = :assignment_id"),
+                    {"assignment_kind": expected_kind, "assignment_id": assignment_id},
+                )
 
     if "todo_items" in table_names:
         todo_columns = {item["name"] for item in inspector.get_columns("todo_items")}
@@ -166,16 +324,9 @@ def _ensure_schema_compatibility() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN manager_user_id INTEGER"))
 
     if "customers" in table_names:
-        customer_columns = {item["name"] for item in inspector.get_columns("customers")}
-        with engine.begin() as conn:
-            if "source_customer_id" not in customer_columns:
-                conn.execute(text("ALTER TABLE customers ADD COLUMN source_customer_id INTEGER"))
-            if "customer_code_seq" not in customer_columns:
-                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_seq INTEGER"))
-            if "customer_code_suffix" not in customer_columns:
-                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code_suffix VARCHAR(8) DEFAULT ''"))
-            if "customer_code" not in customer_columns:
-                conn.execute(text("ALTER TABLE customers ADD COLUMN customer_code VARCHAR(32) DEFAULT ''"))
+        ensure_customer_responsibility_columns()
+
+    ensure_billing_assignment_kind()
 
     if "customer_timeline_events" in table_names:
         timeline_columns = {item["name"] for item in inspector.get_columns("customer_timeline_events")}

@@ -127,11 +127,13 @@ class BillingActivityOut(BaseModel):
 
 class BillingAssignmentCreate(BaseModel):
     assignee_user_id: int = Field(gt=0)
+    assignment_kind: Literal["PRIMARY", "CC"] = "CC"
     assignment_role: Literal["REGISTRATION", "DELIVERY", "OTHER"] = "DELIVERY"
     note: str = ""
 
 
 class BillingAssignmentUpdate(BaseModel):
+    assignment_kind: Optional[Literal["PRIMARY", "CC"]] = None
     assignment_role: Optional[Literal["REGISTRATION", "DELIVERY", "OTHER"]] = None
     is_active: Optional[bool] = None
     note: Optional[str] = None
@@ -145,6 +147,7 @@ class BillingAssignmentOut(BaseModel):
     assignee_user_id: int
     assignee_username: str
     assignee_role: str
+    assignment_kind: str
     assignment_role: str
     is_active: bool
     note: str

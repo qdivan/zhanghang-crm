@@ -26,7 +26,7 @@ const drawerVisible = computed({
   set: (value: boolean) => emit("update:visible", value),
 });
 
-const drawerTitle = computed(() => `执行进度 - ${props.targetRecord?.customer_name ?? ""}`);
+const drawerTitle = computed(() => `办理进度/难点 - ${props.targetRecord?.customer_name ?? ""}`);
 const { isMobile } = useResponsive();
 </script>
 

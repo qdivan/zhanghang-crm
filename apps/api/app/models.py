@@ -60,7 +60,14 @@ class User(SoftDeleteMixin, Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="owner")
-    assigned_customers: Mapped[list["Customer"]] = relationship(back_populates="accountant")
+    assigned_customers: Mapped[list["Customer"]] = relationship(
+        back_populates="accountant",
+        foreign_keys="Customer.assigned_accountant_id",
+    )
+    responsible_customers: Mapped[list["Customer"]] = relationship(
+        back_populates="responsible_user",
+        foreign_keys="Customer.responsible_user_id",
+    )
     customer_timeline_events: Mapped[list["CustomerTimelineEvent"]] = relationship(back_populates="actor")
     billing_activities: Mapped[list["BillingActivity"]] = relationship(back_populates="actor")
     billing_execution_logs: Mapped[list["BillingExecutionLog"]] = relationship(back_populates="actor")
@@ -165,7 +172,8 @@ class Customer(SoftDeleteMixin, Base):
     contact_name: Mapped[str] = mapped_column(String(100))
     phone: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")
-    assigned_accountant_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    responsible_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    assigned_accountant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     customer_code_seq: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     customer_code_suffix: Mapped[str] = mapped_column(String(8), default="")
     customer_code: Mapped[str] = mapped_column(String(32), default="", index=True)
@@ -173,13 +181,32 @@ class Customer(SoftDeleteMixin, Base):
     source_lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    accountant: Mapped["User"] = relationship(back_populates="assigned_customers")
+    responsible_user: Mapped[Optional["User"]] = relationship(
+        back_populates="responsible_customers",
+        foreign_keys=[responsible_user_id],
+    )
+    accountant: Mapped[Optional["User"]] = relationship(
+        back_populates="assigned_customers",
+        foreign_keys=[assigned_accountant_id],
+    )
     source_lead: Mapped["Lead"] = relationship(back_populates="customer")
     billing_records: Mapped[list["BillingRecord"]] = relationship(back_populates="customer")
     timeline_events: Mapped[list["CustomerTimelineEvent"]] = relationship(
         back_populates="customer",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def responsible_username(self) -> str:
+        if self.responsible_user is None:
+            return ""
+        return self.responsible_user.username
+
+    @property
+    def accountant_username(self) -> str:
+        if self.accountant is None:
+            return ""
+        return self.accountant.username
 
 
 class CustomerTimelineEvent(Base):
@@ -332,9 +359,9 @@ class BillingRecord(SoftDeleteMixin, Base):
 
     @property
     def accountant_username(self) -> str:
-        if self.customer is None or self.customer.accountant is None:
+        if self.customer is None:
             return ""
-        return self.customer.accountant.username
+        return self.customer.accountant_username or self.customer.responsible_username
 
     @property
     def customer_contact_name(self) -> str:
@@ -499,6 +526,7 @@ class BillingAssignment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     billing_record_id: Mapped[int] = mapped_column(ForeignKey("billing_records.id"), index=True)
     assignee_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    assignment_kind: Mapped[str] = mapped_column(String(16), default="CC", index=True)
     assignment_role: Mapped[str] = mapped_column(String(32), default="DELIVERY")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")

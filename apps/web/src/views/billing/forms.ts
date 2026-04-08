@@ -24,6 +24,7 @@ export type BillingActivityForm = {
 
 export type BillingAssignmentForm = {
   assignee_user_id: number | null;
+  assignment_kind: "PRIMARY" | "CC";
   assignment_role: "REGISTRATION" | "DELIVERY" | "OTHER";
   note: string;
 };
@@ -78,6 +79,7 @@ export function createBillingFilters(): BillingFilters {
 export function createBillingAssignmentForm(): BillingAssignmentForm {
   return {
     assignee_user_id: null,
+    assignment_kind: "PRIMARY",
     assignment_role: "DELIVERY",
     note: "",
   };

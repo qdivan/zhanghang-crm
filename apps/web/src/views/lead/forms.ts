@@ -50,7 +50,8 @@ export type LeadRedevelopForm = {
 
 export type LeadConvertForm = {
   lead_id: number | null;
-  accountant_id: number | null;
+  responsible_user_id: number | null;
+  assigned_accountant_id: number | null;
   customer_name: string;
   customer_contact_name: string;
   customer_phone: string;
@@ -131,7 +132,8 @@ export function createLeadRedevelopForm(): LeadRedevelopForm {
 export function createLeadConvertForm(): LeadConvertForm {
   return {
     lead_id: null,
-    accountant_id: null,
+    responsible_user_id: null,
+    assigned_accountant_id: null,
     customer_name: "",
     customer_contact_name: "",
     customer_phone: "",

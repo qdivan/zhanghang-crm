@@ -4482,3 +4482,189 @@ def test_customer_import_creates_and_updates_customer():
         assert detail["phone"] == "13950004199"
         assert detail["lead"]["fee_standard"] == "4200/年"
         assert detail["lead"]["notes"] == "导入更新成功"
+
+
+def test_lead_list_supports_sorting_and_legacy_accountant_convert():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        seeds = [
+            ("排序线索-C", "13800130031"),
+            ("排序线索-A", "13800130032"),
+            ("排序线索-B", "13800130033"),
+        ]
+        for name, phone in seeds:
+            create_resp = client.post(
+                "/api/v1/leads",
+                headers=headers,
+                json={
+                    "name": name,
+                    "contact_name": f"{name}-联系人",
+                    "phone": phone,
+                    "main_business": "排序测试",
+                    "source": "Sally直播",
+                },
+            )
+            assert create_resp.status_code == 201
+
+        default_resp = client.get("/api/v1/leads", headers=headers, params={"keyword": "排序线索-"})
+        assert default_resp.status_code == 200
+        default_ids = [item["id"] for item in default_resp.json()]
+        assert default_ids == sorted(default_ids, reverse=True)
+
+        name_sorted_resp = client.get(
+            "/api/v1/leads",
+            headers=headers,
+            params={"keyword": "排序线索-", "sort_by": "name", "sort_order": "asc"},
+        )
+        assert name_sorted_resp.status_code == 200
+        assert [item["name"] for item in name_sorted_resp.json()] == ["排序线索-A", "排序线索-B", "排序线索-C"]
+
+        accountants_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert accountants_resp.status_code == 200
+        accountant = accountants_resp.json()[0]
+        target_lead = next(item for item in name_sorted_resp.json() if item["name"] == "排序线索-A")
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{target_lead['id']}/convert",
+            headers=headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer = convert_resp.json()["customer"]
+        assert customer["responsible_user_id"] == accountant["id"]
+        assert customer["assigned_accountant_id"] == accountant["id"]
+
+
+def test_customer_list_supports_sorting():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        accountants_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert accountants_resp.status_code == 200
+        accountant = accountants_resp.json()[0]
+
+        seeds = [
+            ("排序客户-C", "13800130041"),
+            ("排序客户-A", "13800130042"),
+            ("排序客户-B", "13800130043"),
+        ]
+        for name, phone in seeds:
+            lead_resp = client.post(
+                "/api/v1/leads",
+                headers=headers,
+                json={
+                    "name": name,
+                    "contact_name": f"{name}-联系人",
+                    "phone": phone,
+                    "main_business": "客户排序测试",
+                    "source": "Sally直播",
+                },
+            )
+            assert lead_resp.status_code == 201
+            convert_resp = client.post(
+                f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+                headers=headers,
+                json={"accountant_id": accountant["id"]},
+            )
+            assert convert_resp.status_code == 200
+
+        default_resp = client.get("/api/v1/customers", headers=headers, params={"keyword": "排序客户-"})
+        assert default_resp.status_code == 200
+        default_ids = [item["id"] for item in default_resp.json()]
+        assert default_ids == sorted(default_ids, reverse=True)
+
+        name_sorted_resp = client.get(
+            "/api/v1/customers",
+            headers=headers,
+            params={"keyword": "排序客户-", "sort_by": "name", "sort_order": "asc"},
+        )
+        assert name_sorted_resp.status_code == 200
+        assert [item["name"] for item in name_sorted_resp.json()] == ["排序客户-A", "排序客户-B", "排序客户-C"]
+
+
+def test_billing_record_list_supports_sorting():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        accountants_resp = client.get("/api/v1/users", headers=headers, params={"role": "ACCOUNTANT"})
+        assert accountants_resp.status_code == 200
+        accountant = accountants_resp.json()[0]
+
+        seeds = [
+            ("排序收费-C", "13800130051", 4003, "2026-12-31"),
+            ("排序收费-A", "13800130052", 4001, "2026-10-31"),
+            ("排序收费-B", "13800130053", 4002, "2026-11-30"),
+        ]
+        customer_ids: dict[str, int] = {}
+        for name, phone, _, _ in seeds:
+            lead_resp = client.post(
+                "/api/v1/leads",
+                headers=headers,
+                json={
+                    "name": name,
+                    "contact_name": f"{name}-联系人",
+                    "phone": phone,
+                    "main_business": "收费排序测试",
+                    "source": "Sally直播",
+                },
+            )
+            assert lead_resp.status_code == 201
+            convert_resp = client.post(
+                f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+                headers=headers,
+                json={"accountant_id": accountant["id"]},
+            )
+            assert convert_resp.status_code == 200
+            customer_ids[name] = convert_resp.json()["customer"]["id"]
+
+        for name, _, serial_no, due_month in seeds:
+            create_resp = client.post(
+                "/api/v1/billing-records",
+                headers=headers,
+                json={
+                    "customer_id": customer_ids[name],
+                    "serial_no": serial_no,
+                    "total_fee": 1000,
+                    "monthly_fee": 100,
+                    "billing_cycle_text": "收费排序测试",
+                    "due_month": due_month,
+                    "payment_method": "后收",
+                },
+            )
+            assert create_resp.status_code == 201
+
+        default_resp = client.get("/api/v1/billing-records", headers=headers, params={"keyword": "排序收费-"})
+        assert default_resp.status_code == 200
+        assert [item["serial_no"] for item in default_resp.json()] == [4003, 4002, 4001]
+
+        customer_sorted_resp = client.get(
+            "/api/v1/billing-records",
+            headers=headers,
+            params={"keyword": "排序收费-", "sort_by": "customer_name", "sort_order": "asc"},
+        )
+        assert customer_sorted_resp.status_code == 200
+        assert [item["customer_name"] for item in customer_sorted_resp.json()] == ["排序收费-A", "排序收费-B", "排序收费-C"]
+
+        due_sorted_resp = client.get(
+            "/api/v1/billing-records",
+            headers=headers,
+            params={"keyword": "排序收费-", "sort_by": "due_month", "sort_order": "asc"},
+        )
+        assert due_sorted_resp.status_code == 200
+        assert [item["due_month"] for item in due_sorted_resp.json()] == ["2026-10-31", "2026-11-30", "2026-12-31"]

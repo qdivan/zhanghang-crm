@@ -113,6 +113,8 @@ const summary = ref<BillingSummaryData>({
 });
 const summaryDateRange = ref<[string, string] | null>(null);
 const billingPrimaryView = ref<BillingPrimaryView>("SUMMARY");
+const recordSortBy = ref(String(route.query.sort_by || "serial_no"));
+const recordSortOrder = ref<"asc" | "desc">(route.query.sort_order === "asc" ? "asc" : "desc");
 const paymentRows = ref<BillingPaymentItem[]>([]);
 const paymentLoading = ref(false);
 const paymentListHydrated = ref(false);
@@ -431,6 +433,30 @@ function currentBillingFilterSnapshot() {
   };
 }
 
+function recordSortOrderForTable() {
+  return recordSortOrder.value === "asc" ? "ascending" : "descending";
+}
+
+async function applyBillingRecordSort(sortBy: string, sortOrder: "asc" | "desc") {
+  recordSortBy.value = sortBy;
+  recordSortOrder.value = sortOrder;
+  await router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    },
+  });
+  await fetchRecords();
+}
+
+async function handleBillingRecordSortChange(payload: { prop?: string; order: "ascending" | "descending" | null; columnKey?: string }) {
+  const sortKey = payload.columnKey || payload.prop || "serial_no";
+  const sortOrder = payload.order === "ascending" ? "asc" : "desc";
+  await applyBillingRecordSort(sortKey, sortOrder);
+}
+
 function updateCreateRows(nextRows: BillingCreatePayload[]) {
   createRows.value = nextRows;
 }
@@ -480,23 +506,6 @@ function matchesBillingMonth(record: BillingRecord, targetMonth: string): boolea
   return false;
 }
 
-function getDuePriority(record: BillingRecord): [number, string, number] {
-  const outstanding = Number(record.outstanding_amount || 0);
-  if (outstanding <= 0) {
-    return [3, record.due_month || "9999-99-99", record.serial_no || record.id];
-  }
-  const due = (record.due_month || "").trim() || "9999-99-99";
-  const dueDate = new Date(`${due}T00:00:00`);
-  if (Number.isNaN(dueDate.getTime())) {
-    return [2, due, record.serial_no || record.id];
-  }
-  const today = new Date(`${todayInBrowserTimeZone()}T00:00:00`);
-  const diffDays = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-  if (diffDays < 0) return [0, due, record.serial_no || record.id];
-  if (diffDays <= 7) return [1, due, record.serial_no || record.id];
-  return [2, due, record.serial_no || record.id];
-}
-
 async function fetchRecords() {
   loading.value = true;
   ledgerCache.clear();
@@ -508,6 +517,8 @@ async function fetchRecords() {
         accountant_id: filters.accountant_id || undefined,
         receipt_account: filters.receipt_account || undefined,
         contact_name: filters.contact_name || undefined,
+        sort_by: recordSortBy.value || "serial_no",
+        sort_order: recordSortOrder.value || "desc",
       },
     });
     let filteredRows = resp.data;
@@ -520,19 +531,7 @@ async function fetchRecords() {
     if (filters.status) {
       filteredRows = filteredRows.filter((item) => item.status === filters.status);
     }
-    rows.value = filteredRows
-      .map((item) => ({
-        item,
-        priority: getDuePriority(item),
-      }))
-      .sort((left, right) => {
-        const leftPriority = left.priority;
-        const rightPriority = right.priority;
-        if (leftPriority[0] !== rightPriority[0]) return leftPriority[0] - rightPriority[0];
-        if (leftPriority[1] !== rightPriority[1]) return leftPriority[1].localeCompare(rightPriority[1]);
-        return leftPriority[2] - rightPriority[2];
-      })
-      .map(({ item }) => item);
+    rows.value = filteredRows;
     if (!isMobile.value) {
       void prefetchLedgerRows(rows.value);
     }
@@ -659,7 +658,7 @@ const billingRowActionItems = computed(() => {
   if (!row) return [];
   return [
     { key: "ledger", label: "往来账", description: "查看当前客户的明细往来账。" },
-    { key: "execution", label: "执行进度", description: "进入执行进度和交付过程。" },
+    { key: "execution", label: "办理进度/难点", description: "维护这笔业务的办理进度、难点和下一步动作。" },
     {
       key: "split",
       label: "分摊收款",
@@ -667,7 +666,7 @@ const billingRowActionItems = computed(() => {
       disabled: !canWriteBillingRecord(row),
     },
     canManageAssignment.value
-      ? { key: "assignment", label: "分派执行", description: "把这条收费单分给执行人员处理。" }
+      ? { key: "assignment", label: "派工/推送", description: "设置当前负责人和抄送人员，继续往下流转。" }
       : null,
     canManageBillingLifecycle.value
       ? { key: "renew", label: "确认续费", description: "基于当前收费单快速生成续费单。" }
@@ -676,7 +675,7 @@ const billingRowActionItems = computed(() => {
       ? { key: "terminate", label: "提前终止", description: "按提前结束情况冲减费用。", danger: true }
       : null,
     canDeleteBillingRecord.value
-      ? { key: "delete", label: "删除收费单", description: "删除后会移除这条收费项目；若已有收款会提示先处理收款单。", danger: true }
+      ? { key: "delete", label: "删除收费项目", description: "删除后会移除这条收费项目；若已有收款会提示先处理收款单。", danger: true }
       : null,
   ].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean; danger?: boolean }>;
 });
@@ -694,8 +693,10 @@ async function fetchAssignableUsers() {
   if (!canManageAssignment.value) return;
   if (assignableUsers.value.length) return;
   try {
-    const resp = await apiClient.get<UserLite[]>("/users");
-    assignableUsers.value = resp.data.filter((item) => item.role !== "OWNER");
+    const resp = await apiClient.get<UserLite[]>("/users", {
+      params: { scope: "all_active" },
+    });
+    assignableUsers.value = resp.data;
   } catch (error) {
     ElMessage.error("获取可分派人员失败");
   }
@@ -853,7 +854,7 @@ async function fetchAssignments(recordId: number) {
     const resp = await apiClient.get<BillingAssignmentItem[]>(`/billing-records/${recordId}/assignees`);
     assignmentRows.value = resp.data;
   } catch (error) {
-    ElMessage.error("获取执行分派失败");
+    ElMessage.error("获取派工/推送信息失败");
     assignmentRows.value = [];
   } finally {
     assignmentLoading.value = false;
@@ -877,13 +878,13 @@ async function createAssignment() {
   assignmentSubmitting.value = true;
   try {
     await apiClient.post(`/billing-records/${assignmentTargetRecord.value.id}/assignees`, assignmentForm);
-    ElMessage.success("执行分派已创建");
+    ElMessage.success("派工/推送已保存");
     resetAssignmentForm();
     await fetchAssignments(assignmentTargetRecord.value.id);
     await fetchRecords();
     await fetchSummary();
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.detail ?? "创建执行分派失败");
+    ElMessage.error(error?.response?.data?.detail ?? "保存派工/推送失败");
   } finally {
     assignmentSubmitting.value = false;
   }
@@ -1074,28 +1075,12 @@ function openTerminateDialog(row: BillingRecord) {
   showTerminateDialog.value = true;
 }
 
-function getBillingDeleteConfirmName(row: BillingRecord): string {
-  const summaryText = (row.summary || "").trim() || (row.charge_category || "").trim() || `收费单#${row.serial_no || row.id}`;
-  const customerText = (row.customer_name || "").trim() || "未命名客户";
-  return `${customerText} · ${summaryText}`;
-}
-
 async function removeBillingRecord(row: BillingRecord) {
   if (!canDeleteBillingRecord.value) {
     ElMessage.warning("只有老板和管理员可以删除收费单");
     return;
   }
-  const expectedName = getBillingDeleteConfirmName(row);
   try {
-    await ElMessageBox.confirm(
-      `确认删除这条收费项目吗？\n${expectedName}`,
-      "删除收费单",
-      {
-        type: "warning",
-        confirmButtonText: "确认删除",
-        cancelButtonText: "取消",
-      },
-    );
     await apiClient.delete(`/billing-records/${row.id}`);
     ElMessage.success("收费项目已删除");
     if (ledgerTargetRecord.value?.id === row.id) {
@@ -1129,20 +1114,10 @@ async function removeBillingRecord(row: BillingRecord) {
 
 async function removePaymentRow(row: BillingPaymentItem) {
   try {
-    await ElMessageBox.confirm(
-      `确认删除收款单 ${row.payment_no} 吗？删除后会撤回本次入账与分摊。`,
-      "删除收款单",
-      {
-        type: "warning",
-        confirmButtonText: "确认删除",
-        cancelButtonText: "取消",
-      },
-    );
     await apiClient.delete(`/billing-records/payments/${row.id}`);
     ElMessage.success("收款单已删除");
     await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
   } catch (error: any) {
-    if (error === "cancel" || error?.message === "cancel") return;
     ElMessage.error(error?.response?.data?.detail ?? "删除收款单失败");
   }
 }
@@ -1396,11 +1371,27 @@ function openBillingRowActions(row: BillingRecord) {
 
 function handleBillingRowActionSelect(action: string) {
   if (!selectedBillingActionRow.value) return;
+  if (action === "delete") {
+    void ElMessageBox.confirm(
+      "确认删除这条收费项目吗？若已有收款分摊，系统会提示你先去处理收款单。",
+      "删除收费项目",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+      },
+    )
+      .then(() => removeBillingRecord(selectedBillingActionRow.value!))
+      .catch(() => undefined);
+    return;
+  }
   handleBillingMenuCommand(action, selectedBillingActionRow.value);
 }
 
 async function applyBillingRouteViewState() {
   const queryView = String(route.query.view || "").trim().toLowerCase();
+  const querySortBy = String(route.query.sort_by || "serial_no").trim() || "serial_no";
+  const querySortOrder = route.query.sort_order === "asc" ? "asc" : "desc";
   if (queryView === "records") billingPrimaryView.value = "RECORDS";
   else if (queryView === "payments") billingPrimaryView.value = "PAYMENTS";
   else if (queryView === "ledger") billingPrimaryView.value = "LEDGER";
@@ -1411,6 +1402,14 @@ async function applyBillingRouteViewState() {
   const normalizedCustomerId = nextCustomerId && Number.isFinite(nextCustomerId) ? nextCustomerId : null;
   const unallocatedOnly = String(route.query.unallocated || "").trim() === "1";
   let shouldQuery = false;
+  if (recordSortBy.value !== querySortBy) {
+    recordSortBy.value = querySortBy;
+    shouldQuery = true;
+  }
+  if (recordSortOrder.value !== querySortOrder) {
+    recordSortOrder.value = querySortOrder;
+    shouldQuery = true;
+  }
 
   if (filters.customer_id !== normalizedCustomerId) {
     filters.customer_id = normalizedCustomerId;
@@ -1674,6 +1673,8 @@ async function submitActivity(mode: "close" | "next" = "close") {
 }
 
 onMounted(async () => {
+  recordSortBy.value = String(route.query.sort_by || "serial_no");
+  recordSortOrder.value = route.query.sort_order === "asc" ? "asc" : "desc";
   if (isMobileWorkflow.value) {
     restoreSavedBillingFilters();
   }
@@ -1918,7 +1919,7 @@ watch(
                   催收/收款
                 </el-button>
                 <el-button class="mobile-row-secondary-button" size="small" plain @click="openExecutionDrawer(row)">
-                  执行进度
+                  办理进度/难点
                 </el-button>
                 <el-button class="mobile-row-secondary-button" size="small" plain @click="openLedgerDialog(row)">
                   往来账
@@ -2041,7 +2042,7 @@ watch(
         </div>
         <div class="billing-view-switch-actions">
           <el-button :type="billingPrimaryView === 'SUMMARY' ? 'primary' : 'default'" @click="openSummaryView">单位汇总</el-button>
-          <el-button :type="billingPrimaryView === 'RECORDS' ? 'primary' : 'default'" @click="openRecordsView">收费项目序时</el-button>
+          <el-button :type="billingPrimaryView === 'RECORDS' ? 'primary' : 'default'" @click="openRecordsView">收费项目列表</el-button>
           <el-button :type="billingPrimaryView === 'PAYMENTS' ? 'primary' : 'default'" @click="openPaymentListView">收款列表</el-button>
           <el-tag v-if="billingPrimaryView === 'LEDGER' && ledgerTargetRecord" type="success" effect="plain">
             当前：{{ ledgerTargetRecord.customer_name }} 往来账
@@ -2086,6 +2087,8 @@ watch(
       :can-manage-lifecycle="canManageBillingLifecycle"
       :can-delete-record="canDeleteBillingRecord"
       :can-write-record="canWriteBillingRecord"
+      :sort-prop="recordSortBy"
+      :sort-order="recordSortOrderForTable()"
       @customer="openCustomerDetail"
       @ledger="openLedgerDialog"
       @split="openSplitPaymentDialog"
@@ -2095,6 +2098,7 @@ watch(
       @renew="openRenewDialog"
       @terminate="openTerminateDialog"
       @delete="removeBillingRecord"
+      @sort-change="handleBillingRecordSortChange"
     />
 
     <BillingPaymentsCard

@@ -17,6 +17,8 @@ const props = defineProps<{
   rows: LeadItem[];
   canConvert: boolean;
   canDelete: boolean;
+  sortProp: string;
+  sortOrder: "ascending" | "descending" | null;
 }>();
 
 const emit = defineEmits<{
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   convert: [row: LeadItem];
   revoke: [row: LeadItem];
   delete: [row: LeadItem];
+  "sort-change": [payload: { prop: string | undefined; order: "ascending" | "descending" | null; columnKey?: string }];
 }>();
 
 const { isMobile } = useResponsive();
@@ -117,6 +120,17 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
           >
             转化
           </el-button>
+          <el-popconfirm
+            v-if="props.canDelete"
+            title="确认删除这条线索吗？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="emit('delete', row)"
+          >
+            <template #reference>
+              <el-button size="small" type="danger" plain>删除</el-button>
+            </template>
+          </el-popconfirm>
           <el-dropdown trigger="click" @command="onMobileMenuCommand">
             <el-button size="small" plain>
               更多
@@ -140,18 +154,25 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
                 >
                   撤销转化
                 </el-dropdown-item>
-                <el-dropdown-item v-if="props.canDelete" :command="{ action: 'delete', row }">
-                  删除线索
-                </el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
         </div>
       </div>
     </div>
-    <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
-      <el-table-column prop="id" label="序号" width="70" />
-      <el-table-column label="公司名" min-width="150" show-overflow-tooltip>
+    <el-table
+      v-else
+      v-loading="props.loading"
+      :data="props.rows"
+      stripe
+      border
+      size="small"
+      class="lead-desktop-table"
+      :default-sort="{ prop: props.sortProp, order: props.sortOrder }"
+      @sort-change="emit('sort-change', $event)"
+    >
+      <el-table-column prop="id" label="序号" width="70" sortable="custom" />
+      <el-table-column label="公司名" min-width="140" show-overflow-tooltip column-key="name" sortable="custom">
         <template #default="{ row }">
           <div class="lead-name-cell">
             <el-button link type="primary" @click="emit('company', row)">
@@ -164,14 +185,14 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       <el-table-column
         prop="grade"
         label="等级"
-        width="130"
+        width="106"
         show-overflow-tooltip
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
       <el-table-column
         label="地区/国家"
-        width="110"
+        width="96"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       >
@@ -179,7 +200,9 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       </el-table-column>
       <el-table-column
         label="联络/服务开始"
-        width="120"
+        width="112"
+        column-key="contact_start_date"
+        sortable="custom"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       >
@@ -187,7 +210,9 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       </el-table-column>
       <el-table-column
         label="联系人（微信号）"
-        min-width="160"
+        min-width="148"
+        column-key="contact_name"
+        sortable="custom"
         show-overflow-tooltip
         class-name="mobile-hide"
         label-class-name="mobile-hide"
@@ -197,7 +222,7 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       <el-table-column
         prop="main_business"
         label="主营/需求"
-        min-width="180"
+        min-width="160"
         show-overflow-tooltip
         class-name="mobile-hide"
         label-class-name="mobile-hide"
@@ -205,7 +230,8 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       <el-table-column
         prop="phone"
         label="电话"
-        width="130"
+        width="118"
+        sortable="custom"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
@@ -224,20 +250,22 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       <el-table-column
         prop="last_followup_date"
         label="最后跟进日期"
-        width="120"
+        width="112"
+        sortable="custom"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
       <el-table-column
         prop="reminder_value"
         label="提醒值"
-        width="90"
+        width="84"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
       <el-table-column
         label="操作"
-        width="250"
+        width="220"
+        fixed="right"
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       >
@@ -266,7 +294,17 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
             >
               撤销转化
             </el-button>
-            <el-button v-if="props.canDelete" link type="danger" @click="emit('delete', row)">删除</el-button>
+            <el-popconfirm
+              v-if="props.canDelete"
+              title="确认删除这条线索吗？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              @confirm="emit('delete', row)"
+            >
+              <template #reference>
+                <el-button link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
           </el-space>
         </template>
       </el-table-column>
@@ -286,6 +324,15 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.lead-desktop-table :deep(.el-table__cell) {
+  padding: 7px 0;
+}
+
+.table-action-wrap {
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 .mobile-lead-title {

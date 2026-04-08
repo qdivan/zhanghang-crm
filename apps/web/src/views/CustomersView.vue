@@ -72,13 +72,17 @@ const creatingBilling = ref(false);
 const selectedCustomerForBilling = ref<CustomerListItem | null>(null);
 const billingRows = ref<BillingCreatePayload[]>([createEmptyBillingDraft(null)]);
 const keywordSuggestions = ref<CustomerSuggestItem[]>([]);
-const showDeleteBlockersDialog = ref(false);
+const showDeleteCustomerDialog = ref(false);
 const deleteBlockers = ref<CustomerDeleteBlockerItem[]>([]);
-const deleteBlockedCustomer = ref<CustomerListItem | null>(null);
+const deleteTargetCustomer = ref<CustomerListItem | null>(null);
+const deleteConfirmValue = ref("");
+const deletingCustomer = ref(false);
 const importFileInput = ref<HTMLInputElement | null>(null);
 const downloadingTemplate = ref(false);
 const exportingCustomers = ref(false);
 const importingCustomers = ref(false);
+const customerSortBy = ref(String(route.query.sort_by || "id"));
+const customerSortOrder = ref<"asc" | "desc">(route.query.sort_order === "asc" ? "asc" : "desc");
 
 function mobileMetrics(row: CustomerListItem) {
   return [
@@ -111,6 +115,8 @@ async function fetchCustomers() {
     const resp = await apiClient.get<CustomerListItem[]>("/customers", {
       params: {
         keyword: keyword.value || undefined,
+        sort_by: customerSortBy.value || "id",
+        sort_order: customerSortOrder.value || "desc",
       },
     });
     rows.value = resp.data;
@@ -175,10 +181,34 @@ function applyKeywordSuggestion(item: CustomerSuggestItem) {
 }
 
 function openDeleteBlockerTarget(blocker: CustomerDeleteBlockerItem) {
-  showDeleteBlockersDialog.value = false;
+  showDeleteCustomerDialog.value = false;
   if (blocker.href) {
     router.push(blocker.href);
   }
+}
+
+function customerSortOrderForTable() {
+  return customerSortOrder.value === "asc" ? "ascending" : "descending";
+}
+
+async function applyCustomerSort(sortBy: string, sortOrder: "asc" | "desc") {
+  customerSortBy.value = sortBy;
+  customerSortOrder.value = sortOrder;
+  await router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    },
+  });
+  await fetchCustomers();
+}
+
+async function handleCustomerSortChange(payload: { prop?: string; order: "ascending" | "descending" | null; columnKey?: string }) {
+  const sortKey = payload.columnKey || payload.prop || "id";
+  const sortOrder = payload.order === "ascending" ? "asc" : "desc";
+  await applyCustomerSort(sortKey, sortOrder);
 }
 
 function fileNameFromDisposition(disposition: string | undefined, fallback: string) {
@@ -288,42 +318,45 @@ async function handleCustomerImportChange(event: Event) {
   }
 }
 
-async function removeCustomer(row: CustomerListItem) {
+function openDeleteCustomerDialog(row: CustomerListItem) {
+  deleteTargetCustomer.value = row;
+  deleteConfirmValue.value = "";
+  deleteBlockers.value = [];
+  showDeleteCustomerDialog.value = true;
+}
+
+async function submitDeleteCustomer() {
+  const row = deleteTargetCustomer.value;
+  if (!row) return;
   if (!canDeleteCustomer.value) {
     ElMessage.warning("只有老板和管理员可以删除客户");
     return;
   }
   const expectedName = (row.name || "").trim() || (row.contact_name || "").trim() || `客户#${row.id}`;
+  if ((deleteConfirmValue.value || "").trim() !== expectedName) {
+    ElMessage.warning("请输入完整客户名称后再确认删除");
+    return;
+  }
+  deletingCustomer.value = true;
   try {
-    const result = (await ElMessageBox.prompt(
-      `请输入“${expectedName}”确认删除这位客户。`,
-      "删除客户",
-      {
-        type: "warning",
-        confirmButtonText: "确认删除",
-        cancelButtonText: "取消",
-        inputPlaceholder: expectedName,
-      },
-    )) as { value: string };
-    if ((result.value || "").trim() !== expectedName) {
-      ElMessage.warning("输入名称不一致，已取消删除");
-      return;
-    }
     await apiClient.delete(`/customers/${row.id}`, {
       params: { confirm_name: expectedName },
     });
+    showDeleteCustomerDialog.value = false;
+    deleteTargetCustomer.value = null;
+    deleteConfirmValue.value = "";
+    deleteBlockers.value = [];
     ElMessage.success("客户已删除");
     await fetchCustomers();
   } catch (error: any) {
-    if (error === "cancel" || error?.message === "cancel") return;
     const detail = error?.response?.data?.detail;
     if (detail?.reason === "DEPENDENCY_BLOCKED" && Array.isArray(detail.blockers)) {
-      deleteBlockedCustomer.value = row;
       deleteBlockers.value = detail.blockers;
-      showDeleteBlockersDialog.value = true;
       return;
     }
     ElMessage.error(detail ?? "删除客户失败");
+  } finally {
+    deletingCustomer.value = false;
   }
 }
 
@@ -331,7 +364,7 @@ function handleMobileCommand(command: string, row: CustomerListItem) {
   if (command === "detail") openCustomerDetail(row);
   if (command === "billing") openCreateBillingDialog(row);
   if (command === "lead") openLeadDetail(row);
-  if (command === "delete") void removeCustomer(row);
+  if (command === "delete") openDeleteCustomerDialog(row);
 }
 
 function onMobileMenuCommand(command: { action: string; row: CustomerListItem }) {
@@ -420,6 +453,8 @@ async function createBillingRecordForCustomer() {
 }
 
 onMounted(async () => {
+  customerSortBy.value = String(route.query.sort_by || "id");
+  customerSortOrder.value = route.query.sort_order === "asc" ? "asc" : "desc";
   if (isMobileWorkflow.value) {
     restoreSavedCustomerFilters();
   }
@@ -666,7 +701,7 @@ onMounted(async () => {
                 {{ row.contact_name || "-" }} / {{ row.phone || "-" }}
               </div>
             </div>
-            <el-tag size="small" effect="plain">{{ row.accountant_username || "-" }}</el-tag>
+            <el-tag size="small" effect="plain">{{ row.responsible_username || row.accountant_username || "-" }}</el-tag>
           </div>
 
           <div class="mobile-record-metrics">
@@ -702,9 +737,19 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <el-table v-else v-loading="loading" :data="rows" stripe border size="small" class="customer-table-compact">
-        <el-table-column prop="id" label="序号" width="80" />
-        <el-table-column label="客户号+公司名" min-width="180" show-overflow-tooltip>
+      <el-table
+        v-else
+        v-loading="loading"
+        :data="rows"
+        stripe
+        border
+        size="small"
+        class="customer-table-compact"
+        :default-sort="{ prop: customerSortBy, order: customerSortOrderForTable() }"
+        @sort-change="handleCustomerSortChange"
+      >
+        <el-table-column prop="id" label="序号" width="80" sortable="custom" />
+        <el-table-column label="客户号+公司名" min-width="180" show-overflow-tooltip column-key="name" sortable="custom">
           <template #default="{ row }">
             <div class="customer-name-cell">
               <el-tag v-if="row.customer_code" size="small" effect="plain">{{ row.customer_code }}</el-tag>
@@ -736,11 +781,14 @@ onMounted(async () => {
           prop="source_service_start_display"
           label="服务开始"
           width="110"
+          column-key="created_at"
+          sortable="custom"
         />
         <el-table-column
           prop="contact_name"
           label="对接人及电话"
           min-width="160"
+          sortable="custom"
         >
           <template #default="{ row }">{{ `${row.contact_name || "-"} / ${row.phone || "-"}` }}</template>
         </el-table-column>
@@ -751,13 +799,16 @@ onMounted(async () => {
         />
         <el-table-column
           prop="accountant_username"
-          label="会计"
-          width="110"
-        />
-        <el-table-column
-          label="操作"
-          width="200"
+          label="负责人/会计"
+          width="128"
+          column-key="accountant"
+          sortable="custom"
         >
+          <template #default="{ row }">
+            {{ row.responsible_username || row.accountant_username || "-" }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-space class="table-action-wrap">
               <el-button link type="primary" @click="openCustomerDetail(row)">客户档案</el-button>
@@ -765,7 +816,7 @@ onMounted(async () => {
                 新增收费项目
               </el-button>
               <el-button link @click="openLeadDetail(row)">开发来源</el-button>
-              <el-button v-if="canDeleteCustomer" link type="danger" @click="removeCustomer(row)">删除</el-button>
+              <el-button v-if="canDeleteCustomer" link type="danger" @click="openDeleteCustomerDialog(row)">删除</el-button>
             </el-space>
           </template>
         </el-table-column>
@@ -799,22 +850,45 @@ onMounted(async () => {
     </template>
   </el-dialog>
 
-  <el-dialog v-model="showDeleteBlockersDialog" title="客户暂时不能删除" width="620px">
-    <div class="customer-delete-blockers-copy">
-      <strong>{{ deleteBlockedCustomer?.name || "该客户" }}</strong>
-      还有关联记录。先处理下面这些内容，再回来删除客户会更安全。
-    </div>
-    <div class="customer-delete-blockers">
-      <article v-for="item in deleteBlockers" :key="`${item.type}-${item.href}`" class="customer-delete-blocker-card">
-        <div class="customer-delete-blocker-main">
-          <div class="customer-delete-blocker-title">{{ item.label }}<span> · {{ item.count }} 条</span></div>
-          <div class="customer-delete-blocker-text">{{ item.message }}</div>
-        </div>
-        <el-button type="primary" plain size="small" @click="openDeleteBlockerTarget(item)">去处理</el-button>
-      </article>
-    </div>
+  <el-dialog v-model="showDeleteCustomerDialog" title="删除客户" width="620px" align-center destroy-on-close>
+    <template v-if="!deleteBlockers.length">
+      <div class="customer-delete-blockers-copy">
+        请输入完整客户名称确认删除：
+        <strong>{{ deleteTargetCustomer?.name || "该客户" }}</strong>
+      </div>
+      <el-input
+        v-model="deleteConfirmValue"
+        :placeholder="deleteTargetCustomer?.name || '请输入完整客户名称'"
+        class="customer-delete-input"
+        @keyup.enter="submitDeleteCustomer"
+      />
+    </template>
+    <template v-else>
+      <div class="customer-delete-blockers-copy">
+        <strong>{{ deleteTargetCustomer?.name || "该客户" }}</strong>
+        还有关联记录。先处理下面这些内容，再回来删除客户会更安全。
+      </div>
+      <div class="customer-delete-blockers">
+        <article v-for="item in deleteBlockers" :key="`${item.type}-${item.href}`" class="customer-delete-blocker-card">
+          <div class="customer-delete-blocker-main">
+            <div class="customer-delete-blocker-title">{{ item.label }}<span> · {{ item.count }} 条</span></div>
+            <div class="customer-delete-blocker-text">{{ item.message }}</div>
+          </div>
+          <el-button type="primary" plain size="small" @click="openDeleteBlockerTarget(item)">去处理</el-button>
+        </article>
+      </div>
+    </template>
     <template #footer>
-      <el-button @click="showDeleteBlockersDialog = false">知道了</el-button>
+      <el-button @click="showDeleteCustomerDialog = false">取消</el-button>
+      <el-button
+        v-if="!deleteBlockers.length"
+        type="danger"
+        :loading="deletingCustomer"
+        @click="submitDeleteCustomer"
+      >
+        确认删除
+      </el-button>
+      <el-button v-else type="primary" @click="showDeleteCustomerDialog = false">知道了</el-button>
     </template>
   </el-dialog>
 
@@ -856,7 +930,11 @@ onMounted(async () => {
 }
 
 .customer-table-compact :deep(.el-table__cell) {
-  padding: 6px 0;
+  padding: 4px 0;
+}
+
+.customer-delete-input {
+  margin-top: 14px;
 }
 
 .customer-delete-blockers-copy {

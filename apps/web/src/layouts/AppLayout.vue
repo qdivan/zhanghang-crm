@@ -273,6 +273,7 @@ const userTagText = computed(() => {
 .content-main {
   min-width: 0;
   overflow-x: visible;
+  padding-right: 88px;
 }
 
 @media (max-width: 768px) {
@@ -314,6 +315,10 @@ const userTagText = computed(() => {
 
   .main-area {
     padding: 10px 10px 78px;
+  }
+
+  .content-main {
+    padding-right: 0;
   }
 }
 

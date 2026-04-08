@@ -49,7 +49,6 @@ import {
   getLeadStartText,
   getStatusLabel,
   getTemplateLabel,
-  sortLeadRows,
   statusTagType,
 } from "./lead/viewMeta";
 
@@ -89,6 +88,7 @@ const historyRows = ref<FollowupItem[]>([]);
 const historyLeadName = ref("");
 const convertTargetLeadName = ref("");
 const convertBillingTargetName = ref("");
+const userOptions = ref<UserLite[]>([]);
 const accountantOptions = ref<UserLite[]>([]);
 const converting = ref(false);
 const creatingConvertBilling = ref(false);
@@ -146,6 +146,8 @@ const leadPageActionItems = computed(() => [
   { key: "import", label: "导入 Excel", description: "保留导入入口，后续继续接入。", disabled: true },
 ]);
 const showLeadInitialSkeleton = computed(() => !leadsHydrated.value);
+const leadSortBy = ref(String(route.query.sort_by || "id"));
+const leadSortOrder = ref<"asc" | "desc">(route.query.sort_order === "asc" ? "asc" : "desc");
 const leadRowActionItems = computed(() => {
   const row = selectedLeadActionRow.value;
   if (!row) return [];
@@ -157,7 +159,7 @@ const leadRowActionItems = computed(() => {
       : {
           key: "convert",
           label: "转化成交",
-          description: canConvert.value ? "将这条线索转为客户并分配会计。" : "当前账号没有转化权限。",
+          description: canConvert.value ? "将这条线索转为客户并分配负责人员。" : "当前账号没有转化权限。",
           disabled: !canConvert.value || row.status === "CONVERTED",
         },
     row.status === "CONVERTED"
@@ -189,6 +191,30 @@ function currentLeadFilterSnapshot() {
   };
 }
 
+function leadSortOrderForTable() {
+  return leadSortOrder.value === "asc" ? "ascending" : "descending";
+}
+
+async function applyLeadSort(sortBy: string, sortOrder: "asc" | "desc") {
+  leadSortBy.value = sortBy;
+  leadSortOrder.value = sortOrder;
+  await router.replace({
+    path: route.path,
+    query: {
+      ...route.query,
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    },
+  });
+  await fetchLeads();
+}
+
+async function handleLeadSortChange(payload: { prop?: string; order: "ascending" | "descending" | null; columnKey?: string }) {
+  const sortKey = payload.columnKey || payload.prop || "id";
+  const sortOrder = payload.order === "ascending" ? "asc" : "desc";
+  await applyLeadSort(sortKey, sortOrder);
+}
+
 async function fetchLeads() {
   loading.value = true;
   try {
@@ -196,13 +222,15 @@ async function fetchLeads() {
       params: {
         keyword: filters.keyword || undefined,
         status: filters.status || undefined,
+        sort_by: leadSortBy.value || "id",
+        sort_order: leadSortOrder.value || "desc",
       },
     });
     const activeLeadRows = resp.data.filter((item) => item.status !== "CONVERTED");
     const filtered = filters.template_type
       ? activeLeadRows.filter((item) => item.template_type === filters.template_type)
       : activeLeadRows;
-    rows.value = sortLeadRows(filtered);
+    rows.value = filtered;
   } catch (error) {
     ElMessage.error("获取线索失败");
   } finally {
@@ -265,24 +293,31 @@ async function createLead() {
   }
 }
 
-async function fetchAccountants() {
+async function fetchUserOptions() {
   if (!canConvert.value) {
+    userOptions.value = [];
     accountantOptions.value = [];
     return;
   }
   try {
-    const resp = await apiClient.get<UserLite[]>("/users", {
-      params: { role: "ACCOUNTANT" },
-    });
-    accountantOptions.value = resp.data;
+    const [usersResp, accountantsResp] = await Promise.all([
+      apiClient.get<UserLite[]>("/users", {
+        params: { scope: "all_active" },
+      }),
+      apiClient.get<UserLite[]>("/users", {
+        params: { role: "ACCOUNTANT", scope: "all_active" },
+      }),
+    ]);
+    userOptions.value = usersResp.data;
+    accountantOptions.value = accountantsResp.data;
   } catch (error) {
-    ElMessage.error("获取会计列表失败");
+    ElMessage.error("获取负责人员列表失败");
   }
 }
 
 async function ensureAccountantsLoaded() {
-  if (!canConvert.value || accountantOptions.value.length) return;
-  await fetchAccountants();
+  if (!canConvert.value || (accountantOptions.value.length && userOptions.value.length)) return;
+  await fetchUserOptions();
 }
 
 function resetRedevelopForm() {
@@ -434,14 +469,16 @@ async function openConvertDialog(lead: LeadItem) {
   }
   await ensureAccountantsLoaded();
   convertTargetLeadName.value = lead.name;
-  const preferred = accountantOptions.value.find((item) => item.id === lead.owner_id);
+  const preferredResponsible = userOptions.value.find((item) => item.id === lead.owner_id);
+  const preferredAccountant = accountantOptions.value.find((item) => item.id === lead.owner_id);
   Object.assign(convertForm, createLeadConvertForm(), {
     lead_id: lead.id,
-    accountant_id: preferred?.id ?? accountantOptions.value[0]?.id ?? null,
+    responsible_user_id: preferredResponsible?.id ?? userOptions.value[0]?.id ?? null,
+    assigned_accountant_id: preferredAccountant?.id ?? null,
     customer_name: lead.name,
     customer_contact_name: lead.contact_name,
     customer_phone: lead.phone,
-    customer_code_suffix: lead.source === "Sally直播" ? "S" : lead.intro === "麦总" ? "M" : "A",
+    customer_code_suffix: lead.source === "Sally直播" ? "S" : lead.source === "麦总" || lead.intro === "麦总" ? "M" : "A",
     conversion_mode: "NEW_CUSTOMER_LINKED",
   });
   showConvertDialog.value = true;
@@ -452,8 +489,8 @@ function resetConvertBillingRows(customerId: number | null = null) {
 }
 
 function validateConvertForm(): boolean {
-  if (!convertForm.lead_id || !convertForm.accountant_id) {
-    ElMessage.warning("请先选择分配会计");
+  if (!convertForm.lead_id || !convertForm.responsible_user_id) {
+    ElMessage.warning("请先选择负责人员");
     return false;
   }
   if (
@@ -470,10 +507,15 @@ async function performConvert(): Promise<{ id: number; name: string } | null> {
   if (!validateConvertForm()) return null;
   converting.value = true;
   try {
+    const selectedResponsible = userOptions.value.find((item) => item.id === convertForm.responsible_user_id);
+    const effectiveAssignedAccountantId =
+      convertForm.assigned_accountant_id
+      || (selectedResponsible?.role === "ACCOUNTANT" ? selectedResponsible.id : undefined);
     const resp = await apiClient.post<{ customer: { id: number; name: string } }>(
       `/leads/${convertForm.lead_id}/convert`,
       {
-        accountant_id: convertForm.accountant_id,
+        responsible_user_id: convertForm.responsible_user_id,
+        assigned_accountant_id: effectiveAssignedAccountantId,
         customer_name: convertForm.customer_name.trim(),
         customer_contact_name: convertForm.customer_contact_name.trim(),
         customer_phone: convertForm.customer_phone.trim(),
@@ -566,6 +608,16 @@ async function removeLead(lead: LeadItem) {
     return;
   }
   try {
+    await apiClient.delete(`/leads/${lead.id}`);
+    ElMessage.success("线索已删除");
+    await fetchLeads();
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "删除线索失败");
+  }
+}
+
+async function confirmRemoveLead(lead: LeadItem) {
+  try {
     await ElMessageBox.confirm(
       "删除线索后会进入回收站。已转化线索需要先撤销转化，再删除。",
       "删除线索",
@@ -575,9 +627,7 @@ async function removeLead(lead: LeadItem) {
         cancelButtonText: "取消",
       },
     );
-    await apiClient.delete(`/leads/${lead.id}`);
-    ElMessage.success("线索已删除");
-    await fetchLeads();
+    await removeLead(lead);
   } catch (error: any) {
     if (error === "cancel" || error?.message === "cancel") return;
     ElMessage.error(error?.response?.data?.detail ?? "删除线索失败");
@@ -740,6 +790,10 @@ function openLeadRowActions(row: LeadItem) {
 
 function handleLeadRowActionSelect(action: string) {
   if (!selectedLeadActionRow.value) return;
+  if (action === "delete") {
+    void confirmRemoveLead(selectedLeadActionRow.value);
+    return;
+  }
   handleMobileMenuCommand(action, selectedLeadActionRow.value);
 }
 
@@ -759,6 +813,8 @@ async function openHistoryDrawer(lead: LeadItem) {
 }
 
 onMounted(async () => {
+  leadSortBy.value = String(route.query.sort_by || "id");
+  leadSortOrder.value = route.query.sort_order === "asc" ? "asc" : "desc";
   if (isMobileWorkflow.value) {
     restoreSavedLeadFilters();
   }
@@ -1002,6 +1058,8 @@ watch(
       :rows="rows"
       :can-convert="canConvert"
       :can-delete="canDeleteLead"
+      :sort-prop="leadSortBy"
+      :sort-order="leadSortOrderForTable()"
       @company="openCompanyPage"
       @detail="openLeadDetail"
       @customer="openCustomerArchive"
@@ -1010,6 +1068,7 @@ watch(
       @convert="openConvertDialog"
       @revoke="revokeConvert"
       @delete="removeLead"
+      @sort-change="handleLeadSortChange"
     />
   </el-space>
 
@@ -1038,6 +1097,7 @@ watch(
     v-model:visible="showConvertDialog"
     :target-lead-name="convertTargetLeadName"
     :form="convertForm"
+    :user-options="userOptions"
     :accountant-options="accountantOptions"
     :loading="converting"
     @submit="submitConvert"

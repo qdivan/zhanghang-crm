@@ -13,6 +13,8 @@ const props = defineProps<{
   canManageLifecycle: boolean;
   canDeleteRecord: boolean;
   canWriteRecord: (row: BillingRecord) => boolean;
+  sortProp: string;
+  sortOrder: "ascending" | "descending" | null;
 }>();
 
 const emit = defineEmits<{
@@ -25,6 +27,7 @@ const emit = defineEmits<{
   renew: [row: BillingRecord];
   terminate: [row: BillingRecord];
   delete: [row: BillingRecord];
+  "sort-change": [payload: { prop: string | undefined; order: "ascending" | "descending" | null; columnKey?: string }];
 }>();
 
 const { isMobile } = useResponsive();
@@ -98,8 +101,8 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
     <template #header>
       <div class="table-head">
         <div>
-          <div class="table-title">收费明细</div>
-          <div class="table-subtitle">这里按收费项目序时查看。点公司名称可直接进入该客户往来账，办理进度和难点在右侧操作里继续维护。</div>
+          <div class="table-title">收费项目列表</div>
+          <div class="table-subtitle">这里直接按收费项目查看。点公司名称可进入单客户往来账，办理进度和难点在右侧继续维护。</div>
         </div>
         <el-tag size="small" type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
       </div>
@@ -144,7 +147,18 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           <el-button size="small" type="primary" :disabled="!props.canWriteRecord(row)" @click="emit('activity', row)">
             催收/收款
           </el-button>
-          <el-button size="small" type="warning" @click="emit('execution', row)">执行进度</el-button>
+          <el-button size="small" type="warning" @click="emit('execution', row)">办理进度/难点</el-button>
+          <el-popconfirm
+            v-if="props.canDeleteRecord"
+            title="确认删除这条收费项目吗？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="emit('delete', row)"
+          >
+            <template #reference>
+              <el-button size="small" type="danger" plain>删除</el-button>
+            </template>
+          </el-popconfirm>
           <el-dropdown trigger="click" @command="handleMenuCommand">
             <el-button size="small" plain>
               更多
@@ -153,10 +167,9 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item :command="{ action: 'split', row }" :disabled="!props.canWriteRecord(row)">分摊收款</el-dropdown-item>
-                <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
+                <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">派工/推送</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
                 <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
-                <el-dropdown-item v-if="props.canDeleteRecord" :command="{ action: 'delete', row }">删除收费单</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -172,9 +185,11 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
       border
       size="small"
       class="billing-table"
+      :default-sort="{ prop: props.sortProp, order: props.sortOrder }"
+      @sort-change="emit('sort-change', $event)"
     >
-      <el-table-column prop="serial_no" label="序号" width="64" />
-      <el-table-column label="公司名称" min-width="150" show-overflow-tooltip>
+      <el-table-column prop="serial_no" label="序号" width="72" sortable="custom" />
+      <el-table-column label="公司名称" min-width="150" show-overflow-tooltip column-key="customer_name" sortable="custom">
         <template #default="{ row }">
           <el-button link type="primary" @click="emit('customer', row)">
             <span :class="{ 'active-customer-name': props.activeCustomerId && row.customer_id === props.activeCustomerId }">
@@ -183,7 +198,7 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </el-button>
         </template>
       </el-table-column>
-      <el-table-column prop="receivable_period_text" label="应收期间" width="118" show-overflow-tooltip />
+      <el-table-column prop="receivable_period_text" label="应收期间" width="102" show-overflow-tooltip column-key="due_month" sortable="custom" />
       <el-table-column label="摘要" min-width="250" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="summary-cell">
@@ -192,8 +207,8 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="total_fee" label="应收" width="94" />
-      <el-table-column prop="received_amount" label="实收" width="94" />
+      <el-table-column prop="total_fee" label="应收" width="94" sortable="custom" />
+      <el-table-column prop="received_amount" label="实收" width="94" sortable="custom" />
       <el-table-column label="到期提醒" width="118">
         <template #default="{ row }">
           <el-tag size="small" :type="dueReminderTagType(row)" effect="plain">
@@ -201,9 +216,9 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="latest_payment_at" label="最近收款" width="112" />
+      <el-table-column prop="latest_payment_at" label="最近收款" width="112" sortable="custom" />
       <el-table-column prop="latest_receipt_account" label="入账账户" width="116" show-overflow-tooltip />
-      <el-table-column prop="outstanding_amount" label="余额" width="88" />
+      <el-table-column prop="outstanding_amount" label="余额" width="88" sortable="custom" />
       <el-table-column label="状态" width="88">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)" size="small">
@@ -211,14 +226,25 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="320" fixed="right">
+      <el-table-column label="操作" width="360" fixed="right">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button link type="info" @click="emit('ledger', row)">往来账</el-button>
             <el-button link type="primary" :disabled="!props.canWriteRecord(row)" @click="emit('activity', row)">
               催收/收款
             </el-button>
-            <el-button link type="warning" @click="emit('execution', row)">执行进度</el-button>
+            <el-button link type="warning" @click="emit('execution', row)">办理进度/难点</el-button>
+            <el-popconfirm
+              v-if="props.canDeleteRecord"
+              title="确认删除这条收费项目吗？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              @confirm="emit('delete', row)"
+            >
+              <template #reference>
+                <el-button link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
             <el-dropdown trigger="click" @command="handleMenuCommand">
               <el-button link type="success">
                 更多
@@ -227,10 +253,9 @@ function billingRowClassName({ row }: { row: BillingRecord }) {
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item :command="{ action: 'split', row }" :disabled="!props.canWriteRecord(row)">分摊收款</el-dropdown-item>
-                  <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">分派执行</el-dropdown-item>
+                  <el-dropdown-item v-if="props.canManageAssignment" :command="{ action: 'assignment', row }">派工/推送</el-dropdown-item>
                   <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'renew', row }">确认续费</el-dropdown-item>
                   <el-dropdown-item v-if="props.canManageLifecycle" :command="{ action: 'terminate', row }">提前终止</el-dropdown-item>
-                  <el-dropdown-item v-if="props.canDeleteRecord" :command="{ action: 'delete', row }">删除收费单</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>

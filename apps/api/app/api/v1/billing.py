@@ -2,7 +2,7 @@ from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, asc, desc, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user, require_roles
@@ -48,11 +48,26 @@ from app.schemas.billing import (
     BillingRecordUpdate,
 )
 from app.services.audit import write_operation_log
+from app.services.customer_scope import (
+    billing_assignment_exists_condition,
+    customer_owned_by_any_condition,
+    customer_owned_by_user_condition,
+)
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
 from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/billing-records", tags=["billing-records"])
+
+BILLING_SORT_FIELDS = {
+    "serial_no": BillingRecord.serial_no,
+    "customer_name": func.lower(BillingRecord.customer_name),
+    "due_month": BillingRecord.due_month,
+    "total_fee": BillingRecord.total_fee,
+    "received_amount": BillingRecord.received_amount,
+    "outstanding_amount": BillingRecord.outstanding_amount,
+    "created_at": BillingRecord.created_at,
+}
 
 
 def _normalize_payment_method(value: Optional[str]) -> str:
@@ -65,6 +80,16 @@ def _normalize_payment_method(value: Optional[str]) -> str:
 def _normalize_receipt_account(value: Optional[str]) -> str:
     raw = (value or "").strip()
     return raw or "未指定"
+
+
+def _normalize_sort_order(value: Optional[str], default: str = "desc") -> str:
+    token = (value or default).strip().lower()
+    return "asc" if token == "asc" else "desc"
+
+
+def _normalize_billing_sort_field(value: Optional[str]) -> str:
+    token = (value or "serial_no").strip().lower()
+    return token if token in BILLING_SORT_FIELDS else "serial_no"
 
 
 def _normalize_charge_mode(value: Optional[str]) -> str:
@@ -316,22 +341,14 @@ def _refresh_record_amounts(record: BillingRecord) -> None:
 def _apply_accountant_scope(stmt, db: Session, current_user: User, has_billing_read_grant: bool):
     stmt = stmt.where(active_filter(BillingRecord))
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        return stmt.where(
-            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id.in_(managed_ids)))
-        )
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        return stmt.where(BillingRecord.customer.has(and_(active_filter(Customer), customer_owned_by_any_condition(managed_ids))))
     if current_user.role != "ACCOUNTANT" or has_billing_read_grant:
         return stmt
-    assignment_visible_expr = exists(
-        select(BillingAssignment.id).where(
-            BillingAssignment.billing_record_id == BillingRecord.id,
-            BillingAssignment.assignee_user_id == current_user.id,
-            BillingAssignment.is_active.is_(True),
-        )
-    )
+    assignment_visible_expr = billing_assignment_exists_condition(current_user.id)
     return stmt.where(
         or_(
-            BillingRecord.customer.has(and_(active_filter(Customer), Customer.assigned_accountant_id == current_user.id)),
+            BillingRecord.customer.has(and_(active_filter(Customer), customer_owned_by_user_condition(current_user.id))),
             assignment_visible_expr,
         )
     )
@@ -450,6 +467,18 @@ def _has_active_assignment(db: Session, record_id: int, user_id: int) -> bool:
     return assignment_match is not None
 
 
+def _has_primary_assignment(db: Session, record_id: int, user_id: int) -> bool:
+    assignment_match = db.execute(
+        select(BillingAssignment.id).where(
+            BillingAssignment.billing_record_id == record_id,
+            BillingAssignment.assignee_user_id == user_id,
+            BillingAssignment.assignment_kind == "PRIMARY",
+            BillingAssignment.is_active.is_(True),
+        )
+    ).scalar_one_or_none()
+    return assignment_match is not None
+
+
 def _ensure_billing_access(record: BillingRecord, db: Session, current_user: User, *, for_write: bool = False) -> None:
     if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
@@ -457,8 +486,14 @@ def _ensure_billing_access(record: BillingRecord, db: Session, current_user: Use
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this billing record")
 
     if current_user.role == "MANAGER":
-        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
-        if record.customer is not None and record.customer.assigned_accountant_id in managed_ids:
+        managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)}
+        if (
+            record.customer is not None
+            and (
+                record.customer.responsible_user_id in managed_ids
+                or record.customer.assigned_accountant_id in managed_ids
+            )
+        ):
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this billing record")
 
@@ -466,12 +501,12 @@ def _ensure_billing_access(record: BillingRecord, db: Session, current_user: Use
         select(Customer.id).where(
             Customer.id == record.customer_id,
             active_filter(Customer),
-            Customer.assigned_accountant_id == current_user.id,
+            customer_owned_by_user_condition(current_user.id),
         )
     ).scalar_one_or_none()
     if own_customer is not None:
         return
-    if _has_active_assignment(db, record.id, current_user.id) and not for_write:
+    if not for_write and _has_active_assignment(db, record.id, current_user.id):
         return
     if not for_write and has_module_read_grant(db, current_user.id, "BILLING"):
         return
@@ -482,12 +517,12 @@ def _ensure_execution_log_write_access(record: BillingRecord, db: Session, curre
     if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
     if current_user.role == "MANAGER":
-        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
+        managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)}
         own_customer = db.execute(
             select(Customer.id).where(
                 Customer.id == record.customer_id,
                 active_filter(Customer),
-                Customer.assigned_accountant_id.in_(managed_ids),
+                customer_owned_by_any_condition(managed_ids),
             )
         ).scalar_one_or_none()
         if own_customer is not None:
@@ -497,7 +532,7 @@ def _ensure_execution_log_write_access(record: BillingRecord, db: Session, curre
         select(Customer.id).where(
             Customer.id == record.customer_id,
             active_filter(Customer),
-            Customer.assigned_accountant_id == current_user.id,
+            customer_owned_by_user_condition(current_user.id),
         )
     ).scalar_one_or_none()
     if own_customer is not None:
@@ -535,26 +570,26 @@ def _build_billing_record(
 
 def _ensure_customer_billing_write_access(customer: Customer, db: Session, current_user: User) -> None:
     if current_user.role == "MANAGER":
-        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
-        if customer.assigned_accountant_id in managed_ids:
+        managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)}
+        if customer.responsible_user_id in managed_ids or customer.assigned_accountant_id in managed_ids:
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No write access to this customer billing")
     if current_user.role != "ACCOUNTANT":
         return
-    if customer.assigned_accountant_id == current_user.id:
+    if current_user.id in {customer.responsible_user_id, customer.assigned_accountant_id}:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No write access to this customer billing")
 
 
 def _ensure_customer_billing_read_access(customer: Customer, db: Session, current_user: User) -> None:
     if current_user.role == "MANAGER":
-        managed_ids = set(get_manager_subordinate_ids(db, current_user.id))
-        if customer.assigned_accountant_id in managed_ids:
+        managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)}
+        if customer.responsible_user_id in managed_ids or customer.assigned_accountant_id in managed_ids:
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No read access to this customer billing")
     if current_user.role != "ACCOUNTANT":
         return
-    if customer.assigned_accountant_id == current_user.id:
+    if current_user.id in {customer.responsible_user_id, customer.assigned_accountant_id}:
         return
     if has_module_read_grant(db, current_user.id, "BILLING"):
         return
@@ -668,7 +703,7 @@ def _serialize_payment(payment: BillingPayment) -> BillingPaymentOut:
         customer_id=payment.customer_id,
         customer_name=customer.name if customer is not None else "",
         customer_contact_name=customer.contact_name if customer is not None else "",
-        accountant_username=customer.accountant.username if customer is not None and customer.accountant is not None else "",
+        accountant_username=((customer.accountant_username or customer.responsible_username) if customer is not None else ""),
         occurred_at=payment.occurred_at,
         amount=float(payment.amount or 0),
         strategy=payment.strategy,
@@ -739,6 +774,8 @@ def list_billing_records(
     receipt_account: Optional[str] = Query(default=None),
     contact_name: Optional[str] = Query(default=None),
     payment_method: Optional[str] = Query(default=None),
+    sort_by: Optional[str] = Query(default=None),
+    sort_order: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -748,7 +785,6 @@ def list_billing_records(
 
     stmt = select(BillingRecord).options(selectinload(BillingRecord.activities))
     stmt = _apply_accountant_scope(stmt, db, current_user, has_billing_read_grant)
-    stmt = stmt.order_by(BillingRecord.serial_no.asc(), BillingRecord.id.asc())
     if keyword:
         raw_key = keyword.strip()
         key = f"%{raw_key}%"
@@ -791,6 +827,9 @@ def list_billing_records(
             )
     if payment_method:
         stmt = stmt.where(BillingRecord.payment_method == payment_method)
+    field = _normalize_billing_sort_field(sort_by)
+    order_fn = asc if _normalize_sort_order(sort_order, "desc") == "asc" else desc
+    stmt = stmt.order_by(order_fn(BILLING_SORT_FIELDS[field]), BillingRecord.id.desc())
     return db.execute(stmt).scalars().all()
 
 
@@ -941,16 +980,7 @@ def delete_billing_record(
         )
     ).all()
     allocation_count = len(linked_payment_rows)
-    payment_activity_count = (
-        db.execute(
-            select(func.count(BillingActivity.id)).where(
-                BillingActivity.billing_record_id == record.id,
-                BillingActivity.activity_type == "PAYMENT",
-            )
-        ).scalar()
-        or 0
-    )
-    if allocation_count > 0 or payment_activity_count > 0 or float(record.received_amount or 0) > 0:
+    if allocation_count > 0 or float(record.received_amount or 0) > 0.01:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -959,7 +989,7 @@ def delete_billing_record(
                 "blockers": [
                     {
                         "type": "BILLING_PAYMENT",
-                        "count": allocation_count or payment_activity_count,
+                        "count": allocation_count or 1,
                         "label": "收款单",
                         "message": "请先处理关联收款单后再删除收费项目。",
                         "href": f"/billing?view=payments&customerId={record.customer_id or ''}",
@@ -1190,10 +1220,10 @@ def list_billing_payments(
         .order_by(BillingPayment.occurred_at.desc(), BillingPayment.id.desc())
     )
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        stmt = stmt.where(customer_owned_by_any_condition(managed_ids))
     elif current_user.role == "ACCOUNTANT" and not has_billing_read_grant:
-        stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
+        stmt = stmt.where(customer_owned_by_user_condition(current_user.id))
     if customer_id:
         stmt = stmt.where(BillingPayment.customer_id == customer_id)
     if accountant_id:
@@ -1629,7 +1659,7 @@ def get_receipt_account_ledger(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="date_from must be <= date_to")
     _ensure_receipt_account_ledger_access(db, current_user)
-    managed_ids = set(get_manager_subordinate_ids(db, current_user.id)) if current_user.role == "MANAGER" else set()
+    managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)} if current_user.role == "MANAGER" else set()
 
     normalized_account = (receipt_account or "").strip()
 
@@ -1651,7 +1681,11 @@ def get_receipt_account_ledger(
         .order_by(BillingPayment.occurred_at.asc(), BillingPayment.id.asc())
     ).all()
     for payment, customer, username in payment_rows:
-        if current_user.role == "MANAGER" and customer.assigned_accountant_id not in managed_ids:
+        if (
+            current_user.role == "MANAGER"
+            and customer.responsible_user_id not in managed_ids
+            and customer.assigned_accountant_id not in managed_ids
+        ):
             continue
         account_name = _normalize_receipt_account(payment.receipt_account)
         if normalized_account and account_name != normalized_account:
@@ -1692,7 +1726,11 @@ def get_receipt_account_ledger(
         .order_by(BillingActivity.occurred_at.asc(), BillingActivity.id.asc())
     ).all()
     for activity, record, customer, username in direct_payment_rows:
-        if current_user.role == "MANAGER" and customer.assigned_accountant_id not in managed_ids:
+        if (
+            current_user.role == "MANAGER"
+            and customer.responsible_user_id not in managed_ids
+            and customer.assigned_accountant_id not in managed_ids
+        ):
             continue
         account_name = _normalize_receipt_account(activity.receipt_account)
         if normalized_account and account_name != normalized_account:
@@ -2049,7 +2087,11 @@ def list_billing_assignees(
     assignments = db.execute(
         select(BillingAssignment)
         .where(BillingAssignment.billing_record_id == record.id)
-        .order_by(BillingAssignment.is_active.desc(), BillingAssignment.id.desc())
+        .order_by(
+            BillingAssignment.is_active.desc(),
+            BillingAssignment.assignment_kind.desc(),
+            BillingAssignment.id.desc(),
+        )
     ).scalars().all()
     return assignments
 
@@ -2071,8 +2113,6 @@ def create_billing_assignee(
     assignee = db.execute(select(User).where(User.id == payload.assignee_user_id)).scalar_one_or_none()
     if assignee is None or not assignee.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee not found or inactive")
-    if assignee.role == "OWNER":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Owner cannot be assigned as executor")
 
     existing_active = db.execute(
         select(BillingAssignment.id).where(
@@ -2084,9 +2124,21 @@ def create_billing_assignee(
     if existing_active is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assignee already exists")
 
+    if payload.assignment_kind == "PRIMARY":
+        current_primary_rows = db.execute(
+            select(BillingAssignment).where(
+                BillingAssignment.billing_record_id == record.id,
+                BillingAssignment.assignment_kind == "PRIMARY",
+                BillingAssignment.is_active.is_(True),
+            )
+        ).scalars().all()
+        for item in current_primary_rows:
+            item.is_active = False
+
     assignment = BillingAssignment(
         billing_record_id=record.id,
         assignee_user_id=payload.assignee_user_id,
+        assignment_kind=payload.assignment_kind,
         assignment_role=payload.assignment_role,
         is_active=True,
         note=(payload.note or "").strip(),
@@ -2099,7 +2151,10 @@ def create_billing_assignee(
         action="BILLING_ASSIGNMENT_CREATED",
         entity_type="BILLING_ASSIGNMENT",
         entity_id=record.id,
-        detail=f"record_id={record.id},assignee={assignee.username},role={assignment.assignment_role}",
+        detail=(
+            f"record_id={record.id},assignee={assignee.username},"
+            f"kind={assignment.assignment_kind},role={assignment.assignment_role}"
+        ),
     )
     db.commit()
     db.refresh(assignment)
@@ -2182,10 +2237,34 @@ def update_billing_assignee(
     if assignment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing assignment not found")
 
+    if payload.assignment_kind is not None:
+        assignment.assignment_kind = payload.assignment_kind
+        if payload.assignment_kind == "PRIMARY" and assignment.is_active:
+            current_primary_rows = db.execute(
+                select(BillingAssignment).where(
+                    BillingAssignment.billing_record_id == record.id,
+                    BillingAssignment.assignment_kind == "PRIMARY",
+                    BillingAssignment.is_active.is_(True),
+                    BillingAssignment.id != assignment.id,
+                )
+            ).scalars().all()
+            for item in current_primary_rows:
+                item.is_active = False
     if payload.assignment_role is not None:
         assignment.assignment_role = payload.assignment_role
     if payload.is_active is not None:
         assignment.is_active = payload.is_active
+        if assignment.is_active and assignment.assignment_kind == "PRIMARY":
+            current_primary_rows = db.execute(
+                select(BillingAssignment).where(
+                    BillingAssignment.billing_record_id == record.id,
+                    BillingAssignment.assignment_kind == "PRIMARY",
+                    BillingAssignment.is_active.is_(True),
+                    BillingAssignment.id != assignment.id,
+                )
+            ).scalars().all()
+            for item in current_primary_rows:
+                item.is_active = False
     if payload.note is not None:
         assignment.note = payload.note.strip()
 
@@ -2195,7 +2274,10 @@ def update_billing_assignee(
         action="BILLING_ASSIGNMENT_UPDATED",
         entity_type="BILLING_ASSIGNMENT",
         entity_id=assignment.id,
-        detail=f"is_active={assignment.is_active},role={assignment.assignment_role}",
+        detail=(
+            f"is_active={assignment.is_active},kind={assignment.assignment_kind},"
+            f"role={assignment.assignment_role}"
+        ),
     )
     db.commit()
     db.refresh(assignment)

@@ -108,7 +108,17 @@ function paymentSummary(row: BillingPaymentItem) {
             >
               去分摊
             </el-button>
-            <el-button v-if="props.canDelete" link type="danger" @click="emit('remove', row)">删除</el-button>
+            <el-popconfirm
+              v-if="props.canDelete"
+              title="确认删除这张收款单吗？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              @confirm="emit('remove', row)"
+            >
+              <template #reference>
+                <el-button link type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
           </div>
         </template>
       </el-table-column>

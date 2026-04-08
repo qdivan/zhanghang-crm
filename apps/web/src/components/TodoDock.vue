@@ -357,6 +357,8 @@ watch(isMobile, (value) => {
   right: 14px;
   bottom: 18px;
   z-index: 1080;
+  min-width: 72px;
+  padding-inline: 12px;
   box-shadow: 0 8px 18px rgba(24, 100, 255, 0.25);
 }
 

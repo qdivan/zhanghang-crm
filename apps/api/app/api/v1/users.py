@@ -82,7 +82,12 @@ def _count_user_dependencies(db: Session, user_id: int) -> dict[str, int]:
         select(func.count(Lead.id)).where(Lead.owner_id == user_id),
     ).scalar_one()
     customer_count = db.execute(
-        select(func.count(Customer.id)).where(Customer.assigned_accountant_id == user_id),
+        select(func.count(Customer.id)).where(
+            or_(
+                Customer.assigned_accountant_id == user_id,
+                Customer.responsible_user_id == user_id,
+            )
+        ),
     ).scalar_one()
     activity_count = db.execute(
         select(func.count(BillingActivity.id)).where(BillingActivity.actor_id == user_id),
@@ -130,6 +135,7 @@ def list_users(
     role: Optional[str] = Query(default=None),
     keyword: Optional[str] = Query(default=None),
     include_inactive: bool = Query(default=False),
+    scope: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -142,9 +148,9 @@ def list_users(
     if keyword:
         key = f"%{keyword.strip()}%"
         stmt = stmt.where(or_(User.username.ilike(key), User.role.ilike(key)))
-    if current_user.role == "MANAGER":
+    if current_user.role == "MANAGER" and scope != "all_active":
         stmt = stmt.where(User.id.in_(get_manager_subordinate_ids(db, current_user.id)))
-    elif current_user.role == "OWNER":
+    elif current_user.role == "OWNER" and scope != "all_active":
         stmt = stmt.where(User.role != "ADMIN")
     return db.execute(stmt).scalars().all()
 

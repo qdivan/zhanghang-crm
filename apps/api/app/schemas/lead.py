@@ -127,6 +127,10 @@ class LeadFollowupOut(BaseModel):
 
 
 class ConvertLeadRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    responsible_user_id: Optional[int] = None
+    assigned_accountant_id: Optional[int] = None
     accountant_id: Optional[int] = None
     customer_name: Optional[str] = None
     customer_contact_name: Optional[str] = None
@@ -147,7 +151,10 @@ class CustomerOut(BaseModel):
     contact_name: str
     phone: str
     status: str
-    assigned_accountant_id: int
+    responsible_user_id: Optional[int]
+    responsible_username: str = ""
+    assigned_accountant_id: Optional[int]
+    accountant_username: str = ""
     source_customer_id: Optional[int]
     source_lead_id: int
     created_at: datetime

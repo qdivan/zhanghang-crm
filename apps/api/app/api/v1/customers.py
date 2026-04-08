@@ -2,8 +2,8 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.api.deps import get_current_user, require_roles
 from app.db.session import get_db
@@ -40,11 +40,20 @@ from app.services.customer_spreadsheet import (
     build_customer_template_bytes,
     parse_customer_import_file,
 )
+from app.services.customer_scope import customer_owned_by_any_condition, customer_owned_by_user_condition
 from app.services.data_access import has_module_read_grant
 from app.services.org_scope import get_manager_subordinate_ids
 from app.services.soft_delete import active_filter, mark_deleted
 
 router = APIRouter(prefix="/customers", tags=["customers"])
+
+CUSTOMER_SORT_FIELDS = {
+    "id": Customer.id,
+    "name": func.lower(Customer.name),
+    "customer_code": func.lower(Customer.customer_code),
+    "contact_name": func.lower(Customer.contact_name),
+    "created_at": Customer.created_at,
+}
 
 
 def _get_customer_or_404(db: Session, customer_id: int) -> Customer:
@@ -59,11 +68,31 @@ def _apply_customer_scope_stmt(stmt, db: Session, current_user: User):
     if current_user.role == "ACCOUNTANT":
         has_customer_read_grant = has_module_read_grant(db, current_user.id, "CUSTOMER")
     if current_user.role == "MANAGER":
-        managed_ids = get_manager_subordinate_ids(db, current_user.id)
-        stmt = stmt.where(Customer.assigned_accountant_id.in_(managed_ids))
+        managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
+        stmt = stmt.where(customer_owned_by_any_condition(managed_ids))
     elif current_user.role == "ACCOUNTANT" and not has_customer_read_grant:
-        stmt = stmt.where(Customer.assigned_accountant_id == current_user.id)
+        stmt = stmt.where(customer_owned_by_user_condition(current_user.id))
     return stmt
+
+
+def _normalize_sort_order(value: Optional[str], default: str = "desc") -> str:
+    token = (value or default).strip().lower()
+    return "asc" if token == "asc" else "desc"
+
+
+def _normalize_customer_sort_field(value: Optional[str]) -> str:
+    token = (value or "id").strip().lower()
+    return token if token in CUSTOMER_SORT_FIELDS or token == "accountant" else "id"
+
+
+def _apply_customer_sort(stmt, sort_by: Optional[str], sort_order: Optional[str], *, accountant_username_column=None):
+    field = _normalize_customer_sort_field(sort_by)
+    direction = _normalize_sort_order(sort_order, "desc")
+    order_column = CUSTOMER_SORT_FIELDS[field]
+    if field == "accountant" and accountant_username_column is not None:
+        order_column = func.lower(accountant_username_column)
+    order_fn = asc if direction == "asc" else desc
+    return stmt.order_by(order_fn(order_column), Customer.id.desc())
 
 
 def _customer_service_start_display(lead: Lead) -> str:
@@ -139,7 +168,7 @@ def _resolve_import_accountant_id(
 ) -> int:
     normalized = _normalize_text(username)
     if not normalized:
-        if existing_customer is not None:
+        if existing_customer is not None and existing_customer.assigned_accountant_id is not None:
             return existing_customer.assigned_accountant_id
         raise ValueError("新增客户必须填写会计账号")
     accountant = db.execute(
@@ -315,10 +344,14 @@ def _ensure_customer_access(
     if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
     if current_user.role == "MANAGER":
-        if customer.assigned_accountant_id in set(get_manager_subordinate_ids(db, current_user.id)):
+        managed_ids = {current_user.id, *get_manager_subordinate_ids(db, current_user.id)}
+        if (
+            customer.responsible_user_id in managed_ids
+            or customer.assigned_accountant_id in managed_ids
+        ):
             return
     else:
-        if customer.assigned_accountant_id == current_user.id:
+        if current_user.id in {customer.responsible_user_id, customer.assigned_accountant_id}:
             return
         if not for_write and has_module_read_grant(db, current_user.id, "CUSTOMER"):
             return
@@ -460,7 +493,7 @@ def _join_note_parts(*parts: str) -> str:
 
 def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> list[CustomerTimelineEntryOut]:
     owner = db.execute(select(User).where(User.id == lead.owner_id)).scalar_one_or_none()
-    accountant = db.execute(select(User).where(User.id == customer.assigned_accountant_id)).scalar_one_or_none()
+    responsible_name = customer.responsible_username or customer.accountant_username or str(customer.responsible_user_id or customer.assigned_accountant_id or "")
 
     followups = db.execute(
         select(LeadFollowup)
@@ -577,7 +610,7 @@ def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> lis
                     source_type="CONVERTED",
                     source_id=lead.id,
                     title="客户成单",
-                    content=f"已转入客户列表，并分配会计 {accountant.username if accountant else customer.assigned_accountant_id}",
+                    content=f"已转入客户列表，并分配负责人员 {responsible_name or '-'}",
                     note="",
                     actor_username=username or "",
                     extra="",
@@ -691,13 +724,18 @@ def _build_customer_timeline(db: Session, customer: Customer, lead: Lead) -> lis
 @router.get("", response_model=list[CustomerListOut])
 def list_customers(
     keyword: Optional[str] = Query(default=None),
+    sort_by: Optional[str] = Query(default=None),
+    sort_order: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    accountant_user = aliased(User)
+    responsible_user = aliased(User)
     stmt = (
         select(
             Customer,
-            User.username,
+            accountant_user.username,
+            responsible_user.username,
             Lead.template_type,
             Lead.grade,
             Lead.region,
@@ -715,10 +753,10 @@ def list_customers(
             Lead.last_followup_date,
             Lead.reminder_value,
         )
-        .join(User, Customer.assigned_accountant_id == User.id)
+        .outerjoin(accountant_user, Customer.assigned_accountant_id == accountant_user.id)
+        .outerjoin(responsible_user, Customer.responsible_user_id == responsible_user.id)
         .join(Lead, Customer.source_lead_id == Lead.id)
         .where(active_filter(Customer), active_filter(Lead))
-        .order_by(Customer.id.desc())
     )
     if keyword:
         key = f"%{keyword.strip()}%"
@@ -728,16 +766,19 @@ def list_customers(
                 Customer.contact_name.ilike(key),
                 Customer.phone.ilike(key),
                 Customer.customer_code.ilike(key),
-                User.username.ilike(key),
+                accountant_user.username.ilike(key),
+                responsible_user.username.ilike(key),
             )
         )
     stmt = _apply_customer_scope_stmt(stmt, db, current_user)
+    stmt = _apply_customer_sort(stmt, sort_by, sort_order, accountant_username_column=accountant_user.username)
 
     rows = db.execute(stmt).all()
     result: list[CustomerListOut] = []
     for (
         customer,
         accountant_username,
+        responsible_username,
         template_type,
         grade,
         region,
@@ -769,8 +810,10 @@ def list_customers(
                 contact_name=customer.contact_name,
                 phone=customer.phone,
                 status=customer.status,
+                responsible_user_id=customer.responsible_user_id,
+                responsible_username=responsible_username or "",
                 assigned_accountant_id=customer.assigned_accountant_id,
-                accountant_username=accountant_username,
+                accountant_username=accountant_username or "",
                 source_customer_id=customer.source_customer_id,
                 source_lead_id=customer.source_lead_id,
                 source_template_type=template_type or "",
@@ -823,9 +866,10 @@ def export_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    accountant_user = aliased(User)
     stmt = (
-        select(Customer, User.username, Lead)
-        .join(User, Customer.assigned_accountant_id == User.id)
+        select(Customer, accountant_user.username, Lead)
+        .outerjoin(accountant_user, Customer.assigned_accountant_id == accountant_user.id)
         .join(Lead, Customer.source_lead_id == Lead.id)
         .where(active_filter(Customer), active_filter(Lead))
         .order_by(Customer.id.desc())
@@ -838,7 +882,7 @@ def export_customers(
                 Customer.contact_name.ilike(key),
                 Customer.phone.ilike(key),
                 Customer.customer_code.ilike(key),
-                User.username.ilike(key),
+                accountant_user.username.ilike(key),
             )
         )
     stmt = _apply_customer_scope_stmt(stmt, db, current_user)
@@ -953,6 +997,7 @@ async def import_customers(
                     )
                     if accountant_id != existing_customer.assigned_accountant_id:
                         existing_customer.assigned_accountant_id = accountant_id
+                        existing_customer.responsible_user_id = accountant_id
                         changed = True
 
                     imported_code = _normalize_text(row.get("customer_code", "")).upper()
@@ -1094,6 +1139,7 @@ async def import_customers(
                     contact_name=contact_name,
                     phone=phone,
                     status=_normalize_text(row.get("status", "")).upper() or "ACTIVE",
+                    responsible_user_id=accountant_id,
                     assigned_accountant_id=accountant_id,
                     customer_code_seq=code_seq,
                     customer_code_suffix=code_suffix,
@@ -1282,8 +1328,6 @@ def get_customer_detail(
         .order_by(LeadFollowup.followup_at.desc(), LeadFollowup.id.desc())
     ).scalars().all()
 
-    accountant = db.execute(select(User).where(User.id == customer.assigned_accountant_id)).scalar_one_or_none()
-    accountant_username = accountant.username if accountant else ""
     timeline = _build_customer_timeline(db, customer, lead)
 
     return CustomerDetailOut(
@@ -1295,8 +1339,10 @@ def get_customer_detail(
         contact_name=customer.contact_name,
         phone=customer.phone,
         status=customer.status,
+        responsible_user_id=customer.responsible_user_id,
+        responsible_username=customer.responsible_username,
         assigned_accountant_id=customer.assigned_accountant_id,
-        accountant_username=accountant_username,
+        accountant_username=customer.accountant_username,
         source_customer_id=customer.source_customer_id,
         source_lead_id=customer.source_lead_id,
         created_at=customer.created_at,

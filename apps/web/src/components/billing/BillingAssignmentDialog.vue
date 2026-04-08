@@ -3,7 +3,12 @@ import { computed } from "vue";
 
 import type { BillingAssignmentItem, BillingRecord } from "../../types";
 import type { BillingAssignmentForm } from "../../views/billing/forms";
-import { assignmentRoleLabel, assignmentRoleOptions } from "../../views/billing/viewMeta";
+import {
+  assignmentKindLabel,
+  assignmentKindOptions,
+  assignmentRoleLabel,
+  assignmentRoleOptions,
+} from "../../views/billing/viewMeta";
 
 type UserLite = {
   id: number;
@@ -32,7 +37,7 @@ const dialogVisible = computed({
   set: (value: boolean) => emit("update:visible", value),
 });
 
-const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.customer_name ?? ""}`);
+const dialogTitle = computed(() => `派工 / 推送 - ${props.targetRecord?.customer_name ?? ""}`);
 </script>
 
 <template>
@@ -40,7 +45,7 @@ const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.custome
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="10">
-          <el-form-item label="执行人员">
+          <el-form-item label="派给谁">
             <el-select v-model="props.form.assignee_user_id" filterable placeholder="请选择执行人员">
               <el-option
                 v-for="item in props.users"
@@ -51,8 +56,20 @@ const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.custome
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
-          <el-form-item label="分派角色">
+        <el-col :span="6">
+          <el-form-item label="分派方式">
+            <el-select v-model="props.form.assignment_kind">
+              <el-option
+                v-for="item in assignmentKindOptions"
+                :key="`assignment-kind-${item.value}`"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+        </el-col>
+        <el-col :span="6">
+          <el-form-item label="业务角色">
             <el-select v-model="props.form.assignment_role">
               <el-option
                 v-for="item in assignmentRoleOptions"
@@ -63,9 +80,9 @@ const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.custome
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="4">
           <el-form-item label="操作">
-            <el-button type="primary" :loading="props.submitting" @click="emit('submit')">新增分派</el-button>
+            <el-button type="primary" :loading="props.submitting" @click="emit('submit')">确认派工</el-button>
           </el-form-item>
         </el-col>
       </el-row>
@@ -79,7 +96,12 @@ const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.custome
     <el-table v-loading="props.loading" :data="props.rows" stripe border>
       <el-table-column prop="assignee_username" label="执行人员" width="130" />
       <el-table-column prop="assignee_role" label="系统角色" width="110" />
-      <el-table-column label="分派角色" width="120">
+      <el-table-column label="分派方式" width="110">
+        <template #default="{ row }">
+          {{ assignmentKindLabel(row.assignment_kind) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="业务角色" width="120">
         <template #default="{ row }">
           {{ assignmentRoleLabel(row.assignment_role) }}
         </template>
@@ -95,7 +117,7 @@ const dialogTitle = computed(() => `执行分派 - ${props.targetRecord?.custome
       <el-table-column label="操作" width="90">
         <template #default="{ row }">
           <el-button link type="danger" :disabled="!row.is_active" @click="emit('deactivate', row)">
-            取消
+            结束
           </el-button>
         </template>
       </el-table-column>

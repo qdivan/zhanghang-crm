@@ -1,14 +1,25 @@
 import type {
+  BillingAssignmentKind,
   BillingAssignmentRole,
   BillingExecutionProgressType,
   BillingPaymentStrategy,
 } from "../../types";
+
+export const assignmentKindOptions: Array<{ value: BillingAssignmentKind; label: string }> = [
+  { value: "PRIMARY", label: "当前负责人" },
+  { value: "CC", label: "抄送" },
+];
 
 export const assignmentRoleOptions: Array<{ value: BillingAssignmentRole; label: string }> = [
   { value: "REGISTRATION", label: "注册办理" },
   { value: "DELIVERY", label: "交付执行" },
   { value: "OTHER", label: "其他支持" },
 ];
+
+export function assignmentKindLabel(value: BillingAssignmentKind | string): string {
+  if (value === "PRIMARY") return "当前负责人";
+  return "抄送";
+}
 
 export const progressTypeOptions: Array<{ value: BillingExecutionProgressType; label: string }> = [
   { value: "UPDATE", label: "进展更新" },
