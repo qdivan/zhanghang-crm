@@ -2146,8 +2146,8 @@ watch(
     />
   </template>
 
-  <el-space v-else direction="vertical" fill :size="12">
-    <el-card shadow="never" class="billing-view-switch-card">
+  <section v-else class="billing-desktop-shell">
+    <el-card shadow="never" class="billing-view-switch-card billing-desktop-block">
       <div class="billing-view-switch">
         <div class="billing-view-switch-copy-block">
           <div class="billing-view-switch-title">收费工作台</div>
@@ -2188,6 +2188,7 @@ watch(
 
     <BillingSummaryPanel
       v-if="billingPrimaryView === 'SUMMARY'"
+      class="billing-desktop-block"
       :summary="summary"
       :loading="summaryLoading"
       v-model:date-range="summaryDateRange"
@@ -2203,6 +2204,7 @@ watch(
 
     <BillingFilterCard
       v-if="billingPrimaryView !== 'LEDGER'"
+      class="billing-desktop-block"
       :filters="filters"
       :can-manage-grant="canManageGrant"
       :customers="customerFilterOptions"
@@ -2215,6 +2217,7 @@ watch(
 
     <BillingRecordsCard
       v-if="billingPrimaryView === 'RECORDS'"
+      class="billing-desktop-block"
       :loading="loading"
       :rows="rows"
       :active-customer-id="ledgerTargetRecord?.customer_id ?? null"
@@ -2238,6 +2241,7 @@ watch(
 
     <BillingPaymentsCard
       v-else-if="billingPrimaryView === 'PAYMENTS'"
+      class="billing-desktop-block"
       :loading="paymentLoading"
       :rows="paymentRows"
       :unallocated-only="paymentUnallocatedOnly"
@@ -2248,7 +2252,7 @@ watch(
       @ledger="openPaymentCustomerLedger"
     />
 
-    <div v-if="billingPrimaryView === 'LEDGER'" ref="ledgerPanelAnchor">
+    <div v-if="billingPrimaryView === 'LEDGER'" ref="ledgerPanelAnchor" class="billing-desktop-block">
       <BillingLedgerPanel
         v-if="ledgerTargetRecord && !isMobile"
         v-model:date-range="ledgerDateRange"
@@ -2261,7 +2265,7 @@ watch(
         @clear="clearLedgerPanel"
       />
     </div>
-  </el-space>
+  </section>
   <BillingCreateDialog
     :visible="showCreateDialog"
     :customer-id="createCustomerId"
@@ -2359,17 +2363,48 @@ watch(
 </template>
 
 <style scoped>
+.billing-desktop-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.billing-desktop-block {
+  width: 100%;
+  min-width: 0;
+}
+
+.billing-desktop-shell :deep(.el-card),
+.billing-desktop-shell :deep(.el-card__body),
+.billing-desktop-shell :deep(.el-card__header) {
+  min-width: 0;
+}
+
+.billing-desktop-shell :deep(.el-table),
+.billing-desktop-shell :deep(.el-table__inner-wrapper),
+.billing-desktop-shell :deep(.el-scrollbar),
+.billing-desktop-shell :deep(.el-scrollbar__wrap),
+.billing-desktop-shell :deep(.el-scrollbar__view) {
+  width: 100%;
+  min-width: 0;
+}
+
 .billing-view-switch-card {
   border-color: #dfe6e8;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 251, 0.98) 100%);
+  overflow: hidden;
 }
 
 .billing-view-switch {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
+  grid-template-columns: minmax(0, 1fr) minmax(420px, clamp(420px, 34vw, 560px));
   align-items: center;
   gap: 18px;
+  width: 100%;
+  min-width: 0;
 }
 
 .billing-view-switch-copy-block {
@@ -2397,6 +2432,7 @@ watch(
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+  width: 100%;
 }
 
 .billing-view-switch-tabs {
@@ -2418,6 +2454,7 @@ watch(
 .billing-view-switch-ledger {
   display: flex;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .billing-mobile-page {
@@ -2739,6 +2776,12 @@ watch(
 .billing-expand-leave-to {
   opacity: 0;
   transform: translateY(-6px);
+}
+
+@media (max-width: 1600px) {
+  .billing-view-switch {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
+  }
 }
 
 @media (max-width: 1360px) {
