@@ -95,6 +95,7 @@ const securityForm = reactive({
 
 const logLoading = ref(false);
 const logRows = ref<OperationLogItem[]>([]);
+const showAdvancedLogFilters = ref(false);
 const logFilters = reactive({
   keyword: "",
   action: "",
@@ -105,7 +106,9 @@ const logFilters = reactive({
 
 const recycleLoading = ref(false);
 const recycleRestoreLoadingKey = ref<string | null>(null);
+const recycleBulkRestoring = ref(false);
 const deletedRows = ref<DeletedRecordItem[]>([]);
+const recycleSelectedRows = ref<DeletedRecordItem[]>([]);
 const recycleFilters = reactive({
   keyword: "",
   entity_type: "",
@@ -208,6 +211,32 @@ const deletedEntityOptions = [
   { label: "已服务公司", value: "ADDRESS_RESOURCE_COMPANY" },
   { label: "常用资料", value: "COMMON_LIBRARY" },
 ] as const;
+
+const recycleQuickFilters = computed(() => {
+  const counts = deletedRows.value.reduce<Record<string, number>>((acc, item) => {
+    acc[item.entity_type] = (acc[item.entity_type] || 0) + 1;
+    return acc;
+  }, {});
+  return [
+    { label: "全部", value: "", count: deletedRows.value.length },
+    ...deletedEntityOptions
+      .filter((item) => item.value)
+      .map((item) => ({
+        label: item.label,
+        value: item.value,
+        count: counts[item.value] || 0,
+      })),
+  ];
+});
+
+const activeAdvancedLogFilterCount = computed(() => {
+  let count = 0;
+  if (logFilters.action.trim()) count += 1;
+  if (logFilters.entity_type.trim()) count += 1;
+  if (logFilters.audit_scope) count += 1;
+  if (logFilters.limit !== 200) count += 1;
+  return count;
+});
 
 function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" | "recycle" {
   if (tab === "grants") return "grants";
@@ -675,6 +704,14 @@ async function fetchLogs() {
   }
 }
 
+function resetAdvancedLogFilters() {
+  logFilters.action = "";
+  logFilters.entity_type = "";
+  logFilters.audit_scope = "";
+  logFilters.limit = 200;
+  fetchLogs();
+}
+
 async function fetchDeletedRecords() {
   recycleLoading.value = true;
   try {
@@ -722,6 +759,66 @@ async function restoreDeletedRecord(row: DeletedRecordItem) {
   } finally {
     recycleRestoreLoadingKey.value = null;
   }
+}
+
+function handleRecycleSelectionChange(rows: DeletedRecordItem[]) {
+  recycleSelectedRows.value = rows;
+}
+
+async function restoreSelectedDeletedRecords() {
+  if (!recycleSelectedRows.value.length) {
+    ElMessage.warning("请先勾选要恢复的记录");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认批量恢复已勾选的 ${recycleSelectedRows.value.length} 条记录吗？`,
+      "批量恢复确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认恢复",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+
+  recycleBulkRestoring.value = true;
+  const rows = [...recycleSelectedRows.value];
+  const results = await Promise.allSettled(
+    rows.map((row) =>
+      apiClient.post<DeletedRecordRestoreResult>(
+        `/admin/deleted-records/${row.entity_type}/${row.entity_id}/restore`,
+        {},
+      ),
+    ),
+  );
+  const successCount = results.filter((item) => item.status === "fulfilled").length;
+  const failedCount = results.length - successCount;
+  recycleSelectedRows.value = [];
+  try {
+    await Promise.all([fetchUsers(), fetchDataAccessGrants(), fetchDeletedRecords(), fetchLogs()]);
+    if (successCount && !failedCount) {
+      ElMessage.success(`已恢复 ${successCount} 条记录`);
+    } else if (successCount) {
+      ElMessage.warning(`已恢复 ${successCount} 条，另有 ${failedCount} 条恢复失败`);
+    } else {
+      ElMessage.error("批量恢复失败");
+    }
+  } finally {
+    recycleBulkRestoring.value = false;
+  }
+}
+
+function applyRecycleQuickFilter(value: string) {
+  recycleFilters.entity_type = value;
+  recycleSelectedRows.value = [];
+  fetchDeletedRecords();
+}
+
+function recycleRowKey(row: DeletedRecordItem) {
+  return `${row.entity_type}:${row.entity_id}`;
 }
 
 function resetGrantForm() {
@@ -1399,7 +1496,7 @@ watch(
 
       <el-tab-pane label="数据授权" name="grants">
         <el-space direction="vertical" fill :size="12">
-          <el-card shadow="never">
+          <el-card shadow="never" class="admin-panel-card">
             <el-form inline @submit.prevent="fetchDataAccessGrants" class="admin-filter-form">
               <el-form-item label="关键词">
                 <el-input
@@ -1434,80 +1531,74 @@ watch(
             </el-form>
           </el-card>
 
-          <el-card shadow="never">
+          <el-card shadow="never" class="admin-panel-card">
             <template #header>
-              <div class="head">
-                <span>临时只读授权</span>
-                <el-tag type="warning" effect="plain">{{ filteredGrantRows.length }} 条</el-tag>
+              <div class="head head-rich">
+                <div>
+                  <div class="section-title">临时只读授权</div>
+                  <div class="section-copy">把重点信息压缩在一屏内，方便快速停用、恢复或删除授权。</div>
+                </div>
+                <div class="head-actions">
+                  <el-tag type="warning" effect="plain">{{ filteredGrantRows.length }} 条</el-tag>
+                  <el-button type="primary" @click="openGrantDialog">新增授权</el-button>
+                </div>
               </div>
             </template>
-            <el-table v-loading="grantLoading" :data="filteredGrantRows" stripe border>
-              <el-table-column prop="id" label="ID" width="80" />
-              <el-table-column prop="grantee_username" label="被授权会计" width="130" />
+            <el-table v-loading="grantLoading" :data="filteredGrantRows" stripe border size="small" class="admin-grant-table">
+              <el-table-column prop="grantee_username" label="被授权会计" min-width="150" fixed="left" />
               <el-table-column label="模块" width="110">
                 <template #default="{ row }">{{ moduleLabel(row.module) }}</template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column label="授权状态" width="150">
                 <template #default="{ row }">
-                  <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
-                    {{ row.is_active ? "启用" : "停用" }}
-                  </el-tag>
+                  <div class="grant-status-stack">
+                    <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+                      {{ row.is_active ? "启用" : "停用" }}
+                    </el-tag>
+                    <el-tag :type="row.is_effective ? 'success' : 'warning'" size="small" effect="plain">
+                      {{ row.is_effective ? "当前生效" : "当前未生效" }}
+                    </el-tag>
+                  </div>
                 </template>
               </el-table-column>
-              <el-table-column label="当前生效" width="100">
+              <el-table-column label="有效期" min-width="230" class-name="mobile-hide" label-class-name="mobile-hide">
                 <template #default="{ row }">
-                  <el-tag :type="row.is_effective ? 'success' : 'warning'" size="small">
-                    {{ row.is_effective ? "是" : "否" }}
-                  </el-tag>
+                  <div class="grant-period-cell">
+                    <div>起：{{ formatDateTimeInBrowserTimeZone(row.starts_at) }}</div>
+                    <div>止：{{ formatDateTimeInBrowserTimeZone(row.ends_at) }}</div>
+                  </div>
                 </template>
               </el-table-column>
-              <el-table-column label="生效时间" min-width="165" class-name="mobile-hide" label-class-name="mobile-hide">
-                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.starts_at) }}</template>
-              </el-table-column>
-              <el-table-column label="失效时间" min-width="165" class-name="mobile-hide" label-class-name="mobile-hide">
-                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.ends_at) }}</template>
-              </el-table-column>
-              <el-table-column
-                prop="reason"
-                label="授权原因"
-                min-width="180"
-                show-overflow-tooltip
-                class-name="mobile-hide"
-                label-class-name="mobile-hide"
-              />
-              <el-table-column
-                prop="granted_by_username"
-                label="授权人"
-                width="110"
-                class-name="mobile-hide"
-                label-class-name="mobile-hide"
-              />
-              <el-table-column
-                label="创建时间"
-                min-width="165"
-                class-name="mobile-hide"
-                label-class-name="mobile-hide"
-              >
-                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="150">
+              <el-table-column label="授权说明" min-width="280" show-overflow-tooltip>
                 <template #default="{ row }">
-                  <el-button
-                    link
-                    :type="row.is_active ? 'danger' : 'primary'"
-                    :loading="grantToggleLoadingId === row.id"
-                    @click="toggleGrantActive(row, !row.is_active)"
-                  >
-                    {{ row.is_active ? "停用" : "启用" }}
-                  </el-button>
-                  <el-button
-                    link
-                    type="danger"
-                    :loading="deleteLoadingGrantId === row.id"
-                    @click="removeGrant(row)"
-                  >
-                    删除
-                  </el-button>
+                  <div class="grant-reason-cell">
+                    <div class="grant-reason-main">{{ row.reason || "未填写原因" }}</div>
+                    <div class="grant-reason-meta">
+                      授权人：{{ row.granted_by_username || "-" }} · 创建于 {{ formatDateTimeInBrowserTimeZone(row.created_at) }}
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <div class="admin-row-actions">
+                    <el-button
+                      link
+                      :type="row.is_active ? 'danger' : 'primary'"
+                      :loading="grantToggleLoadingId === row.id"
+                      @click="toggleGrantActive(row, !row.is_active)"
+                    >
+                      {{ row.is_active ? "停用" : "启用" }}
+                    </el-button>
+                    <el-button
+                      link
+                      type="danger"
+                      :loading="deleteLoadingGrantId === row.id"
+                      @click="removeGrant(row)"
+                    >
+                      删除
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -1549,14 +1640,12 @@ watch(
             </el-row>
 
             <el-alert
-              title="仅作用于本地账号登录。默认规则是 5 分钟内同一 IP 连续输错 20 次后锁定该 IP。"
+              title="当前锁定仅作用于本地账号登录，不影响老板账号在局域网内测试。"
               type="info"
               :closable="false"
-              style="margin-bottom: 12px"
             />
-
-            <el-space wrap>
-              <el-button type="primary" :loading="securitySaving" @click="saveSecuritySettings">保存安全设置</el-button>
+            <el-space style="margin-top: 12px">
+              <el-button type="primary" :loading="securitySaving" @click="saveSecuritySettings">保存设置</el-button>
               <el-tag type="warning" effect="plain">
                 当前规则：{{ securityForm.local_ip_lock_window_minutes }} 分钟 / {{ securityForm.local_ip_lock_max_attempts }} 次
               </el-tag>
@@ -1566,126 +1655,175 @@ watch(
       </el-tab-pane>
 
       <el-tab-pane label="LDAP 设置" name="ldap">
-        <el-card v-loading="ldapLoading" shadow="never">
-          <el-form label-position="top">
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="8">
-                <el-form-item label="启用 LDAP">
-                  <el-switch v-model="ldapForm.enabled" active-text="启用" inactive-text="停用" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="8">
-                <el-form-item label="默认角色">
-                  <el-select v-model="ldapForm.default_role">
-                    <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="8">
-                <el-form-item label="同步状态">
-                  <el-tag type="info">{{ hasBindPassword ? "已保存绑定密码" : "未保存绑定密码" }}</el-tag>
-                </el-form-item>
-              </el-col>
-            </el-row>
+        <el-card v-loading="ldapLoading" shadow="never" class="ldap-settings-card">
+          <div class="ldap-settings-shell">
+            <div class="ldap-settings-summary">
+              <div>
+                <div class="section-title">LDAP 同步设置</div>
+                <div class="section-copy">长表单继续保留，但操作区固定在底部，滚动到任何位置都能直接保存或同步。</div>
+              </div>
+              <el-tag type="info" effect="plain">{{ hasBindPassword ? "已保存绑定密码" : "未保存绑定密码" }}</el-tag>
+            </div>
+            <el-form label-position="top" class="ldap-settings-form">
+              <el-row :gutter="12">
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="启用 LDAP">
+                    <el-switch v-model="ldapForm.enabled" active-text="启用" inactive-text="停用" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="默认角色">
+                    <el-select v-model="ldapForm.default_role">
+                      <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="8">
+                  <el-form-item label="同步状态">
+                    <el-tag type="info">{{ hasBindPassword ? "已保存绑定密码" : "未保存绑定密码" }}</el-tag>
+                  </el-form-item>
+                </el-col>
+              </el-row>
 
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="12">
-                <el-form-item label="服务器地址">
-                  <el-input v-model="ldapForm.server_url" placeholder="如 ldap://192.168.1.10:389 或 ldaps://..." />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <el-form-item label="Base DN">
-                  <el-input v-model="ldapForm.base_dn" placeholder="如 dc=example,dc=com" />
-                </el-form-item>
-              </el-col>
-            </el-row>
+              <el-row :gutter="12">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="服务器地址">
+                    <el-input v-model="ldapForm.server_url" placeholder="如 ldap://192.168.1.10:389 或 ldaps://..." />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Base DN">
+                    <el-input v-model="ldapForm.base_dn" placeholder="如 dc=example,dc=com" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
 
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="12">
-                <el-form-item label="Bind DN">
-                  <el-input v-model="ldapForm.bind_dn" placeholder="如 uid=admin,cn=users,dc=example,dc=com" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <el-form-item label="Bind Password（留空不修改）">
-                  <el-input v-model="ldapForm.bind_password" type="password" show-password />
-                </el-form-item>
-              </el-col>
-            </el-row>
+              <el-row :gutter="12">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Bind DN">
+                    <el-input v-model="ldapForm.bind_dn" placeholder="如 uid=admin,cn=users,dc=example,dc=com" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="Bind Password（留空不修改）">
+                    <el-input v-model="ldapForm.bind_password" type="password" show-password />
+                  </el-form-item>
+                </el-col>
+              </el-row>
 
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="12">
-                <el-form-item label="用户搜索基准 DN">
-                  <el-input v-model="ldapForm.user_base_dn" placeholder="如 cn=users,dc=example,dc=com" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <el-form-item label="用户过滤器">
-                  <el-input v-model="ldapForm.user_filter" placeholder="如 (uid=*)" />
-                </el-form-item>
-              </el-col>
-            </el-row>
+              <el-row :gutter="12">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="用户搜索基准 DN">
+                    <el-input v-model="ldapForm.user_base_dn" placeholder="如 cn=users,dc=example,dc=com" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="用户过滤器">
+                    <el-input v-model="ldapForm.user_filter" placeholder="如 (uid=*)" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
 
-            <el-row :gutter="12">
-              <el-col :xs="24" :md="12">
-                <el-form-item label="用户名属性">
-                  <el-input v-model="ldapForm.username_attr" placeholder="如 uid" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <el-form-item label="显示名属性">
-                  <el-input v-model="ldapForm.display_name_attr" placeholder="如 cn" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-
-            <el-space>
-              <el-button type="primary" :loading="ldapSaving" @click="saveLdapSettings">保存设置</el-button>
-              <el-button :loading="ldapSyncing" @click="syncLdapUsers">立即同步 LDAP 账号</el-button>
-            </el-space>
-          </el-form>
+              <el-row :gutter="12">
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="用户名属性">
+                    <el-input v-model="ldapForm.username_attr" placeholder="如 uid" />
+                  </el-form-item>
+                </el-col>
+                <el-col :xs="24" :md="12">
+                  <el-form-item label="显示名属性">
+                    <el-input v-model="ldapForm.display_name_attr" placeholder="如 cn" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </el-form>
+            <div class="ldap-settings-footer">
+              <div class="ldap-settings-footer-copy">
+                保存不会覆盖已存在的绑定密码，只有重新填写密码时才会更新。
+              </div>
+              <div class="ldap-settings-footer-actions">
+                <el-button type="primary" :loading="ldapSaving" @click="saveLdapSettings">保存设置</el-button>
+                <el-button :loading="ldapSyncing" @click="syncLdapUsers">立即同步 LDAP 账号</el-button>
+              </div>
+            </div>
+          </div>
         </el-card>
       </el-tab-pane>
 
       <el-tab-pane label="操作日志" name="logs">
         <el-space direction="vertical" fill :size="12">
-          <el-card shadow="never">
-            <el-form inline @submit.prevent="fetchLogs" class="admin-filter-form">
-              <el-form-item label="关键词">
-                <el-input
-                  v-model="logFilters.keyword"
-                  placeholder="操作描述/对象"
-                  clearable
-                  @keyup.enter="fetchLogs"
-                />
-              </el-form-item>
-              <el-form-item label="动作">
-                <el-input v-model="logFilters.action" placeholder="如 USER_UPDATED" clearable />
-              </el-form-item>
-              <el-form-item label="对象类型">
-                <el-input v-model="logFilters.entity_type" placeholder="如 USER/LDAP" clearable />
-              </el-form-item>
-              <el-form-item label="审计范围">
-                <el-select v-model="logFilters.audit_scope" placeholder="全部" clearable>
-                  <el-option label="仅删除" value="DELETE" />
-                  <el-option label="仅恢复" value="RESTORE" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="条数">
-                <el-input-number v-model="logFilters.limit" :min="1" :max="500" :controls="false" />
-              </el-form-item>
-              <el-form-item>
-                <el-button @click="fetchLogs">查询</el-button>
-              </el-form-item>
-            </el-form>
+          <el-card shadow="never" class="admin-panel-card">
+            <div class="log-filter-shell">
+              <div class="log-filter-primary">
+                <div class="log-filter-copy">
+                  <div class="section-title">操作日志筛选</div>
+                  <div class="section-copy">先用关键词快速定位，再按动作、对象类型和审计范围细筛。</div>
+                </div>
+                <el-form inline @submit.prevent="fetchLogs" class="admin-filter-form log-filter-primary-form">
+                  <el-form-item label="关键词">
+                    <el-input
+                      v-model="logFilters.keyword"
+                      placeholder="操作描述 / 对象 / 用户"
+                      clearable
+                      @keyup.enter="fetchLogs"
+                    />
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button type="primary" @click="fetchLogs">查询</el-button>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button text @click="showAdvancedLogFilters = !showAdvancedLogFilters">
+                      {{ showAdvancedLogFilters ? "收起高级筛选" : "高级筛选" }}
+                      <el-tag
+                        v-if="activeAdvancedLogFilterCount"
+                        size="small"
+                        effect="plain"
+                        class="log-advanced-count"
+                      >
+                        {{ activeAdvancedLogFilterCount }}
+                      </el-tag>
+                    </el-button>
+                  </el-form-item>
+                </el-form>
+              </div>
+              <el-collapse-transition>
+                <div v-show="showAdvancedLogFilters" class="log-filter-advanced">
+                  <div class="log-filter-advanced-head">
+                    <div class="log-filter-advanced-title">高级筛选</div>
+                    <el-button text @click="resetAdvancedLogFilters">清空细筛</el-button>
+                  </div>
+                  <el-form inline @submit.prevent="fetchLogs" class="admin-filter-form log-filter-advanced-form">
+                    <el-form-item label="动作">
+                      <el-input v-model="logFilters.action" placeholder="如 USER_UPDATED" clearable />
+                    </el-form-item>
+                    <el-form-item label="对象类型">
+                      <el-input v-model="logFilters.entity_type" placeholder="如 USER / LDAP" clearable />
+                    </el-form-item>
+                    <el-form-item label="审计范围">
+                      <el-select v-model="logFilters.audit_scope" placeholder="全部" clearable>
+                        <el-option label="仅删除" value="DELETE" />
+                        <el-option label="仅恢复" value="RESTORE" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="条数">
+                      <el-input-number v-model="logFilters.limit" :min="1" :max="500" :controls="false" />
+                    </el-form-item>
+                  </el-form>
+                </div>
+              </el-collapse-transition>
+            </div>
           </el-card>
 
-          <el-card shadow="never">
+          <el-card shadow="never" class="admin-panel-card">
             <template #header>
-              <div class="head">
-                <span>操作日志</span>
-                <el-tag type="info" effect="plain">{{ logRows.length }} 条</el-tag>
+              <div class="head head-rich">
+                <div>
+                  <div class="section-title">操作日志</div>
+                  <div class="section-copy">集中看账号、授权、删除恢复这些关键动作，判断是谁在什么时间做了什么。</div>
+                </div>
+                <div class="head-actions">
+                  <el-tag type="info" effect="plain">{{ logRows.length }} 条</el-tag>
+                </div>
               </div>
             </template>
             <el-table v-loading="logLoading" :data="logRows" stripe border>
@@ -1737,7 +1875,24 @@ watch(
 
       <el-tab-pane label="回收站" name="recycle">
         <el-space direction="vertical" fill :size="12">
-          <el-card shadow="never">
+          <el-card shadow="never" class="admin-panel-card">
+            <div class="recycle-filter-strip">
+              <div class="recycle-filter-strip-label">快捷筛选</div>
+              <div class="recycle-filter-chips">
+                <el-button
+                  v-for="item in recycleQuickFilters"
+                  :key="item.value || 'all'"
+                  size="small"
+                  :type="recycleFilters.entity_type === item.value ? 'primary' : 'default'"
+                  :plain="recycleFilters.entity_type !== item.value"
+                  class="recycle-filter-chip"
+                  @click="applyRecycleQuickFilter(item.value)"
+                >
+                  {{ item.label }}
+                  <span class="recycle-filter-chip-count">{{ item.count }}</span>
+                </el-button>
+              </div>
+            </div>
             <el-form inline @submit.prevent="fetchDeletedRecords" class="admin-filter-form">
               <el-form-item label="关键词">
                 <el-input
@@ -1761,14 +1916,38 @@ watch(
             </el-form>
           </el-card>
 
-          <el-card shadow="never">
+          <el-card shadow="never" class="admin-panel-card">
             <template #header>
-              <div class="head">
-                <span>回收站</span>
-                <el-tag type="warning" effect="plain">{{ deletedRows.length }} 条</el-tag>
+              <div class="head head-rich">
+                <div>
+                  <div class="section-title">回收站</div>
+                  <div class="section-copy">先按类型快速缩小范围，再批量恢复，能少很多来回点开的操作。</div>
+                </div>
+                <div class="head-actions">
+                  <el-tag type="warning" effect="plain">{{ deletedRows.length }} 条</el-tag>
+                  <el-button
+                    type="primary"
+                    plain
+                    :disabled="!recycleSelectedRows.length"
+                    :loading="recycleBulkRestoring"
+                    @click="restoreSelectedDeletedRecords"
+                  >
+                    批量恢复
+                  </el-button>
+                </div>
               </div>
             </template>
-            <el-table v-loading="recycleLoading" :data="deletedRows" stripe border>
+            <el-table
+              v-loading="recycleLoading"
+              :data="deletedRows"
+              stripe
+              border
+              size="small"
+              :row-key="recycleRowKey"
+              class="recycle-table"
+              @selection-change="handleRecycleSelectionChange"
+            >
+              <el-table-column type="selection" width="48" reserve-selection />
               <el-table-column label="删除时间" min-width="160">
                 <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.deleted_at) }}</template>
               </el-table-column>
@@ -1791,7 +1970,7 @@ watch(
                 class-name="mobile-hide"
                 label-class-name="mobile-hide"
               />
-              <el-table-column label="操作" width="100">
+              <el-table-column label="操作" width="108" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     link
@@ -2069,6 +2248,175 @@ watch(
   justify-content: space-between;
 }
 
+.head-rich {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.head-actions,
+.admin-row-actions,
+.ldap-settings-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text-primary);
+}
+
+.section-copy {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.admin-panel-card {
+  border-color: var(--app-border-soft);
+}
+
+.grant-status-stack,
+.grant-period-cell,
+.grant-reason-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.grant-period-cell,
+.grant-reason-meta,
+.ldap-settings-footer-copy,
+.recycle-filter-strip-label,
+.recycle-filter-chip-count {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--app-text-muted);
+}
+
+.grant-reason-main {
+  color: var(--app-text-primary);
+  line-height: 1.5;
+}
+
+.admin-grant-table :deep(.el-table__cell),
+.recycle-table :deep(.el-table__cell) {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.ldap-settings-card :deep(.el-card__body) {
+  padding: 18px 20px 0;
+}
+
+.ldap-settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ldap-settings-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.ldap-settings-form {
+  min-width: 0;
+}
+
+.ldap-settings-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0 16px;
+  margin-top: 4px;
+  border-top: 1px solid var(--app-border-soft);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.recycle-filter-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px dashed var(--app-border-soft);
+}
+
+.recycle-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recycle-filter-chip {
+  min-height: 32px;
+}
+
+.log-filter-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.log-filter-primary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.log-filter-copy {
+  min-width: 0;
+  max-width: 440px;
+}
+
+.log-filter-primary-form {
+  justify-content: flex-end;
+}
+
+.log-filter-primary-form :deep(.el-form-item:first-child .el-input) {
+  width: min(420px, 100%);
+}
+
+.log-advanced-count {
+  margin-left: 8px;
+}
+
+.log-filter-advanced {
+  padding: 14px 16px 6px;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 16px;
+  background: var(--app-surface-muted);
+}
+
+.log-filter-advanced-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.log-filter-advanced-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--app-text-primary);
+}
+
+.log-filter-advanced-form {
+  margin-bottom: -8px;
+}
+
 .admin-filter-form :deep(.el-select),
 .admin-filter-form :deep(.el-autocomplete),
 .admin-filter-form :deep(.el-date-editor),
@@ -2086,6 +2434,26 @@ watch(
 @media (max-width: 768px) {
   .admin-mobile-hero {
     flex-direction: column;
+  }
+
+  .head-rich,
+  .log-filter-primary,
+  .ldap-settings-summary,
+  .ldap-settings-footer,
+  .recycle-filter-strip {
+    flex-direction: column;
+  }
+
+  .head-actions,
+  .ldap-settings-footer-actions,
+  .log-filter-primary-form {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .log-filter-copy {
+    max-width: none;
   }
 
   .admin-mobile-tab-row {
