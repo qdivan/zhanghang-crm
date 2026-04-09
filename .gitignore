@@ -28,11 +28,14 @@ infra/env/*.env
 output/playwright/
 output/spreadsheet/
 output/release/
+output/import-export/
+output/ui-audit/
 old_example_table/
 backups/
 
 # Local SQLite runtime data
 /test.db
+/daizhang.db
 apps/api/*.db
 apps/api/*.sqlite
 apps/api/*.sqlite3

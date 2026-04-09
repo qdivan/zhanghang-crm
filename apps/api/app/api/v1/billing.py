@@ -992,11 +992,12 @@ def delete_billing_record(
                         "count": allocation_count or 1,
                         "label": "收款单",
                         "message": "请先处理关联收款单后再删除收费项目。",
-                        "href": f"/billing?view=payments&customerId={record.customer_id or ''}",
+                        "href": f"/billing?view=payments&customerId={record.customer_id or ''}&recordId={record.id}&focusDependency=1",
                         "filters": {
                             "view": "payments",
                             "customerId": record.customer_id,
                             "recordId": record.id,
+                            "focusDependency": 1,
                         },
                     }
                 ],
@@ -1197,6 +1198,7 @@ def suggest_billing_payment_allocations(
 def list_billing_payments(
     keyword: Optional[str] = Query(default=None),
     customer_id: Optional[int] = Query(default=None),
+    record_id: Optional[int] = Query(default=None),
     accountant_id: Optional[int] = Query(default=None),
     receipt_account: Optional[str] = Query(default=None),
     date_from: Optional[date] = Query(default=None),
@@ -1226,6 +1228,10 @@ def list_billing_payments(
         stmt = stmt.where(customer_owned_by_user_condition(current_user.id))
     if customer_id:
         stmt = stmt.where(BillingPayment.customer_id == customer_id)
+    if record_id:
+        stmt = stmt.join(BillingPaymentAllocation, BillingPaymentAllocation.payment_id == BillingPayment.id).where(
+            BillingPaymentAllocation.billing_record_id == record_id
+        )
     if accountant_id:
         stmt = stmt.where(Customer.assigned_accountant_id == accountant_id)
     if receipt_account:

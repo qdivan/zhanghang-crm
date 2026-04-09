@@ -119,6 +119,8 @@ const paymentRows = ref<BillingPaymentItem[]>([]);
 const paymentLoading = ref(false);
 const paymentListHydrated = ref(false);
 const paymentUnallocatedOnly = ref(false);
+const paymentFocusRecordId = ref<number | null>(null);
+const paymentDependencyFocus = ref(false);
 const allocatingPaymentRow = ref<BillingPaymentItem | null>(null);
 
 const billingQuickView = ref<BillingQuickView>("ALL");
@@ -579,10 +581,11 @@ async function fetchPayments() {
     const params: Record<string, string | number | boolean | undefined> = {
       keyword: filters.keyword || undefined,
       customer_id: filters.customer_id || undefined,
+      record_id: paymentFocusRecordId.value || undefined,
       accountant_id: filters.accountant_id || undefined,
       receipt_account: filters.receipt_account || undefined,
-      date_from: summaryDateRange.value?.[0] || undefined,
-      date_to: summaryDateRange.value?.[1] || undefined,
+      date_from: paymentDependencyFocus.value ? undefined : summaryDateRange.value?.[0] || undefined,
+      date_to: paymentDependencyFocus.value ? undefined : summaryDateRange.value?.[1] || undefined,
       unallocated_only: paymentUnallocatedOnly.value || undefined,
     };
     const resp = await apiClient.get<BillingPaymentItem[]>("/billing-records/payments", { params });
@@ -1101,7 +1104,14 @@ async function removeBillingRecord(row: BillingRecord) {
             cancelButtonText: "稍后处理",
           },
         );
-        router.push(detail.blockers[0].href);
+        const blocker = detail.blockers[0];
+        router.push({
+          path: "/billing",
+          query: {
+            ...(blocker.filters || {}),
+            view: "payments",
+          },
+        });
         billingPrimaryView.value = "PAYMENTS";
       } catch {
         // user cancelled follow-up navigation
@@ -1392,6 +1402,9 @@ async function applyBillingRouteViewState() {
   const queryView = String(route.query.view || "").trim().toLowerCase();
   const querySortBy = String(route.query.sort_by || "serial_no").trim() || "serial_no";
   const querySortOrder = route.query.sort_order === "asc" ? "asc" : "desc";
+  const focusDependency = ["1", "true", "yes"].includes(
+    String(route.query.focus_dependency || route.query.focusDependency || "").trim().toLowerCase(),
+  );
   if (queryView === "records") billingPrimaryView.value = "RECORDS";
   else if (queryView === "payments") billingPrimaryView.value = "PAYMENTS";
   else if (queryView === "ledger") billingPrimaryView.value = "LEDGER";
@@ -1400,6 +1413,9 @@ async function applyBillingRouteViewState() {
   const customerToken = String(route.query.customer_id || route.query.customerId || "").trim();
   const nextCustomerId = customerToken ? Number(customerToken) : null;
   const normalizedCustomerId = nextCustomerId && Number.isFinite(nextCustomerId) ? nextCustomerId : null;
+  const recordToken = String(route.query.record_id || route.query.recordId || "").trim();
+  const nextRecordId = recordToken ? Number(recordToken) : null;
+  const normalizedRecordId = nextRecordId && Number.isFinite(nextRecordId) ? nextRecordId : null;
   const unallocatedOnly = String(route.query.unallocated || "").trim() === "1";
   let shouldQuery = false;
   if (recordSortBy.value !== querySortBy) {
@@ -1415,9 +1431,64 @@ async function applyBillingRouteViewState() {
     filters.customer_id = normalizedCustomerId;
     shouldQuery = true;
   }
-  if (paymentUnallocatedOnly.value !== unallocatedOnly) {
-    paymentUnallocatedOnly.value = unallocatedOnly;
+  const expectedFocusRecordId = queryView === "payments" ? normalizedRecordId : null;
+  if (paymentFocusRecordId.value !== expectedFocusRecordId) {
+    paymentFocusRecordId.value = expectedFocusRecordId;
     shouldQuery = true;
+  }
+  if (paymentDependencyFocus.value !== focusDependency) {
+    paymentDependencyFocus.value = focusDependency;
+    shouldQuery = true;
+  }
+  const desiredUnallocatedOnly = focusDependency ? false : unallocatedOnly;
+  if (paymentUnallocatedOnly.value !== desiredUnallocatedOnly) {
+    paymentUnallocatedOnly.value = desiredUnallocatedOnly;
+    shouldQuery = true;
+  }
+
+  if (focusDependency) {
+    const nextFilters = createBillingFilters();
+    nextFilters.customer_id = normalizedCustomerId;
+    if (filters.keyword !== nextFilters.keyword) {
+      filters.keyword = nextFilters.keyword;
+      shouldQuery = true;
+    }
+    if (filters.customer_id !== nextFilters.customer_id) {
+      filters.customer_id = nextFilters.customer_id;
+      shouldQuery = true;
+    }
+    if (filters.accountant_id !== nextFilters.accountant_id) {
+      filters.accountant_id = nextFilters.accountant_id;
+      shouldQuery = true;
+    }
+    if (filters.billing_month !== nextFilters.billing_month) {
+      filters.billing_month = nextFilters.billing_month;
+      shouldQuery = true;
+    }
+    if (filters.receipt_account !== nextFilters.receipt_account) {
+      filters.receipt_account = nextFilters.receipt_account;
+      shouldQuery = true;
+    }
+    if (filters.contact_name !== nextFilters.contact_name) {
+      filters.contact_name = nextFilters.contact_name;
+      shouldQuery = true;
+    }
+    if (filters.payment_method !== nextFilters.payment_method) {
+      filters.payment_method = nextFilters.payment_method;
+      shouldQuery = true;
+    }
+    if (filters.status !== nextFilters.status) {
+      filters.status = nextFilters.status;
+      shouldQuery = true;
+    }
+    if (billingQuickView.value !== "ALL") {
+      billingQuickView.value = "ALL";
+      shouldQuery = true;
+    }
+    if (summaryDateRange.value !== null) {
+      summaryDateRange.value = null;
+      shouldQuery = true;
+    }
   }
 
   if (shouldQuery) {

@@ -3139,6 +3139,9 @@ def test_billing_record_delete_uses_simple_confirm_and_blocks_paid_record():
         detail = paid_delete_resp.json()["detail"]
         assert detail["reason"] == "DEPENDENCY_BLOCKED"
         assert detail["blockers"][0]["type"] == "BILLING_PAYMENT"
+        assert detail["blockers"][0]["filters"]["recordId"] == paid_record_id
+        assert detail["blockers"][0]["filters"]["focusDependency"] == 1
+        assert f"recordId={paid_record_id}" in detail["blockers"][0]["href"]
 
 
 def test_billing_payment_supports_prepay_list_and_manual_allocate():
@@ -3252,6 +3255,112 @@ def test_billing_payment_supports_prepay_list_and_manual_allocate():
         target = next(item for item in records_resp.json() if item["id"] == record_id)
         assert target["received_amount"] == 500
         assert target["status"] == "CLEARED"
+
+
+def test_billing_payment_list_supports_record_filter():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "收款列表按收费项目过滤客户",
+                "contact_name": "过滤联系人",
+                "phone": "13800131234",
+                "main_business": "收费过滤测试",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_a_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "收费项目A",
+                "total_fee": 600,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-08",
+                "due_month": "2026-04-08",
+                "payment_method": "后收",
+            },
+        )
+        assert record_a_resp.status_code == 201
+        record_a_id = record_a_resp.json()["id"]
+
+        record_b_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "注册",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "收费项目B",
+                "total_fee": 300,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-09",
+                "due_month": "2026-04-09",
+                "payment_method": "后收",
+            },
+        )
+        assert record_b_resp.status_code == 201
+        record_b_id = record_b_resp.json()["id"]
+
+        payment_resp = client.post(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "occurred_at": "2026-04-09",
+                "amount": 600,
+                "strategy": "DUE_DATE_ASC",
+                "receipt_account": "一帆光大",
+                "note": "仅核销收费项目A",
+                "allocations": [{"billing_record_id": record_a_id, "allocated_amount": 600}],
+            },
+        )
+        assert payment_resp.status_code == 201
+        payment_id = payment_resp.json()["id"]
+
+        record_filtered_resp = client.get(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            params={"record_id": record_a_id},
+        )
+        assert record_filtered_resp.status_code == 200
+        filtered_rows = record_filtered_resp.json()
+        assert [item["id"] for item in filtered_rows] == [payment_id]
+
+        empty_record_resp = client.get(
+            "/api/v1/billing-records/payments",
+            headers=owner_headers,
+            params={"record_id": record_b_id},
+        )
+        assert empty_record_resp.status_code == 200
+        assert empty_record_resp.json() == []
 
 
 def test_user_delete_requires_confirm_and_supports_restore():

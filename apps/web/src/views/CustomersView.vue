@@ -2,7 +2,7 @@
 import { Filter, MoreFilled } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { type LocationQueryRaw, useRoute, useRouter } from "vue-router";
 
 import { apiClient } from "../api/client";
 import BillingDraftRowsEditor from "../components/BillingDraftRowsEditor.vue";
@@ -182,6 +182,23 @@ function applyKeywordSuggestion(item: CustomerSuggestItem) {
 
 function openDeleteBlockerTarget(blocker: CustomerDeleteBlockerItem) {
   showDeleteCustomerDialog.value = false;
+  if (blocker.filters && Object.keys(blocker.filters).length) {
+    const href = blocker.href || "";
+    const path = href.split("?")[0] || route.path;
+    const query: LocationQueryRaw = {};
+    Object.entries(blocker.filters).forEach(([key, value]) => {
+      if (typeof value === "string" || typeof value === "number") {
+        query[key] = value;
+      } else if (value === true) {
+        query[key] = "1";
+      }
+    });
+    router.push({
+      path,
+      query,
+    });
+    return;
+  }
   if (blocker.href) {
     router.push(blocker.href);
   }

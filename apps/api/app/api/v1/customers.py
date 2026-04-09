@@ -266,8 +266,8 @@ def _build_customer_delete_blockers(db: Session, customer: Customer) -> list[Cus
                 count=int(billing_count),
                 label="收费项目",
                 message="该客户下还有收费项目，请先删除或处理收费项目后再删除客户。",
-                href=f"/billing?view=records&customerId={customer.id}",
-                filters={"view": "records", "customerId": customer.id},
+                href=f"/billing?view=records&customerId={customer.id}&focusDependency=1",
+                filters={"view": "records", "customerId": customer.id, "focusDependency": 1},
             )
         )
 
@@ -287,8 +287,8 @@ def _build_customer_delete_blockers(db: Session, customer: Customer) -> list[Cus
                 count=int(payment_count),
                 label="收款单",
                 message="该客户下还有收款单，请先删除或冲正收款单后再删除客户。",
-                href=f"/billing?view=payments&customerId={customer.id}",
-                filters={"view": "payments", "customerId": customer.id},
+                href=f"/billing?view=payments&customerId={customer.id}&focusDependency=1",
+                filters={"view": "payments", "customerId": customer.id, "focusDependency": 1},
             )
         )
 
