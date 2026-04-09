@@ -338,6 +338,38 @@ def _refresh_record_amounts(record: BillingRecord) -> None:
         record.status = "PARTIAL"
 
 
+def _get_record_payment_dependency_state(db: Session, record: BillingRecord) -> tuple[list[tuple[int, Optional[int]]], list[BillingActivity], float]:
+    linked_payment_rows = db.execute(
+        select(BillingPayment.id, BillingPayment.customer_id)
+        .join(BillingPaymentAllocation, BillingPaymentAllocation.payment_id == BillingPayment.id)
+        .where(
+            active_filter(BillingPayment),
+            BillingPaymentAllocation.billing_record_id == record.id,
+        )
+    ).all()
+    direct_payment_activities = db.execute(
+        select(BillingActivity)
+        .where(
+            BillingActivity.billing_record_id == record.id,
+            BillingActivity.activity_type == "PAYMENT",
+            BillingActivity.payment_id.is_(None),
+            BillingActivity.amount > 0,
+        )
+        .order_by(BillingActivity.occurred_at.desc(), BillingActivity.id.desc())
+    ).scalars().all()
+    actual_received_total = float(
+        sum(float(row_amount or 0) for row_amount in db.execute(
+            select(BillingPaymentAllocation.allocated_amount)
+            .join(BillingPayment, BillingPayment.id == BillingPaymentAllocation.payment_id)
+            .where(
+                active_filter(BillingPayment),
+                BillingPaymentAllocation.billing_record_id == record.id,
+            )
+        ).scalars().all())
+    ) + float(sum(float(item.amount or 0) for item in direct_payment_activities))
+    return linked_payment_rows, direct_payment_activities, actual_received_total
+
+
 def _apply_accountant_scope(stmt, db: Session, current_user: User, has_billing_read_grant: bool):
     stmt = stmt.where(active_filter(BillingRecord))
     if current_user.role == "MANAGER":
@@ -971,36 +1003,54 @@ def delete_billing_record(
     current_user: User = Depends(get_current_user),
 ):
     record = _get_record_or_404(db, record_id)
-    linked_payment_rows = db.execute(
-        select(BillingPayment.id, BillingPayment.customer_id)
-        .join(BillingPaymentAllocation, BillingPaymentAllocation.payment_id == BillingPayment.id)
-        .where(
-            active_filter(BillingPayment),
-            BillingPaymentAllocation.billing_record_id == record.id,
-        )
-    ).all()
+    linked_payment_rows, direct_payment_activities, actual_received_total = _get_record_payment_dependency_state(db, record)
+    if abs(float(record.received_amount or 0) - actual_received_total) > 0.01:
+        record.received_amount = actual_received_total
+        _refresh_record_amounts(record)
+        db.flush()
     allocation_count = len(linked_payment_rows)
-    if allocation_count > 0 or float(record.received_amount or 0) > 0.01:
+    activity_count = len(direct_payment_activities)
+    blockers: list[dict[str, object]] = []
+    if allocation_count > 0:
+        blockers.append(
+            {
+                "type": "BILLING_PAYMENT",
+                "count": allocation_count,
+                "label": "收款单",
+                "message": "请先处理关联收款单后再删除收费项目。",
+                "href": f"/billing?view=payments&customerId={record.customer_id or ''}&recordId={record.id}&focusDependency=1",
+                "filters": {
+                    "view": "payments",
+                    "customerId": record.customer_id,
+                    "recordId": record.id,
+                    "focusDependency": 1,
+                },
+            }
+        )
+    if activity_count > 0:
+        blockers.append(
+            {
+                "type": "BILLING_ACTIVITY_PAYMENT",
+                "count": activity_count,
+                "label": "收费项目收款记录",
+                "message": "这条收费项目下还有旧版收款记录，请先在催收/收款日志里删除或处理。",
+                "href": f"/billing?view=records&customerId={record.customer_id or ''}&record_id={record.id}&action=activity&focusDependency=1",
+                "filters": {
+                    "view": "records",
+                    "customerId": record.customer_id,
+                    "record_id": record.id,
+                    "action": "activity",
+                    "focusDependency": 1,
+                },
+            }
+        )
+    if blockers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "reason": "DEPENDENCY_BLOCKED",
-                "message": "当前收费项目已有收款核销记录，不能直接删除。",
-                "blockers": [
-                    {
-                        "type": "BILLING_PAYMENT",
-                        "count": allocation_count or 1,
-                        "label": "收款单",
-                        "message": "请先处理关联收款单后再删除收费项目。",
-                        "href": f"/billing?view=payments&customerId={record.customer_id or ''}&recordId={record.id}&focusDependency=1",
-                        "filters": {
-                            "view": "payments",
-                            "customerId": record.customer_id,
-                            "recordId": record.id,
-                            "focusDependency": 1,
-                        },
-                    }
-                ],
+                "message": "当前收费项目已有收款记录，不能直接删除。",
+                "blockers": blockers,
             },
         )
 
@@ -1450,6 +1500,69 @@ def delete_billing_payment(
         entity_type="BILLING_PAYMENT",
         entity_id=payment.id,
         detail=f"payment_no={payment.payment_no},customer_id={payment.customer_id}",
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
+    "/{record_id}/activities/{activity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_roles("OWNER", "ADMIN"))],
+)
+def delete_billing_activity(
+    record_id: int,
+    activity_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    record = _get_record_or_404(db, record_id)
+    activity = db.execute(
+        select(BillingActivity).where(
+            BillingActivity.id == activity_id,
+            BillingActivity.billing_record_id == record.id,
+        )
+    ).scalar_one_or_none()
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing activity not found")
+    _ensure_billing_access(record, db, current_user, for_write=True)
+
+    if activity.payment_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "reason": "DEPENDENCY_BLOCKED",
+                "message": "这条收款记录由收款单生成，请到收款列表删除对应收款单。",
+                "blockers": [
+                    {
+                        "type": "BILLING_PAYMENT",
+                        "count": 1,
+                        "label": "收款单",
+                        "message": "请到收款列表删除对应收款单。",
+                        "href": f"/billing?view=payments&customerId={record.customer_id or ''}&recordId={record.id}&focusDependency=1",
+                        "filters": {
+                            "view": "payments",
+                            "customerId": record.customer_id,
+                            "recordId": record.id,
+                            "focusDependency": 1,
+                        },
+                    }
+                ],
+            },
+        )
+
+    if activity.activity_type == "PAYMENT" and float(activity.amount or 0) > 0:
+        record.received_amount = max(float(record.received_amount or 0) - float(activity.amount or 0), 0.0)
+        _refresh_record_amounts(record)
+
+    db.delete(activity)
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="BILLING_ACTIVITY_DELETED",
+        entity_type="BILLING_ACTIVITY",
+        entity_id=activity.id,
+        detail=f"record_id={record.id},type={activity.activity_type},amount={activity.amount}",
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

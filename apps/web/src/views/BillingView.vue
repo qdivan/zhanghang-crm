@@ -162,6 +162,7 @@ const activityLoading = ref(false);
 const activityRows = ref<BillingActivity[]>([]);
 const selectedRecord = ref<BillingRecord | null>(null);
 const activityForm = reactive<BillingActivityForm>(createBillingActivityForm(todayInBrowserTimeZone()));
+const canDeleteBillingActivity = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canManageGrant = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canManageAssignment = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN" || auth.user?.role === "MANAGER",
@@ -1095,24 +1096,25 @@ async function removeBillingRecord(row: BillingRecord) {
     const detail = error?.response?.data?.detail;
     if (detail?.reason === "DEPENDENCY_BLOCKED" && Array.isArray(detail.blockers) && detail.blockers[0]?.href) {
       try {
+        const blocker = detail.blockers[0];
         await ElMessageBox.confirm(
-          `${detail.message}\n是否现在跳到相关收款单处理？`,
+          `${detail.message}\n是否现在跳到相关记录处理？`,
           "收费项目暂时不能删除",
           {
             type: "warning",
-            confirmButtonText: "去处理收款单",
+            confirmButtonText: `去处理${blocker.label || "关联记录"}`,
             cancelButtonText: "稍后处理",
           },
         );
-        const blocker = detail.blockers[0];
-        router.push({
-          path: "/billing",
+        await router.push({
+          path: blocker.href?.split("?")[0] || "/billing",
           query: {
             ...(blocker.filters || {}),
-            view: "payments",
+            view: blocker.filters?.view || "payments",
           },
         });
-        billingPrimaryView.value = "PAYMENTS";
+        if ((blocker.filters?.view || "payments") === "payments") billingPrimaryView.value = "PAYMENTS";
+        if (blocker.filters?.view === "records") billingPrimaryView.value = "RECORDS";
       } catch {
         // user cancelled follow-up navigation
       }
@@ -1129,6 +1131,42 @@ async function removePaymentRow(row: BillingPaymentItem) {
     await Promise.all([fetchRecords(), fetchSummary(), fetchPayments()]);
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "删除收款单失败");
+  }
+}
+
+async function removeBillingActivityRow(row: BillingActivity) {
+  if (!selectedRecord.value) return;
+  try {
+    await apiClient.delete(`/billing-records/${selectedRecord.value.id}/activities/${row.id}`);
+    ElMessage.success("记录已删除");
+    await Promise.all([fetchActivities(), fetchRecords(), fetchSummary(), fetchPayments()]);
+  } catch (error: any) {
+    const detail = error?.response?.data?.detail;
+    if (detail?.reason === "DEPENDENCY_BLOCKED" && Array.isArray(detail.blockers) && detail.blockers[0]) {
+      const blocker = detail.blockers[0];
+      try {
+        await ElMessageBox.confirm(
+          `${detail.message}\n是否现在跳到相关记录处理？`,
+          "这条记录暂时不能删除",
+          {
+            type: "warning",
+            confirmButtonText: `去处理${blocker.label || "关联记录"}`,
+            cancelButtonText: "稍后处理",
+          },
+        );
+        await router.push({
+          path: blocker.href?.split("?")[0] || "/billing",
+          query: {
+            ...(blocker.filters || {}),
+            view: blocker.filters?.view || "payments",
+          },
+        });
+      } catch {
+        // user cancelled follow-up navigation
+      }
+      return;
+    }
+    ElMessage.error(detail?.message || detail || "删除记录失败");
   }
 }
 
@@ -1546,6 +1584,10 @@ async function handleRouteAction() {
         return;
       }
       openRenewDialog(target);
+      return;
+    }
+    if (action === "activity") {
+      await openActivityDrawer(target);
       return;
     }
   } finally {
@@ -2284,11 +2326,13 @@ watch(
     :form="activityForm"
     :loading="activityLoading"
     :rows="activityRows"
+    :can-delete="canDeleteBillingActivity"
     :queue-label="isMobileWorkflow ? billingActivityQueueLabel : ''"
     :show-next-action="isMobileWorkflow && hasNextBillingActivityRecord"
     @activity-type-change="onActivityTypeChange"
     @submit="submitActivity()"
     @submit-next="submitActivity('next')"
+    @remove="removeBillingActivityRow"
   />
 </template>
 

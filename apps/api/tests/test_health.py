@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from app.main import app
+from app.db.session import SessionLocal
+from app.models import BillingRecord
 from app.services.customer_spreadsheet import CUSTOMER_SHEET_COLUMNS
 
 DEMO_PASSWORD = os.environ.get("BOOTSTRAP_DEMO_PASSWORD", "Daizhang#2026!")
@@ -3361,6 +3363,163 @@ def test_billing_payment_list_supports_record_filter():
         )
         assert empty_record_resp.status_code == 200
         assert empty_record_resp.json() == []
+
+
+def test_billing_record_delete_blocks_direct_payment_activity_with_activity_target():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "旧版收费活动收款删除校验客户",
+                "contact_name": "旧版活动联系人",
+                "phone": "13800131235",
+                "main_business": "删除校验",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "旧版活动收款收费项目",
+                "total_fee": 300,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-09",
+                "due_month": "2026-04-09",
+                "payment_method": "后收",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        activity_resp = client.post(
+            f"/api/v1/billing-records/{record_id}/activities",
+            headers=owner_headers,
+            json={
+                "activity_type": "PAYMENT",
+                "occurred_at": "2026-04-09",
+                "amount": 300,
+                "payment_nature": "ONE_OFF",
+                "receipt_account": "一帆光大",
+                "content": "旧版活动收款",
+                "note": "没有收款单 allocation",
+            },
+        )
+        assert activity_resp.status_code == 201
+        activity_id = activity_resp.json()["id"]
+
+        blocked_delete_resp = client.delete(f"/api/v1/billing-records/{record_id}", headers=owner_headers)
+        assert blocked_delete_resp.status_code == 400
+        detail = blocked_delete_resp.json()["detail"]
+        assert detail["reason"] == "DEPENDENCY_BLOCKED"
+        assert detail["blockers"][0]["type"] == "BILLING_ACTIVITY_PAYMENT"
+        assert detail["blockers"][0]["filters"]["record_id"] == record_id
+        assert detail["blockers"][0]["filters"]["action"] == "activity"
+        assert detail["blockers"][0]["filters"]["focusDependency"] == 1
+
+        remove_activity_resp = client.delete(
+            f"/api/v1/billing-records/{record_id}/activities/{activity_id}",
+            headers=owner_headers,
+        )
+        assert remove_activity_resp.status_code == 204
+
+        records_resp = client.get("/api/v1/billing-records", headers=owner_headers, params={"customer_id": customer_id})
+        assert records_resp.status_code == 200
+        target = next(item for item in records_resp.json() if item["id"] == record_id)
+        assert target["received_amount"] == 0
+        assert target["outstanding_amount"] == 300
+
+        final_delete_resp = client.delete(f"/api/v1/billing-records/{record_id}", headers=owner_headers)
+        assert final_delete_resp.status_code == 204
+
+
+def test_billing_record_delete_recovers_from_stale_received_amount_without_real_dependencies():
+    with TestClient(app) as client:
+        owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "boss", "password": DEMO_PASSWORD},
+        )
+        assert owner_login.status_code == 200
+        owner_headers = {"Authorization": f"Bearer {owner_login.json()['access_token']}"}
+
+        users_resp = client.get("/api/v1/users", headers=owner_headers, params={"role": "ACCOUNTANT"})
+        assert users_resp.status_code == 200
+        accountant = next(item for item in users_resp.json() if item["username"] == "accountant")
+
+        lead_resp = client.post(
+            "/api/v1/leads",
+            headers=owner_headers,
+            json={
+                "name": "脏实收字段删除校验客户",
+                "contact_name": "脏数据联系人",
+                "phone": "13800131236",
+                "main_business": "脏值校验",
+                "source": "Sally直播",
+            },
+        )
+        assert lead_resp.status_code == 201
+
+        convert_resp = client.post(
+            f"/api/v1/leads/{lead_resp.json()['id']}/convert",
+            headers=owner_headers,
+            json={"accountant_id": accountant["id"]},
+        )
+        assert convert_resp.status_code == 200
+        customer_id = convert_resp.json()["customer"]["id"]
+
+        record_resp = client.post(
+            "/api/v1/billing-records",
+            headers=owner_headers,
+            json={
+                "customer_id": customer_id,
+                "charge_category": "代账",
+                "charge_mode": "ONE_TIME",
+                "amount_basis": "ONE_TIME",
+                "summary": "脏实收字段收费项目",
+                "total_fee": 260,
+                "monthly_fee": 0,
+                "collection_start_date": "2026-04-09",
+                "due_month": "2026-04-09",
+                "payment_method": "后收",
+            },
+        )
+        assert record_resp.status_code == 201
+        record_id = record_resp.json()["id"]
+
+        with SessionLocal() as db:
+            record = db.get(BillingRecord, record_id)
+            assert record is not None
+            record.received_amount = 260
+            db.commit()
+
+        delete_resp = client.delete(f"/api/v1/billing-records/{record_id}", headers=owner_headers)
+        assert delete_resp.status_code == 204
 
 
 def test_user_delete_requires_confirm_and_supports_restore():

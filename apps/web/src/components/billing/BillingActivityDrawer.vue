@@ -17,6 +17,7 @@ const props = defineProps<{
   form: BillingActivityForm;
   loading: boolean;
   rows: BillingActivity[];
+  canDelete: boolean;
   queueLabel?: string;
   showNextAction?: boolean;
 }>();
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   "activity-type-change": [value: unknown];
   submit: [];
   "submit-next": [];
+  remove: [row: BillingActivity];
 }>();
 
 const drawerVisible = computed({
@@ -153,6 +155,18 @@ const { isMobile } = useResponsive();
             <div class="detail-long-value">{{ row.note || "-" }}</div>
           </div>
         </div>
+        <div v-if="props.canDelete && !row.payment_id" class="mobile-row-actions">
+          <el-popconfirm
+            title="确认删除这条记录吗？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="emit('remove', row)"
+          >
+            <template #reference>
+              <el-button size="small" type="danger" plain>删除记录</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
       </div>
     </div>
     <el-table v-else v-loading="props.loading" :data="props.rows" stripe border>
@@ -190,6 +204,22 @@ const { isMobile } = useResponsive();
         class-name="mobile-hide"
         label-class-name="mobile-hide"
       />
+      <el-table-column v-if="props.canDelete" label="操作" width="110" fixed="right">
+        <template #default="{ row }">
+          <el-popconfirm
+            v-if="!row.payment_id"
+            title="确认删除这条记录吗？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="emit('remove', row)"
+          >
+            <template #reference>
+              <el-button link type="danger">删除</el-button>
+            </template>
+          </el-popconfirm>
+          <el-text v-else type="info" size="small">收款单生成</el-text>
+        </template>
+      </el-table-column>
     </el-table>
   </el-drawer>
 </template>
@@ -218,5 +248,9 @@ const { isMobile } = useResponsive();
   line-height: 1.6;
   color: #111827;
   word-break: break-word;
+}
+
+.mobile-row-actions {
+  margin-top: 12px;
 }
 </style>
