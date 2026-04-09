@@ -198,6 +198,7 @@ export function useTodoWorkspace() {
         confirmButtonText: "删除",
         cancelButtonText: "取消",
         inputPlaceholder: expectedName,
+        customClass: "app-prompt-box",
       })) as { value: string };
       if ((result.value || "").trim() !== expectedName) {
         ElMessage.warning("输入名称不一致，已取消删除");

@@ -2149,17 +2149,39 @@ watch(
   <el-space v-else direction="vertical" fill :size="12">
     <el-card shadow="never" class="billing-view-switch-card">
       <div class="billing-view-switch">
-        <div>
+        <div class="billing-view-switch-copy-block">
           <div class="billing-view-switch-title">收费工作台</div>
           <div class="billing-view-switch-copy">把客户汇总、收费项目、收款列表和单客户往来账拆开看，页面会更干净。</div>
         </div>
         <div class="billing-view-switch-actions">
-          <el-button :type="billingPrimaryView === 'SUMMARY' ? 'primary' : 'default'" @click="openSummaryView">单位汇总</el-button>
-          <el-button :type="billingPrimaryView === 'RECORDS' ? 'primary' : 'default'" @click="openRecordsView">收费项目列表</el-button>
-          <el-button :type="billingPrimaryView === 'PAYMENTS' ? 'primary' : 'default'" @click="openPaymentListView">收款列表</el-button>
-          <el-tag v-if="billingPrimaryView === 'LEDGER' && ledgerTargetRecord" type="success" effect="plain">
-            当前：{{ ledgerTargetRecord.customer_name }} 往来账
-          </el-tag>
+          <div class="billing-view-switch-tabs" role="tablist" aria-label="收费工作台视图切换">
+            <el-button
+              class="billing-view-switch-tab"
+              :type="billingPrimaryView === 'SUMMARY' ? 'primary' : 'default'"
+              @click="openSummaryView"
+            >
+              单位汇总
+            </el-button>
+            <el-button
+              class="billing-view-switch-tab"
+              :type="billingPrimaryView === 'RECORDS' ? 'primary' : 'default'"
+              @click="openRecordsView"
+            >
+              收费项目列表
+            </el-button>
+            <el-button
+              class="billing-view-switch-tab"
+              :type="billingPrimaryView === 'PAYMENTS' ? 'primary' : 'default'"
+              @click="openPaymentListView"
+            >
+              收款列表
+            </el-button>
+          </div>
+          <div v-if="billingPrimaryView === 'LEDGER' && ledgerTargetRecord" class="billing-view-switch-ledger">
+            <el-tag type="success" effect="plain">
+              当前：{{ ledgerTargetRecord.customer_name }} 往来账
+            </el-tag>
+          </div>
         </div>
       </div>
     </el-card>
@@ -2339,13 +2361,19 @@ watch(
 <style scoped>
 .billing-view-switch-card {
   border-color: #dfe6e8;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 251, 0.98) 100%);
 }
 
 .billing-view-switch {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 520px);
+  align-items: center;
+  gap: 18px;
+}
+
+.billing-view-switch-copy-block {
+  min-width: 0;
 }
 
 .billing-view-switch-title {
@@ -2359,14 +2387,37 @@ watch(
   font-size: 12px;
   line-height: 1.5;
   color: #667085;
+  max-width: 48ch;
 }
 
 .billing-view-switch-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.billing-view-switch-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  width: 100%;
+}
+
+.billing-view-switch-tab {
+  width: 100%;
+  min-height: 40px;
+  margin: 0 !important;
+  justify-content: center;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.billing-view-switch-ledger {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .billing-mobile-page {
@@ -2690,9 +2741,32 @@ watch(
   transform: translateY(-6px);
 }
 
+@media (max-width: 1360px) {
+  .billing-view-switch {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .billing-view-switch-copy {
+    max-width: none;
+  }
+}
+
 @media (max-width: 420px) {
   .billing-view-switch {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+  }
+
+  .billing-view-switch-copy {
+    max-width: none;
+  }
+
+  .billing-view-switch-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-view-switch-ledger {
+    justify-content: flex-start;
   }
 
   .billing-mobile-stats,

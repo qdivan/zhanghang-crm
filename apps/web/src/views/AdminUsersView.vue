@@ -483,6 +483,7 @@ async function removeUser(row: ManagedUser) {
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
         inputPlaceholder: expectedName,
+        customClass: "app-prompt-box",
       },
     )) as { value: string };
     if ((result.value || "").trim() !== expectedName) {
@@ -522,6 +523,7 @@ async function removeGrant(row: DataAccessGrantItem) {
         confirmButtonText: "确认删除",
         cancelButtonText: "取消",
         inputPlaceholder: expectedName,
+        customClass: "app-prompt-box",
       },
     )) as { value: string };
     if ((result.value || "").trim() !== expectedName) {
