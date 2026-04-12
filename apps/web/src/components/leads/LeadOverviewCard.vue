@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { MoreFilled } from "@element-plus/icons-vue";
+import { todayInBrowserTimeZone } from "../../utils/time";
 
 import { useResponsive } from "../../composables/useResponsive";
 import type { LeadItem } from "../../types";
@@ -34,6 +35,34 @@ const emit = defineEmits<{
 }>();
 
 const { isMobile } = useResponsive();
+const todayText = todayInBrowserTimeZone();
+
+function reminderDay(value: string | null) {
+  return value ? value.slice(0, 10) : "";
+}
+
+function followupFlagLevel(row: LeadItem): "OVERDUE" | "TODAY" | "NONE" {
+  if (row.status === "CONVERTED" || row.status === "LOST") return "NONE";
+  const reminder = reminderDay(row.next_reminder_at);
+  if (!reminder) return "NONE";
+  if (reminder < todayText) return "OVERDUE";
+  if (reminder === todayText) return "TODAY";
+  return "NONE";
+}
+
+function followupFlagLabel(row: LeadItem) {
+  const level = followupFlagLevel(row);
+  if (level === "OVERDUE") return "超期未跟进";
+  if (level === "TODAY") return "今日需跟进";
+  return "";
+}
+
+function desktopRowClassName({ row }: { row: LeadItem }) {
+  const level = followupFlagLevel(row);
+  if (level === "OVERDUE") return "lead-row-overdue";
+  if (level === "TODAY") return "lead-row-today";
+  return "";
+}
 
 function mobileMetrics(row: LeadItem) {
   return [
@@ -63,13 +92,24 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
 <template>
   <el-card shadow="never">
     <template #header>
-      <div class="table-head">
-        <span>客户开发</span>
-        <el-tag type="success" effect="plain">{{ props.rows.length }} 条</el-tag>
+      <div class="table-head workspace-section-head">
+        <div>
+          <div class="workspace-section-title">客户开发</div>
+          <div class="workspace-section-copy">默认按最新录入在前，超期未跟进会在列表里重点标出。</div>
+        </div>
+        <el-tag type="success" effect="plain" class="workspace-subtle-tag">{{ props.rows.length }} 条</el-tag>
       </div>
     </template>
     <div v-if="isMobile" v-loading="props.loading" class="mobile-record-list">
-      <div v-for="row in props.rows" :key="row.id" class="mobile-record-card">
+      <div
+        v-for="row in props.rows"
+        :key="row.id"
+        class="mobile-record-card"
+        :class="{
+          'lead-mobile-card-overdue': followupFlagLevel(row) === 'OVERDUE',
+          'lead-mobile-card-today': followupFlagLevel(row) === 'TODAY',
+        }"
+      >
         <div class="mobile-record-head">
           <div class="mobile-record-main">
             <div class="mobile-lead-title">
@@ -77,6 +117,9 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
                 {{ row.name }}
               </el-button>
               <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
+              <el-tag v-if="followupFlagLabel(row)" size="small" :type="followupFlagLevel(row) === 'OVERDUE' ? 'danger' : 'warning'" effect="dark">
+                {{ followupFlagLabel(row) }}
+              </el-tag>
             </div>
             <div class="mobile-record-subtitle">
               {{ getLeadContactText(row) || "未填写联系人" }}
@@ -167,8 +210,9 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
       stripe
       border
       size="small"
-      class="lead-desktop-table"
+      class="lead-desktop-table workspace-table-compact"
       :default-sort="{ prop: props.sortProp, order: props.sortOrder }"
+      :row-class-name="desktopRowClassName"
       @sort-change="emit('sort-change', $event)"
     >
       <el-table-column prop="id" label="序号" width="70" sortable="custom" />
@@ -179,6 +223,15 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
               {{ row.name }}
             </el-button>
             <el-tag size="small" effect="plain">{{ getTemplateLabel(row.template_type) }}</el-tag>
+            <el-tag
+              v-if="followupFlagLabel(row)"
+              size="small"
+              :type="followupFlagLevel(row) === 'OVERDUE' ? 'danger' : 'warning'"
+              effect="dark"
+              class="lead-followup-flag"
+            >
+              {{ followupFlagLabel(row) }}
+            </el-tag>
           </div>
         </template>
       </el-table-column>
@@ -313,26 +366,40 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
 </template>
 
 <style scoped>
-.table-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .lead-name-cell {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px 8px;
 }
 
 .lead-desktop-table :deep(.el-table__cell) {
-  padding: 7px 0;
+  padding: 6px 0;
+}
+
+.lead-desktop-table :deep(.lead-row-overdue td.el-table__cell) {
+  background: linear-gradient(90deg, rgba(201, 87, 58, 0.14), rgba(255, 248, 244, 0.9) 34%, #ffffff 80%);
+}
+
+.lead-desktop-table :deep(.lead-row-overdue td.el-table__cell:first-child .cell) {
+  box-shadow: inset 3px 0 0 rgba(201, 87, 58, 0.88);
+}
+
+.lead-desktop-table :deep(.lead-row-today td.el-table__cell) {
+  background: linear-gradient(90deg, rgba(217, 164, 57, 0.12), rgba(255, 251, 241, 0.88) 34%, #ffffff 80%);
+}
+
+.lead-desktop-table :deep(.lead-row-today td.el-table__cell:first-child .cell) {
+  box-shadow: inset 3px 0 0 rgba(217, 164, 57, 0.84);
 }
 
 .table-action-wrap {
   flex-wrap: wrap;
   row-gap: 2px;
+}
+
+.lead-followup-flag {
+  letter-spacing: 0.01em;
 }
 
 .mobile-lead-title {
@@ -344,5 +411,16 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
 
 .mobile-actions :deep(.el-button) {
   margin-left: 0;
+}
+
+.lead-mobile-card-overdue {
+  border-color: rgba(201, 87, 58, 0.28);
+  background: linear-gradient(180deg, rgba(255, 247, 242, 0.96), #ffffff 64%);
+  box-shadow: 0 10px 24px rgba(201, 87, 58, 0.08);
+}
+
+.lead-mobile-card-today {
+  border-color: rgba(217, 164, 57, 0.28);
+  background: linear-gradient(180deg, rgba(255, 251, 240, 0.96), #ffffff 64%);
 }
 </style>

@@ -414,14 +414,13 @@ watch(
     </MobileFilterSheet>
   </section>
 
-  <div v-else class="receipt-page">
-    <section class="receipt-header">
-      <div>
-        <div class="receipt-eyebrow">到账核对</div>
-        <h1 class="receipt-title">按入账账户核对收款流水</h1>
-        <p class="receipt-copy">{{ scopeLabel }}。左侧按账户切换，右侧核对收款明细。</p>
+  <div v-else class="receipt-page workspace-page">
+    <section class="receipt-header workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">到账核对</div>
+        <div class="workspace-copy">{{ scopeLabel }}。左侧按账户切换，右侧核对收款明细。</div>
       </div>
-      <div class="receipt-header-stats">
+      <div class="receipt-header-stats workspace-actions">
         <div class="receipt-stat-block">
           <span class="receipt-stat-label">期初余额</span>
           <strong class="receipt-stat-value">{{ formatAmount(data?.opening_balance ?? 0) }}</strong>
@@ -437,7 +436,7 @@ watch(
       </div>
     </section>
 
-    <section class="receipt-toolbar">
+    <section class="receipt-toolbar workspace-surface">
       <el-form inline class="receipt-toolbar-form" @submit.prevent="fetchReceiptLedger">
         <el-form-item label="入账账户">
           <el-select v-model="receiptAccount" clearable filterable placeholder="全部账户">
@@ -468,7 +467,7 @@ watch(
     </section>
 
     <section class="receipt-workspace" :class="{ mobile: isMobile }">
-      <aside class="receipt-sidebar">
+      <aside class="receipt-sidebar workspace-surface">
         <div class="receipt-sidebar-head">
           <div class="receipt-sidebar-title">账户汇总</div>
           <div class="receipt-sidebar-copy">点账户名直接切换到账流水。</div>
@@ -497,7 +496,7 @@ watch(
         </button>
       </aside>
 
-      <div class="receipt-main">
+      <div class="receipt-main workspace-surface">
         <div class="receipt-main-head">
           <div>
             <div class="receipt-main-title">{{ selectedAccountLabel }}</div>
@@ -651,42 +650,14 @@ watch(
   gap: 12px;
 }
 
-.receipt-header,
 .receipt-toolbar,
 .receipt-sidebar,
 .receipt-main {
-  background: #ffffff;
-  border: 1px solid #dde5e7;
+  min-width: 0;
 }
 
 .receipt-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  padding: 18px 20px;
-  border-top: 2px solid #4d8096;
-}
-
-.receipt-eyebrow {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: #5a7d72;
-}
-
-.receipt-title {
-  margin: 4px 0 6px;
-  font-size: 24px;
-  line-height: 1.08;
-  color: #172330;
-}
-
-.receipt-copy {
-  margin: 0;
-  max-width: 680px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: #61727e;
+  padding: 2px 2px 0;
 }
 
 .receipt-header-stats {
@@ -697,8 +668,8 @@ watch(
 
 .receipt-stat-block {
   min-width: 112px;
-  padding: 10px 12px;
-  background: #f5f8f8;
+  padding: 8px 10px;
+  background: #f7fafb;
   border: 1px solid #dde5e7;
 }
 
@@ -717,7 +688,7 @@ watch(
 }
 
 .receipt-toolbar {
-  padding: 12px 14px 2px;
+  padding: 12px 14px 4px;
 }
 
 .receipt-toolbar-form {
@@ -891,7 +862,7 @@ watch(
 
 @media (max-width: 960px) {
   .receipt-header {
-    grid-template-columns: 1fr;
+    padding-top: 0;
   }
 
   .receipt-header-stats {
@@ -900,11 +871,6 @@ watch(
 }
 
 @media (max-width: 640px) {
-  .receipt-title {
-    font-size: 20px;
-  }
-
-  .receipt-header,
   .receipt-sidebar,
   .receipt-main {
     padding: 14px;

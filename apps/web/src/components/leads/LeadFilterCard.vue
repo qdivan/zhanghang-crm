@@ -23,54 +23,54 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
 </script>
 
 <template>
-  <el-card shadow="never">
-    <el-form inline @submit.prevent="emit('query')" class="lead-filter-form">
-      <el-form-item label="关键词">
-        <el-input
-          v-model="props.filters.keyword"
-          placeholder="客户/联系人/电话"
-          clearable
-          @keyup.enter="emit('query')"
-        />
-      </el-form-item>
-      <el-form-item v-show="!isMobile || showAdvancedFilters" label="状态">
-        <el-select v-model="props.filters.status" placeholder="全部" clearable>
-          <el-option
-            v-for="item in statusOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-show="!isMobile || showAdvancedFilters" label="模板筛选">
-        <el-select v-model="props.filters.template_type" placeholder="全部" clearable>
-          <el-option
-            v-for="item in templateOptions"
-            :key="item.value"
-            :label="item.label"
-            :value="item.value"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="isMobile">
-        <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
-          {{ showAdvancedFilters ? "收起筛选" : hasAdvancedValue ? "更多筛选（已选）" : "更多筛选" }}
-        </el-button>
-      </el-form-item>
-      <el-form-item>
-        <div class="action-group">
-          <el-button size="small" @click="emit('query')">查询</el-button>
-          <el-button size="small" type="primary" @click="emit('create')">新增线索</el-button>
-          <el-button size="small" type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
-          <el-button size="small" @click="emit('guide')">流程说明</el-button>
-          <el-button size="small" @click="emit('importExcel')">导入 Excel</el-button>
-        </div>
-      </el-form-item>
-    </el-form>
-    <el-text type="info">
-      这里仅显示未成单线索；已成单客户统一进入“客户列表”。默认按最新录入在前，可点表头按序号、名称或联络开始排序。
-    </el-text>
+  <el-card shadow="never" class="workspace-surface">
+    <div class="workspace-inline-toolbar lead-toolbar">
+      <div class="workspace-inline-toolbar-main">
+        <el-form inline @submit.prevent="emit('query')" class="lead-filter-form">
+          <el-form-item label="关键词">
+            <el-input
+              v-model="props.filters.keyword"
+              placeholder="客户/联系人/电话"
+              clearable
+              @keyup.enter="emit('query')"
+            />
+          </el-form-item>
+          <el-form-item v-show="!isMobile || showAdvancedFilters" label="状态">
+            <el-select v-model="props.filters.status" placeholder="全部" clearable>
+              <el-option
+                v-for="item in statusOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-show="!isMobile || showAdvancedFilters" label="模板">
+            <el-select v-model="props.filters.template_type" placeholder="全部" clearable>
+              <el-option
+                v-for="item in templateOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="isMobile">
+            <el-button text @click="showAdvancedFilters = !showAdvancedFilters">
+              {{ showAdvancedFilters ? "收起筛选" : hasAdvancedValue ? "更多筛选（已选）" : "更多筛选" }}
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+      <div class="workspace-inline-toolbar-actions action-group">
+        <el-button size="small" @click="emit('query')">查询</el-button>
+        <el-button size="small" type="primary" @click="emit('create')">新增线索</el-button>
+        <el-button size="small" type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
+        <el-button size="small" @click="emit('guide')">流程说明</el-button>
+        <el-button size="small" @click="emit('importExcel')">导入 Excel</el-button>
+      </div>
+    </div>
+    <div class="lead-toolbar-copy">这里只显示未成单线索。默认按最新录入在前，可点表头按序号、名称或联络开始排序。</div>
   </el-card>
 </template>
 
@@ -78,7 +78,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
 .lead-filter-form {
   display: flex;
   flex-wrap: wrap;
-  row-gap: 8px;
+  gap: 8px 10px;
 }
 
 .lead-filter-form :deep(.el-input),
@@ -90,6 +90,13 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.lead-toolbar-copy {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
 }
 
 @media (max-width: 768px) {

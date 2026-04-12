@@ -266,7 +266,7 @@ const userTagText = computed(() => {
 
 .main-area {
   background: #f7f8fa;
-  padding: clamp(14px, 1.2vw, 24px);
+  padding: clamp(12px, 1vw, 20px);
   overflow-x: hidden;
 }
 
@@ -274,7 +274,7 @@ const userTagText = computed(() => {
   width: 100%;
   min-width: 0;
   overflow-x: visible;
-  padding-right: clamp(72px, 5vw, 96px);
+  padding-right: clamp(64px, 4vw, 88px);
 }
 
 @media (max-width: 768px) {

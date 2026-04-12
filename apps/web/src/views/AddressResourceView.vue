@@ -344,18 +344,21 @@ function fetchCompanyNameSuggestions(queryString: string, callback: (items: Arra
     </section>
   </template>
 
-  <el-space v-else direction="vertical" fill :size="12">
-    <el-card shadow="never">
-      <template #header>
-        <div class="head">
-          <div>
-            <div class="page-title">挂靠地址</div>
-            <div class="page-desc">地址资源单独维护，下面再增加已服务的公司，方便查看每个地址正在服务哪些客户。</div>
-          </div>
-          <el-tag type="info" effect="plain">补充模块</el-tag>
-        </div>
-      </template>
-      <el-form inline @submit.prevent="fetchResources" class="resource-filter-form">
+  <el-space v-else direction="vertical" fill :size="10" class="workspace-page">
+    <section class="workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">挂靠地址</div>
+        <div class="workspace-copy">地址资源单独维护，下面直接增加已服务的公司，方便查看每个地址正在服务哪些客户。</div>
+      </div>
+      <div class="workspace-actions">
+        <el-tag type="info" effect="plain" class="workspace-subtle-tag">补充模块</el-tag>
+      </div>
+    </section>
+
+    <el-card shadow="never" class="workspace-surface">
+      <div class="workspace-inline-toolbar">
+        <div class="workspace-inline-toolbar-main">
+          <el-form inline @submit.prevent="fetchResources" class="resource-filter-form">
         <el-form-item label="关键词">
           <el-input
             v-model="keyword"
@@ -368,14 +371,19 @@ function fetchCompanyNameSuggestions(queryString: string, callback: (items: Arra
           <el-button @click="fetchResources">查询</el-button>
           <el-button type="primary" @click="openCreateDialog">新增地址</el-button>
         </el-form-item>
-      </el-form>
+          </el-form>
+        </div>
+      </div>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="workspace-surface">
       <template #header>
         <div class="head">
-          <span>{{ isMobile ? "挂靠地址" : "挂靠地址记录" }}</span>
-          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+          <div>
+            <div class="page-title">{{ isMobile ? "挂靠地址" : "挂靠地址记录" }}</div>
+            <div class="page-desc">查看地址资源、已服务公司和当前维护数量。</div>
+          </div>
+          <el-tag type="success" effect="plain" class="workspace-subtle-tag">{{ rows.length }} 条</el-tag>
         </div>
       </template>
       <el-table v-loading="loading" :data="rows" stripe border class="address-table">

@@ -55,6 +55,7 @@ const showLibraryActionSheet = ref(false);
 const selectedLibraryRow = ref<CommonLibraryItem | null>(null);
 const desktopSelectedRowId = ref<number | null>(null);
 const selectedRowIds = ref<number[]>([]);
+const expandedRowIds = ref<number[]>([]);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
@@ -113,14 +114,6 @@ const moduleMetaMap: Record<CommonLibraryModuleType, ModuleMeta> = {
 const activeMeta = computed(() => moduleMetaMap[activeTab.value]);
 const visibleModuleKeys = computed<CommonLibraryModuleType[]>(() => ["TEMPLATE", "DIRECTORY", "EXTENSION_A", "EXTENSION_B"]);
 const canDelete = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
-const categoryOptions = computed(() => {
-  const unique = new Set<string>();
-  rows.value.forEach((item) => {
-    const token = (item.category || "").trim();
-    if (token) unique.add(token);
-  });
-  return Array.from(unique).sort((left, right) => left.localeCompare(right, "zh-CN"));
-});
 const categoryWorkspaceOptions = computed(() => {
   const counts = new Map<string, number>();
   let uncategorizedCount = 0;
@@ -157,26 +150,6 @@ const visibleRows = computed(() => {
     return rows.value.filter((item) => !(item.category || "").trim());
   }
   return rows.value.filter((item) => (item.category || "").trim() === selectedCategory.value);
-});
-const selectedCategoryLabel = computed(() => {
-  if (!selectedCategory.value) return "全部分类";
-  if (selectedCategory.value === UNCATEGORIZED_CATEGORY) return "未分类";
-  return selectedCategory.value;
-});
-const selectedCategoryHelper = computed(() => {
-  if (!selectedCategory.value) {
-    return `当前展示 ${activeMeta.value.label} 的全部条目，可以先从左侧分类切进去再处理。`;
-  }
-  if (selectedCategory.value === UNCATEGORIZED_CATEGORY) {
-    return "这些条目还没归类，适合先整理分类，再让同事更快复用。";
-  }
-  return `当前只看“${selectedCategory.value}”分类，适合集中维护这一组资料。`;
-});
-const internalCount = computed(() => rows.value.filter((item) => item.visibility === "INTERNAL").length);
-const publicCount = computed(() => rows.value.filter((item) => item.visibility === "PUBLIC").length);
-const activeWorkspaceRow = computed(() => {
-  if (!visibleRows.value.length) return null;
-  return visibleRows.value.find((item) => item.id === desktopSelectedRowId.value) || visibleRows.value[0] || null;
 });
 const dialogTitle = computed(() => (form.id ? `编辑${activeMeta.value.label}` : `新增${activeMeta.value.label}`));
 const libraryFilterChips = computed(() =>
@@ -387,18 +360,11 @@ function primaryContent(row: CommonLibraryItem) {
   return row.content || row.notes || "-";
 }
 
-function workspacePreviewContent(row: CommonLibraryItem) {
+function detailContent(row: CommonLibraryItem) {
   if (row.module_type === "DIRECTORY") {
-    return row.content || row.notes || "这条通讯录还没有补充说明。";
+    return row.content || row.notes || "暂无补充说明";
   }
-  return row.content || row.notes || "这条资料还没有正文内容。";
-}
-
-function workspaceListHint(row: CommonLibraryItem) {
-  if (row.module_type === "DIRECTORY") {
-    return [row.phone, row.address].filter(Boolean).join(" · ") || "补充电话或地址后会显示在这里。";
-  }
-  return row.content || row.notes || "还没有填写内容。";
+  return row.content || row.notes || "暂无内容";
 }
 
 function workspaceListTitle(row: CommonLibraryItem) {
@@ -406,6 +372,34 @@ function workspaceListTitle(row: CommonLibraryItem) {
   const category = (row.category || "").trim();
   if (title && category && title === category) return title;
   return title || category || activeMeta.value.label;
+}
+
+function rowMetaTokens(row: CommonLibraryItem) {
+  return [
+    row.category && row.category !== workspaceListTitle(row) ? row.category : "",
+    row.module_type === "DIRECTORY" ? row.phone : "",
+    row.module_type === "DIRECTORY" ? row.address : "",
+  ].filter(Boolean);
+}
+
+function rowHasExtraNote(row: CommonLibraryItem) {
+  return Boolean(row.notes && row.notes.trim() && row.notes.trim() !== detailContent(row).trim());
+}
+
+function rowNeedsExpand(row: CommonLibraryItem) {
+  return detailContent(row).length > 150 || (row.notes?.length || 0) > 100;
+}
+
+function isRowExpanded(rowId: number) {
+  return expandedRowIds.value.includes(rowId);
+}
+
+function toggleRowExpanded(rowId: number) {
+  if (isRowExpanded(rowId)) {
+    expandedRowIds.value = expandedRowIds.value.filter((item) => item !== rowId);
+    return;
+  }
+  expandedRowIds.value = [...expandedRowIds.value, rowId];
 }
 
 function visibilityLabel(value: CommonLibraryVisibility) {
@@ -443,12 +437,14 @@ watch(visibleRows, (items) => {
   if (!items.length) {
     desktopSelectedRowId.value = null;
     selectedRowIds.value = [];
+    expandedRowIds.value = [];
     return;
   }
   if (!items.some((item) => item.id === desktopSelectedRowId.value)) {
     desktopSelectedRowId.value = items[0].id;
   }
   selectedRowIds.value = selectedRowIds.value.filter((item) => items.some((row) => row.id === item));
+  expandedRowIds.value = expandedRowIds.value.filter((item) => items.some((row) => row.id === item));
 });
 
 watch(visibilityFilter, () => {
@@ -620,241 +616,115 @@ onMounted(() => {
     />
   </template>
 
-  <el-space v-else direction="vertical" fill :size="12">
-    <el-card shadow="never" class="library-workspace-card">
-      <template #header>
-        <div class="page-head">
-          <div>
-            <div class="page-title">常用资料</div>
-            <div class="page-desc">常用资料、通讯录和扩展模块统一沉淀，并区分内部资料与可公开到官网的内容。</div>
-          </div>
-          <el-tag type="info" effect="plain">{{ visibleRows.length }} 条</el-tag>
+  <el-space v-else direction="vertical" fill :size="10" class="workspace-page">
+    <el-card shadow="never" class="library-workspace-card workspace-surface">
+      <div class="workspace-header library-page-header">
+        <div class="workspace-title-block">
+          <div class="workspace-title">常用资料</div>
+          <div class="workspace-copy">直接按分类查看真实内容，复制、编辑、删除都在当前列表里完成。</div>
         </div>
-      </template>
+        <div class="workspace-actions">
+          <el-input
+            v-model="keyword"
+            class="library-toolbar-search"
+            clearable
+            placeholder="关键词搜索"
+            @keyup.enter="fetchItems"
+          />
+          <el-button size="small" @click="fetchItems">查询</el-button>
+          <el-button size="small" type="primary" :icon="Plus" @click="openCreateDialog()">新增</el-button>
+          <el-tag type="info" effect="plain" class="workspace-subtle-tag">{{ visibleRows.length }} 条</el-tag>
+        </div>
+      </div>
 
-      <el-tabs v-model="activeTab" class="module-tabs">
-        <el-tab-pane
-          v-for="key in visibleModuleKeys"
-          :key="key"
-          :label="moduleMetaMap[key].label"
-          :name="key"
+      <div class="library-toolbar-strip">
+        <el-tabs v-model="activeTab" class="module-tabs module-tabs-compact">
+          <el-tab-pane
+            v-for="key in visibleModuleKeys"
+            :key="key"
+            :label="moduleMetaMap[key].label"
+            :name="key"
+          />
+        </el-tabs>
+        <div class="library-toolbar-filters">
+          <el-select v-model="visibilityFilter" class="library-visibility-select">
+            <el-option label="全部范围" value="ALL" />
+            <el-option label="内部资料" value="INTERNAL" />
+            <el-option label="可公开到官网" value="PUBLIC" />
+          </el-select>
+        </div>
+      </div>
+
+      <div class="library-category-strip">
+        <button
+          v-for="item in categoryWorkspaceOptions"
+          :key="`library-category-workspace-${item.key || 'all'}`"
+          type="button"
+          class="library-category-chip"
+          :class="{ active: selectedCategory === item.key }"
+          @click="selectedCategory = item.key"
         >
-          <div class="tab-helper">{{ moduleMetaMap[key].helper }}</div>
-        </el-tab-pane>
-      </el-tabs>
+          <span>{{ item.label }}</span>
+          <strong>{{ item.count }}</strong>
+        </button>
+      </div>
 
-      <div class="library-workspace">
-        <aside class="library-sidebar">
-          <section class="library-sidebar-panel">
-            <div class="library-sidebar-title">分类工作台</div>
-            <div class="library-sidebar-copy">先按分类聚焦，再在右侧处理条目，日常查资料会更快。</div>
-            <div class="library-sidebar-metrics">
-              <article class="library-sidebar-metric">
-                <span>全部条目</span>
-                <strong>{{ rows.length }}</strong>
-              </article>
-              <article class="library-sidebar-metric">
-                <span>内部资料</span>
-                <strong>{{ internalCount }}</strong>
-              </article>
-              <article class="library-sidebar-metric">
-                <span>可公开</span>
-                <strong>{{ publicCount }}</strong>
-              </article>
-            </div>
-          </section>
+      <div v-if="canDelete && hasSelectedRows" class="library-bulk-strip">
+        <span>已勾选 {{ selectedRowIds.length }} 条</span>
+        <el-button size="small" type="danger" plain @click="removeSelectedItems">
+          批量删除
+        </el-button>
+      </div>
 
-          <section class="library-sidebar-panel">
-            <div class="library-sidebar-section-head">
-              <div>
-                <div class="library-sidebar-title">{{ activeMeta.categoryLabel }}</div>
-                <div class="library-sidebar-copy">点左侧分类后，右侧只看这一类内容。</div>
-              </div>
-              <el-tag size="small" effect="plain">{{ categoryWorkspaceOptions.length - 1 }} 类</el-tag>
-            </div>
-            <div class="library-category-list">
-              <button
-                v-for="item in categoryWorkspaceOptions"
-                :key="`library-category-workspace-${item.key || 'all'}`"
-                type="button"
-                class="library-category-button"
-                :class="{ active: selectedCategory === item.key }"
-                @click="selectedCategory = item.key"
-              >
-                <span>{{ item.label }}</span>
-                <strong>{{ item.count }}</strong>
-              </button>
-            </div>
-          </section>
-        </aside>
-
-        <section class="library-main-panel">
-          <div class="library-main-toolbar">
-            <el-form class="library-filter-form" @submit.prevent="fetchItems">
-              <div class="library-filter-grid">
-                <el-form-item label="关键词">
-                  <el-input
-                    v-model="keyword"
-                    clearable
-                    placeholder="分类/标题/内容/电话/地址"
-                    @keyup.enter="fetchItems"
+      <div v-loading="loading" class="library-list-shell">
+        <div v-if="!visibleRows.length" class="library-empty-state">
+          <div class="library-empty-kicker">{{ activeMeta.label }}</div>
+          <div class="library-empty-title">当前没有匹配内容</div>
+          <div class="library-empty-copy">换个分类、关键词或资料范围后再继续查找。</div>
+        </div>
+        <div v-else class="library-inline-list">
+          <article v-for="row in visibleRows" :key="row.id" class="library-inline-row">
+            <div class="library-inline-row-head">
+              <div class="library-inline-row-main">
+                <div class="library-inline-row-title-line">
+                  <el-checkbox
+                    v-if="canDelete"
+                    :model-value="selectedRowIds.includes(row.id)"
+                    @change="toggleRowSelection(row.id)"
                   />
-                </el-form-item>
-                <el-form-item label="资料范围">
-                  <el-radio-group v-model="visibilityFilter">
-                    <el-radio-button value="ALL">全部</el-radio-button>
-                    <el-radio-button value="INTERNAL">内部资料</el-radio-button>
-                    <el-radio-button value="PUBLIC">可公开到官网</el-radio-button>
-                  </el-radio-group>
-                </el-form-item>
-                <el-form-item label="分类切换">
-                  <el-select
-                    v-model="selectedCategory"
-                    clearable
-                    filterable
-                    placeholder="全部分类"
-                    class="library-category-select"
-                  >
-                    <el-option label="全部分类" value="" />
-                    <el-option label="未分类" :value="UNCATEGORIZED_CATEGORY" />
-                    <el-option
-                      v-for="item in categoryOptions"
-                      :key="`library-category-${item}`"
-                      :label="item"
-                      :value="item"
-                    />
-                  </el-select>
-                </el-form-item>
+                  <div class="library-inline-row-title">{{ workspaceListTitle(row) }}</div>
+                  <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
+                    {{ visibilityLabel(row.visibility) }}
+                  </el-tag>
+                </div>
+                <div v-if="rowMetaTokens(row).length" class="library-inline-row-meta">
+                  <span v-for="token in rowMetaTokens(row)" :key="`${row.id}-${token}`">{{ token }}</span>
+                </div>
               </div>
-            </el-form>
-            <div class="library-toolbar-actions">
-              <el-button @click="fetchItems">查询</el-button>
-              <el-button type="primary" :icon="Plus" @click="openCreateDialog()">新增</el-button>
+              <div class="library-inline-row-actions">
+                <el-button link type="primary" @click="copyItem(row)">复制</el-button>
+                <el-button link @click="openEditDialog(row)">编辑</el-button>
+                <el-button
+                  v-if="rowNeedsExpand(row)"
+                  link
+                  type="info"
+                  @click="toggleRowExpanded(row.id)"
+                >
+                  {{ isRowExpanded(row.id) ? "收起" : "展开" }}
+                </el-button>
+                <el-button v-if="canDelete" link type="danger" @click="removeItem(row)">删除</el-button>
+              </div>
             </div>
-          </div>
 
-          <div class="library-main-head">
-            <div>
-              <div class="library-main-title">{{ selectedCategoryLabel }}</div>
-              <div class="library-main-copy">{{ selectedCategoryHelper }}</div>
+            <div
+              class="library-inline-row-body"
+              :class="{ collapsed: rowNeedsExpand(row) && !isRowExpanded(row.id) }"
+            >
+              {{ detailContent(row) }}
             </div>
-            <div class="library-main-head-actions">
-              <el-tag type="info" effect="plain">{{ visibleRows.length }} 条</el-tag>
-              <el-button
-                v-if="canDelete && hasSelectedRows"
-                size="small"
-                type="danger"
-                plain
-                @click="removeSelectedItems"
-              >
-                批量删除 {{ selectedRowIds.length }} 条
-              </el-button>
-              <el-button size="small" plain :icon="Plus" @click="openCreateDialog()">
-                当前分类新增
-              </el-button>
-            </div>
-          </div>
-
-          <div v-loading="loading" class="library-workbench">
-            <div v-if="!visibleRows.length" class="library-empty-state">
-              <div class="library-empty-kicker">{{ activeMeta.label }}</div>
-              <div class="library-empty-title">当前分类还没有内容</div>
-              <div class="library-empty-copy">可以先新增一条，或回到左侧切换其他分类继续查看。</div>
-            </div>
-            <template v-else>
-              <section class="library-entry-list-panel">
-                <div class="library-entry-list-head">
-                  <div>
-                    <div class="library-entry-list-title">条目列表</div>
-                    <div class="library-entry-list-copy">左侧定分类，右侧先选条目，再看详情或直接编辑。</div>
-                  </div>
-                  <el-tag effect="plain">{{ visibleRows.length }}</el-tag>
-                </div>
-                <div class="library-entry-list">
-                  <article
-                    v-for="row in visibleRows"
-                    :key="row.id"
-                    class="library-entry-item"
-                    :class="{ active: activeWorkspaceRow?.id === row.id }"
-                  >
-                    <button
-                      type="button"
-                      class="library-entry-button"
-                      @click="desktopSelectedRowId = row.id"
-                    >
-                      <div class="library-entry-button-head">
-                        <div class="library-entry-button-title">{{ workspaceListTitle(row) }}</div>
-                        <el-tag size="small" :type="visibilityTagType(row.visibility)" effect="plain">
-                          {{ visibilityLabel(row.visibility) }}
-                        </el-tag>
-                      </div>
-                      <div class="library-entry-button-meta">
-                        <span>{{ row.category || "未分类" }}</span>
-                        <span v-if="row.module_type === 'DIRECTORY' && row.phone">{{ row.phone }}</span>
-                      </div>
-                      <div class="library-entry-button-copy">{{ workspaceListHint(row) }}</div>
-                    </button>
-                    <div class="library-entry-inline-actions">
-                      <el-checkbox :model-value="selectedRowIds.includes(row.id)" @change="toggleRowSelection(row.id)" />
-                      <el-button link type="primary" @click="copyItem(row)">复制</el-button>
-                      <el-button v-if="canDelete" link type="danger" @click="removeItem(row)">删除</el-button>
-                    </div>
-                  </article>
-                </div>
-              </section>
-
-              <section v-if="activeWorkspaceRow" class="library-preview-panel">
-                <div class="library-preview-head">
-                  <div class="library-preview-main">
-                    <div class="library-preview-title">{{ activeWorkspaceRow.title || activeMeta.label }}</div>
-                    <div class="library-preview-meta">
-                      <span>{{ activeWorkspaceRow.category || "未分类" }}</span>
-                      <el-tag size="small" :type="visibilityTagType(activeWorkspaceRow.visibility)" effect="plain">
-                        {{ visibilityLabel(activeWorkspaceRow.visibility) }}
-                      </el-tag>
-                    </div>
-                  </div>
-                  <div class="library-preview-actions">
-                    <el-button size="small" plain @click="copyItem(activeWorkspaceRow)">复制</el-button>
-                    <el-button size="small" plain @click="openEditDialog(activeWorkspaceRow)">编辑</el-button>
-                    <el-button
-                      v-if="canDelete"
-                      size="small"
-                      type="danger"
-                      plain
-                      @click="removeItem(activeWorkspaceRow)"
-                    >
-                      删除
-                    </el-button>
-                  </div>
-                </div>
-
-                <div class="library-preview-body">
-                  <section class="library-preview-section">
-                    <div class="library-preview-section-label">{{ activeMeta.contentLabel }}</div>
-                    <div class="library-preview-richtext">{{ workspacePreviewContent(activeWorkspaceRow) }}</div>
-                  </section>
-
-                  <section v-if="activeWorkspaceRow.module_type === 'DIRECTORY'" class="library-preview-directory-grid">
-                    <article class="library-preview-directory-card">
-                      <span>电话</span>
-                      <strong>{{ activeWorkspaceRow.phone || "-" }}</strong>
-                    </article>
-                    <article class="library-preview-directory-card">
-                      <span>地址</span>
-                      <strong>{{ activeWorkspaceRow.address || "-" }}</strong>
-                    </article>
-                  </section>
-
-                  <section v-if="activeWorkspaceRow.notes" class="library-preview-section secondary">
-                    <div class="library-preview-section-label">备注</div>
-                    <div class="library-preview-note">{{ activeWorkspaceRow.notes }}</div>
-                  </section>
-                </div>
-              </section>
-            </template>
-          </div>
-        </section>
+            <div v-if="rowHasExtraNote(row)" class="library-inline-row-note">备注：{{ row.notes }}</div>
+          </article>
+        </div>
       </div>
     </el-card>
   </el-space>
@@ -983,205 +853,41 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.page-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.page-desc,
-.tab-helper {
-  color: #667085;
-  font-size: 13px;
-}
-
 .library-workspace-card {
   border-color: #dfe6e8;
 }
 
-.library-workspace {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 8px;
+.library-page-header {
+  margin-bottom: 10px;
 }
 
-.library-sidebar,
-.library-main-panel {
-  min-width: 0;
+.library-toolbar-search {
+  width: clamp(220px, 24vw, 320px);
 }
 
-.library-sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.library-sidebar-panel,
-.library-main-toolbar,
-.library-main-head,
-.library-item-card,
-.library-empty-state {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #fafbfc;
-}
-
-.library-sidebar-panel,
-.library-main-toolbar,
-.library-main-head,
-.library-empty-state {
-  padding: 14px;
-}
-
-.library-sidebar-title,
-.library-main-title,
-.library-item-card-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.library-sidebar-copy,
-.library-main-copy,
-.library-item-card-note {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #6b7280;
-}
-
-.library-sidebar-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.library-sidebar-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  border: 1px solid #e3e8ef;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.library-sidebar-metric span,
-.library-category-button span,
-.library-directory-meta-item span {
-  font-size: 11px;
-  color: #6b7280;
-}
-
-.library-sidebar-metric strong,
-.library-category-button strong,
-.library-directory-meta-item strong {
-  font-size: 13px;
-  color: #111827;
-}
-
-.library-sidebar-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.library-category-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  max-height: 520px;
-  overflow: auto;
-}
-
-.library-category-button {
+.library-toolbar-strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 11px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    transform 0.2s ease;
+  gap: 10px 14px;
+  margin-bottom: 10px;
+  min-width: 0;
 }
 
-.library-category-button:hover {
-  border-color: #cbd5e1;
-  transform: translateY(-1px);
-}
-
-.library-category-button.active {
-  border-color: #8fb2be;
-  background: rgba(143, 178, 190, 0.12);
-}
-
-.library-main-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.library-main-toolbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.library-filter-form {
+.module-tabs {
+  min-width: 0;
   flex: 1;
 }
 
-.library-filter-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.library-filter-form :deep(.el-form-item) {
+.module-tabs-compact :deep(.el-tabs__header) {
   margin-bottom: 0;
 }
 
-.library-filter-form :deep(.el-select__wrapper),
-.library-filter-form :deep(.el-input__wrapper) {
-  min-width: 200px;
+.module-tabs-compact :deep(.el-tabs__nav-wrap::after) {
+  display: none;
 }
 
-.library-category-select {
-  width: 100%;
-}
-
-.library-toolbar-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.library-main-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.library-main-head-actions {
+.library-toolbar-filters {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1189,195 +895,146 @@ onMounted(() => {
   justify-content: flex-end;
 }
 
-.library-workbench {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.35fr);
-  gap: 12px;
+.library-category-select,
+.library-visibility-select {
+  min-width: 170px;
 }
 
-.library-entry-list-panel,
-.library-preview-panel {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  background: #fafbfc;
-}
-
-.library-entry-list-head,
-.library-preview-head,
-.library-preview-meta,
-.library-preview-actions {
+.library-category-strip {
   display: flex;
-  gap: 10px;
-}
-
-.library-entry-list-head,
-.library-preview-head {
-  align-items: flex-start;
-  justify-content: space-between;
-}
-
-.library-entry-list-title,
-.library-preview-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.library-entry-list-copy {
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #6b7280;
-}
-
-.library-entry-list {
-  display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
-  max-height: 520px;
-  overflow: auto;
+  margin-bottom: 10px;
 }
 
-.library-entry-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.library-entry-button {
-  width: 100%;
-  padding: 11px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    transform 0.2s ease;
-}
-
-.library-entry-inline-actions {
+.library-category-chip {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
+  padding: 7px 11px;
+  border: 1px solid #dfe5e8;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  color: #51616d;
 }
 
-.library-entry-button:hover {
-  border-color: #cbd5e1;
-  transform: translateY(-1px);
+.library-category-chip strong {
+  font-size: 11px;
+  color: #172330;
 }
 
-.library-entry-item.active .library-entry-button {
+.library-category-chip.active {
   border-color: #8fb2be;
-  background: rgba(143, 178, 190, 0.12);
+  background: rgba(143, 178, 190, 0.1);
+  color: #2f6073;
 }
 
-.library-entry-button-head {
+.library-bulk-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px dashed #d7dfe3;
+  border-radius: 12px;
+  background: #fbfcfc;
+  font-size: 12px;
+  color: #52616b;
+}
+
+.library-list-shell {
+  min-width: 0;
+}
+
+.library-inline-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.library-inline-row {
+  padding: 12px 0;
+  border-top: 1px solid #edf1f3;
+}
+
+.library-inline-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.library-inline-row-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px 16px;
 }
 
-.library-entry-button-title,
-.library-preview-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: #111827;
+.library-inline-row-main {
+  min-width: 0;
+  flex: 1;
 }
 
-.library-entry-button-meta,
-.library-preview-meta {
+.library-inline-row-title-line {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.library-inline-row-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #172330;
+}
+
+.library-inline-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.library-inline-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 8px;
+  flex-shrink: 0;
+}
+
+.library-inline-row-body {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.68;
+  color: #24323d;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.library-inline-row-body.collapsed {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.library-inline-row-note {
   margin-top: 6px;
   font-size: 12px;
+  line-height: 1.55;
   color: #6b7280;
-}
-
-.library-entry-button-copy {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #4b5563;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.library-preview-main {
-  min-width: 0;
-}
-
-.library-preview-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 14px;
-}
-
-.library-preview-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid #e3e8ef;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.library-preview-section.secondary {
-  background: #fdfefe;
-}
-
-.library-preview-section-label {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #6b7280;
-}
-
-.library-preview-richtext,
-.library-preview-note {
-  font-size: 13px;
-  line-height: 1.7;
-  color: #1f2937;
-  white-space: pre-wrap;
-}
-
-.library-preview-directory-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.library-preview-directory-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
 }
 
 .library-empty-state {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  grid-column: 1 / -1;
   align-items: flex-start;
+  padding: 18px 0 8px;
 }
 
 .library-empty-kicker {
@@ -1405,26 +1062,14 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
-  .library-workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .library-sidebar-metrics,
-  .library-filter-grid,
-  .library-preview-directory-grid,
-  .library-workbench {
-    grid-template-columns: 1fr;
-  }
-
-  .library-main-toolbar,
-  .library-entry-list-head,
-  .library-preview-head,
-  .library-main-head,
-  .library-toolbar-actions,
-  .library-main-head-actions,
-  .library-preview-actions {
+  .library-toolbar-strip,
+  .library-inline-row-head {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .library-toolbar-search {
+    width: 100%;
   }
 }
 

@@ -1044,7 +1044,13 @@ watch(
     />
   </template>
 
-  <el-space v-else direction="vertical" fill :size="12">
+  <el-space v-else direction="vertical" fill :size="10" class="workspace-page">
+    <section class="workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">客户开发</div>
+        <div class="workspace-copy">超期未跟进会重点标出，方便负责人尽快回到该线索继续推进。</div>
+      </div>
+    </section>
     <LeadFilterCard
       :filters="filters"
       @query="fetchLeads"

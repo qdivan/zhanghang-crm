@@ -672,9 +672,21 @@ onMounted(async () => {
     />
   </template>
 
-  <el-space v-else direction="vertical" fill :size="12">
-    <el-card shadow="never">
-      <el-form inline @submit.prevent="fetchCustomers" class="customers-filter-form">
+  <el-space v-else direction="vertical" fill :size="10" class="workspace-page">
+    <section class="workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">客户列表</div>
+        <div class="workspace-copy">先看客户，再直接进档案、补收费或回看来源。</div>
+      </div>
+      <div class="workspace-actions">
+        <el-tag type="success" effect="plain" class="workspace-subtle-tag">{{ rows.length }} 条</el-tag>
+      </div>
+    </section>
+
+    <el-card shadow="never" class="workspace-surface">
+      <div class="workspace-inline-toolbar">
+        <div class="workspace-inline-toolbar-main">
+          <el-form inline @submit.prevent="fetchCustomers" class="customers-filter-form">
         <el-form-item label="关键词">
           <el-autocomplete
             v-model="keyword"
@@ -694,17 +706,19 @@ onMounted(async () => {
           </el-button>
           <el-button v-if="canManageGrant" type="primary" plain @click="openGrantSettings">数据授权配置</el-button>
         </el-form-item>
-      </el-form>
+          </el-form>
+        </div>
+      </div>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="workspace-surface">
       <template #header>
         <div class="head">
           <div>
-            <div class="card-title">客户列表</div>
-            <div class="card-subtitle">这里只显示已成交客户，转给会计或经办人后在这里继续维护。</div>
+            <div class="card-title">已成交客户</div>
+            <div class="card-subtitle">转给会计或经办人后在这里继续维护。</div>
           </div>
-          <el-tag type="success" effect="plain">{{ rows.length }} 条</el-tag>
+          <el-tag type="success" effect="plain" class="workspace-subtle-tag">{{ rows.length }} 条</el-tag>
         </div>
       </template>
       <div v-if="isMobile" v-loading="loading" class="mobile-record-list">
@@ -1175,12 +1189,12 @@ onMounted(async () => {
 .head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 12px 16px;
 }
 
 .card-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #111827;
 }
@@ -1189,6 +1203,10 @@ onMounted(async () => {
   margin-top: 4px;
   font-size: 12px;
   color: #6b7280;
+}
+
+.customers-filter-form :deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 @media (max-width: 768px) {

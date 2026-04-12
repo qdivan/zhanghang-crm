@@ -80,13 +80,15 @@ onMounted(fetchDashboardData);
 </script>
 
 <template>
-  <section class="dashboard-page" v-loading="loading">
-    <header class="dashboard-head">
-      <div>
-        <div class="dashboard-title">工作台</div>
-        <div class="dashboard-copy">{{ summary.month || "本月" }} 的开发、客户、收费和待办概览。</div>
+  <section class="dashboard-page workspace-page" v-loading="loading">
+    <header class="dashboard-head workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">工作台</div>
+        <div class="workspace-copy">{{ summary.month || "本月" }} 的开发、客户、收费和待办概览。</div>
       </div>
-      <el-button size="small" @click="fetchDashboardData">刷新</el-button>
+      <div class="workspace-actions">
+        <el-button size="small" @click="fetchDashboardData">刷新</el-button>
+      </div>
     </header>
 
     <section class="dashboard-summary" :class="{ mobile: isMobile }">
@@ -102,14 +104,14 @@ onMounted(fetchDashboardData);
     </section>
 
     <section class="dashboard-grid">
-      <el-card shadow="never" class="dashboard-card">
+      <el-card shadow="never" class="dashboard-card workspace-surface">
         <template #header>
-          <div class="table-head">
+          <div class="table-head workspace-section-head">
             <div>
-              <div class="table-title">系统待办</div>
-              <div class="table-copy">优先处理系统生成的提醒和跳转任务。</div>
+              <div class="workspace-section-title">系统待办</div>
+              <div class="workspace-section-copy">优先处理系统生成的提醒和跳转任务。</div>
             </div>
-            <el-tag size="small" type="warning" effect="plain">{{ systemTodos.length }} 条</el-tag>
+            <el-tag size="small" type="warning" effect="plain" class="workspace-subtle-tag">{{ systemTodos.length }} 条</el-tag>
           </div>
         </template>
         <div v-if="isMobile" class="mobile-record-list">
@@ -129,7 +131,7 @@ onMounted(fetchDashboardData);
             </div>
           </div>
         </div>
-        <el-table v-else :data="systemTodos" stripe border size="small" class="dashboard-table">
+        <el-table v-else :data="systemTodos" stripe border size="small" class="dashboard-table workspace-table-compact">
           <el-table-column label="模块" width="72">
             <template #default="{ row }">{{ moduleLabel(row.module) }}</template>
           </el-table-column>
@@ -153,14 +155,14 @@ onMounted(fetchDashboardData);
         </el-table>
       </el-card>
 
-      <el-card shadow="never" class="dashboard-card">
+      <el-card shadow="never" class="dashboard-card workspace-surface">
         <template #header>
-          <div class="table-head">
+          <div class="table-head workspace-section-head">
             <div>
-              <div class="table-title">手动待办</div>
-              <div class="table-copy">个人补充的日常事项，和系统待办分开看。</div>
+              <div class="workspace-section-title">手动待办</div>
+              <div class="workspace-section-copy">个人补充的日常事项，和系统待办分开看。</div>
             </div>
-            <el-tag size="small" type="success" effect="plain">{{ manualTodos.length }} 条</el-tag>
+            <el-tag size="small" type="success" effect="plain" class="workspace-subtle-tag">{{ manualTodos.length }} 条</el-tag>
           </div>
         </template>
         <div v-if="isMobile" class="mobile-record-list">
@@ -176,7 +178,7 @@ onMounted(fetchDashboardData);
             </div>
           </div>
         </div>
-        <el-table v-else :data="manualTodos" stripe border size="small" class="dashboard-table">
+        <el-table v-else :data="manualTodos" stripe border size="small" class="dashboard-table workspace-table-compact">
           <el-table-column prop="title" label="任务" min-width="180" show-overflow-tooltip />
           <el-table-column label="优先级" width="78">
             <template #default="{ row }">
@@ -197,26 +199,6 @@ onMounted(fetchDashboardData);
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.dashboard-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 2px 2px;
-}
-
-.dashboard-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #172330;
-}
-
-.dashboard-copy {
-  margin-top: 2px;
-  font-size: 12px;
-  color: #6b7280;
 }
 
 .dashboard-summary {
@@ -261,26 +243,6 @@ onMounted(fetchDashboardData);
 
 .dashboard-card {
   border-color: #dfe6e8;
-}
-
-.table-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.table-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.table-copy {
-  margin-top: 2px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #6b7280;
 }
 
 .dashboard-table :deep(.el-table__cell) {

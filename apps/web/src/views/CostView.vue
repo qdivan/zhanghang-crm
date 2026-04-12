@@ -139,14 +139,18 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="cost-view-page">
-    <el-card shadow="never" class="cost-head-card">
-      <div class="cost-head">
-        <div>
-          <div class="cost-title">成本与老板视图</div>
-          <div class="cost-copy">默认看上年 1 月 1 日至今的经营情况。点卡片就会切到对应客户明细，不再只是说明文字。</div>
-        </div>
-        <el-form inline class="cost-filter-form" @submit.prevent="fetchData">
+  <section class="cost-view-page workspace-page">
+    <section class="workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">成本与老板视图</div>
+        <div class="workspace-copy">默认看上年 1 月 1 日至今的经营情况。点卡片就会切到对应客户明细。</div>
+      </div>
+    </section>
+
+    <el-card shadow="never" class="cost-head-card workspace-surface">
+      <div class="workspace-inline-toolbar cost-head">
+        <div class="workspace-inline-toolbar-main">
+          <el-form inline class="cost-filter-form" @submit.prevent="fetchData">
           <el-form-item label="时间范围">
             <el-date-picker
               v-model="dateRange"
@@ -161,7 +165,8 @@ onMounted(async () => {
           <el-form-item>
             <el-button type="primary" :loading="loading" @click="fetchData">刷新</el-button>
           </el-form-item>
-        </el-form>
+          </el-form>
+        </div>
       </div>
     </el-card>
 
@@ -179,12 +184,12 @@ onMounted(async () => {
       </article>
     </section>
 
-    <el-card shadow="never" class="cost-detail-card">
+    <el-card shadow="never" class="cost-detail-card workspace-surface">
       <template #header>
-        <div class="cost-section-head">
+        <div class="cost-section-head workspace-section-head">
           <div>
-            <div class="cost-section-title">{{ insightTitle }}</div>
-            <div class="cost-section-copy">这里只显示当前指标对应的客户收费总况。需要继续操作时可以跳到收费明细工作台。</div>
+            <div class="workspace-section-title">{{ insightTitle }}</div>
+            <div class="workspace-section-copy">这里只显示当前指标对应的客户收费总况。需要继续操作时可以跳到收费明细工作台。</div>
           </div>
           <el-button plain @click="openBillingInsight">打开收费明细</el-button>
         </div>
@@ -211,28 +216,15 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.cost-head-card,
 .cost-detail-card {
   border-color: #dfe6e8;
 }
 
 .cost-head,
 .cost-section-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
+  min-width: 0;
 }
 
-.cost-title,
-.cost-section-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #172330;
-}
-
-.cost-copy,
-.cost-section-copy,
 .cost-card-note {
   margin-top: 4px;
   font-size: 12px;

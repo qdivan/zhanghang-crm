@@ -241,18 +241,16 @@ watch(
 </script>
 
 <template>
-  <section class="customer-matters-page">
-    <el-card shadow="never" class="matter-head-card">
-      <div class="matter-head">
-        <div>
-          <div class="matter-title">重要事项</div>
-          <div class="matter-copy">这里专门记录收费以外的重要提醒、客户需补资料和办理进度，作为会计维护客户的工作记事本。</div>
-        </div>
+  <section class="customer-matters-page workspace-page">
+    <section class="workspace-header">
+      <div class="workspace-title-block">
+        <div class="workspace-title">重要事项</div>
+        <div class="workspace-copy">这里专门记录收费以外的重要提醒、客户需补资料和办理进度，作为会计维护客户的工作记事本。</div>
       </div>
-    </el-card>
+    </section>
 
     <section class="matter-workspace">
-      <el-card shadow="never" class="matter-summary-card">
+      <el-card shadow="never" class="matter-summary-card workspace-surface">
         <template #header>
           <div class="matter-section-head matter-summary-head">
             <div class="matter-section-copy-block">
@@ -299,7 +297,7 @@ watch(
         </el-table>
       </el-card>
 
-      <el-card shadow="never" class="matter-detail-card">
+      <el-card shadow="never" class="matter-detail-card workspace-surface">
         <template #header>
           <div class="matter-section-head matter-detail-head">
             <div class="matter-section-copy-block">
@@ -441,19 +439,11 @@ watch(
 </template>
 
 <style scoped>
-.customer-matters-page {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.matter-head-card,
 .matter-summary-card,
 .matter-detail-card {
   border-color: #dfe6e8;
 }
 
-.matter-head,
 .matter-section-head,
 .matter-item-head,
 .matter-item-actions,
@@ -465,7 +455,6 @@ watch(
   gap: 10px;
 }
 
-.matter-head,
 .matter-item-head {
   justify-content: space-between;
   align-items: flex-start;
@@ -489,14 +478,12 @@ watch(
   min-width: 0;
 }
 
-.matter-title,
 .matter-section-title {
   font-size: 16px;
   font-weight: 700;
   color: #172330;
 }
 
-.matter-copy,
 .matter-section-copy,
 .matter-empty-copy,
 .matter-item-subtitle,
@@ -601,10 +588,6 @@ watch(
 @media (max-width: 960px) {
   .matter-workspace {
     grid-template-columns: 1fr;
-  }
-
-  .matter-head {
-    flex-direction: column;
   }
 
   .matter-summary-actions {
