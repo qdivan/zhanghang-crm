@@ -20,6 +20,7 @@ from app.services.soft_delete import active_filter
 
 PROVIDER_KEYCLOAK = "keycloak"
 DEFAULT_SSO_ROLE = "ACCOUNTANT"
+PENDING_BINDING_MESSAGE = "当前企业账号需要管理员在后台确认绑定后才能进入 CRM。"
 logger = logging.getLogger(__name__)
 GROUP_ROLE_MAP = {
     "crm-owner": "OWNER",
@@ -39,7 +40,7 @@ class SsoConfigError(SsoError):
 
 class SsoConflictError(SsoError):
     def __init__(self, conflict: SsoBindingConflict):
-        super().__init__("当前企业账号需要管理员确认绑定")
+        super().__init__(PENDING_BINDING_MESSAGE)
         self.conflict = conflict
 
 

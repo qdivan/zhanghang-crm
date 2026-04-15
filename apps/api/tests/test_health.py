@@ -5164,6 +5164,23 @@ def test_sso_exchange_ticket_is_one_time_use():
         assert "票据已失效" in second_resp.json()["detail"]
 
 
+def test_sso_exchange_pending_binding_uses_full_user_message():
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            ticket = auth_api.create_exchange_ticket(
+                db,
+                status="CONFLICT",
+                conflict_id=123,
+            )
+
+        exchange_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": ticket.ticket})
+        assert exchange_resp.status_code == 200
+        payload = exchange_resp.json()
+        assert payload["status"] == "PENDING_BINDING"
+        assert payload["conflict_id"] == 123
+        assert payload["message"] == "当前企业账号需要管理员在后台确认绑定后才能进入 CRM。"
+
+
 def test_verify_id_token_passes_access_token_for_at_hash(monkeypatch):
     original = {
         "sso_enabled": settings.sso_enabled,

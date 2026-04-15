@@ -27,6 +27,7 @@ from app.services.login_security import (
 )
 from app.services.soft_delete import active_filter
 from app.services.sso import (
+    PENDING_BINDING_MESSAGE,
     SsoConflictError,
     SsoError,
     build_auth_provider_payload,
@@ -204,7 +205,7 @@ def sso_callback(
             status="CONFLICT",
             conflict_id=exc.conflict.id,
             error_code="PENDING_BINDING",
-            error_message="当前企业账号需要管理员确认绑定",
+            error_message=PENDING_BINDING_MESSAGE,
         )
     except SsoError as exc:
         exchange_ticket = create_exchange_ticket(
@@ -242,7 +243,7 @@ def exchange_sso_ticket(payload: SsoExchangeRequest, db: Session = Depends(get_d
     if ticket.status == "CONFLICT":
         return SsoExchangeResponse(
             status="PENDING_BINDING",
-            message=ticket.error_message or "当前企业账号需要管理员确认绑定",
+            message=ticket.error_message or PENDING_BINDING_MESSAGE,
             conflict_id=ticket.conflict_id,
             provider_label=settings.sso_provider_label,
         )
