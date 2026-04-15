@@ -30,6 +30,9 @@ output/spreadsheet/
 output/release/
 output/import-export/
 output/ui-audit/
+output/run-sso-staging-audit.mjs
+output/zhanghang-sso-staging-*.md
+output/zhanghang-sso-staging-*.json
 old_example_table/
 backups/
 

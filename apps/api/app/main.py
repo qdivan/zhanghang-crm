@@ -1,8 +1,10 @@
 import re
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
+from sqlalchemy.engine.url import make_url
 
 from app.api.v1.router import router as v1_router
 from app.core.config import settings
@@ -24,6 +26,36 @@ app.add_middleware(
 )
 
 app.include_router(v1_router, prefix="/api/v1")
+
+
+def _reset_database_storage() -> None:
+    engine.dispose()
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            table_names = conn.execute(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+            ).scalars().all()
+            for table_name in table_names:
+                safe_name = str(table_name).replace('"', '""')
+                conn.execute(text(f'DROP TABLE IF EXISTS "{safe_name}"'))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+        db_url = make_url(settings.database_url)
+        db_path = db_url.database
+        if db_path and db_path != ":memory:":
+            target_path = Path(db_path)
+            if not target_path.is_absolute():
+                target_path = Path.cwd() / target_path
+            journal_path = target_path.with_suffix(f"{target_path.suffix}-journal")
+            if journal_path.exists():
+                journal_path.unlink()
+        engine.dispose()
+        return
+    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 def _ensure_schema_compatibility() -> None:
@@ -444,10 +476,13 @@ def _ensure_schema_compatibility() -> None:
 @app.on_event("startup")
 def startup():
     if settings.reset_db_on_startup:
-        Base.metadata.drop_all(bind=engine)
+        _reset_database_storage()
 
     Base.metadata.create_all(bind=engine)
-    _ensure_schema_compatibility()
+    engine.dispose()
+    if not settings.reset_db_on_startup:
+        _ensure_schema_compatibility()
+        engine.dispose()
 
     if settings.bootstrap_demo_data:
         with SessionLocal() as db:

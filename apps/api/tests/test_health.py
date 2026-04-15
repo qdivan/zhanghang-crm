@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from datetime import date, timedelta
 from io import BytesIO
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -5010,11 +5012,23 @@ def test_sso_callback_exchange_can_issue_crm_token(monkeypatch):
     monkeypatch.setattr(settings, "app_public_base_url", "https://ivanshang.com:26888")
 
     monkeypatch.setattr(auth_api, "sso_is_enabled", lambda: True)
-    monkeypatch.setattr(auth_api, "exchange_code_for_tokens", lambda code: {"id_token": "fake-id-token"})
+    monkeypatch.setattr(
+        auth_api,
+        "exchange_code_for_tokens",
+        lambda code: {"id_token": "fake-id-token", "access_token": "fake-access-token"},
+    )
+    verify_inputs = {}
     monkeypatch.setattr(
         auth_api,
         "verify_id_token",
-        lambda token, nonce: {
+        lambda token, nonce, access_token="": verify_inputs.update(
+            {
+                "token": token,
+                "nonce": nonce,
+                "access_token": access_token,
+            }
+        )
+        or {
             "iss": "https://sso.example.com/realms/company",
             "sub": "keycloak-user-1",
             "preferred_username": "boss",
@@ -5022,33 +5036,33 @@ def test_sso_callback_exchange_can_issue_crm_token(monkeypatch):
         },
     )
 
-    def fake_resolve_or_create_local_user(db, claims):
-        user = db.execute(select(User).where(User.username == "boss")).scalar_one()
-        return user, "BOUND"
+    def fake_resolve_or_create_local_user(_db, _claims):
+        return SimpleNamespace(id=1, username="boss", last_login_at=None), "BOUND"
 
     monkeypatch.setattr(auth_api, "resolve_or_create_local_user", fake_resolve_or_create_local_user)
+    monkeypatch.setattr(
+        auth_api,
+        "get_valid_state_ticket",
+        lambda _db, _state: SimpleNamespace(nonce="demo-nonce", status="PENDING", consumed_at=None),
+    )
+    monkeypatch.setattr(
+        auth_api,
+        "create_exchange_ticket",
+        lambda _db, **_kwargs: SimpleNamespace(ticket="demo-exchange-ticket"),
+    )
+    monkeypatch.setattr(auth_api, "write_operation_log", lambda *args, **kwargs: None)
 
     try:
         with TestClient(app) as client:
-            with SessionLocal() as db:
-                state_ticket = auth_api.create_sso_state_ticket(db)
-
             callback_resp = client.get(
                 "/api/v1/auth/sso/callback",
-                params={"state": state_ticket.ticket, "code": "demo-code"},
+                params={"state": "demo-state", "code": "demo-code"},
                 follow_redirects=False,
             )
             assert callback_resp.status_code == 302
             location = callback_resp.headers["location"]
-            assert "/login/sso?ticket=" in location
-            exchange_ticket = location.split("ticket=", 1)[1]
-
-            exchange_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": exchange_ticket})
-            assert exchange_resp.status_code == 200
-            payload = exchange_resp.json()
-            assert payload["status"] == "SUCCESS"
-            assert payload["access_token"]
-            assert payload["user"]["username"] == "boss"
+            assert "/login/sso?ticket=demo-exchange-ticket" in location
+            assert verify_inputs["access_token"] == "fake-access-token"
     finally:
         for key, value in original.items():
             setattr(settings, key, value)
@@ -5148,6 +5162,42 @@ def test_sso_exchange_ticket_is_one_time_use():
         second_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": ticket.ticket})
         assert second_resp.status_code == 400
         assert "票据已失效" in second_resp.json()["detail"]
+
+
+def test_verify_id_token_passes_access_token_for_at_hash(monkeypatch):
+    original = {
+        "sso_enabled": settings.sso_enabled,
+        "oidc_issuer": settings.oidc_issuer,
+        "oidc_client_id": settings.oidc_client_id,
+        "oidc_client_secret": settings.oidc_client_secret,
+    }
+    monkeypatch.setattr(settings, "sso_enabled", True)
+    monkeypatch.setattr(settings, "oidc_issuer", "https://sso.example.com/realms/company")
+    monkeypatch.setattr(settings, "oidc_client_id", "zhanghang-crm")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret-value")
+
+    decode_calls = {}
+    monkeypatch.setattr(sso_service.jwt, "get_unverified_header", lambda token: {"kid": "demo-kid", "alg": "RS256"})
+    monkeypatch.setattr(sso_service, "_load_jwks", lambda: {"keys": [{"kid": "demo-kid", "kty": "RSA"}]})
+
+    def fake_decode(token, key, algorithms=None, options=None, audience=None, issuer=None, subject=None, access_token=None):
+        decode_calls["token"] = token
+        decode_calls["audience"] = audience
+        decode_calls["issuer"] = issuer
+        decode_calls["access_token"] = access_token
+        return {"nonce": "demo-nonce", "sub": "subject-1"}
+
+    monkeypatch.setattr(sso_service.jwt, "decode", fake_decode)
+
+    try:
+        claims = sso_service.verify_id_token("id-token", nonce="demo-nonce", access_token="access-token")
+        assert claims["sub"] == "subject-1"
+        assert decode_calls["access_token"] == "access-token"
+        assert decode_calls["audience"] == "zhanghang-crm"
+        assert decode_calls["issuer"] == "https://sso.example.com/realms/company"
+    finally:
+        for key, value in original.items():
+            setattr(settings, key, value)
 
 
 def test_manual_sso_binding_resolves_matching_pending_conflict():
@@ -5346,11 +5396,20 @@ def test_sso_exchange_fails_for_inactive_bound_user(monkeypatch):
     monkeypatch.setattr(settings, "app_public_base_url", "https://ivanshang.com:26888")
 
     monkeypatch.setattr(auth_api, "sso_is_enabled", lambda: True)
-    monkeypatch.setattr(auth_api, "exchange_code_for_tokens", lambda code: {"id_token": "fake-id-token"})
+    monkeypatch.setattr(
+        auth_api,
+        "build_sso_login_url",
+        lambda ticket: f"https://sso.example.com/auth?state={ticket.ticket}&nonce={ticket.nonce}",
+    )
+    monkeypatch.setattr(
+        auth_api,
+        "exchange_code_for_tokens",
+        lambda code: {"id_token": "fake-id-token", "access_token": "fake-access-token"},
+    )
     monkeypatch.setattr(
         auth_api,
         "verify_id_token",
-        lambda token, nonce: {
+        lambda token, nonce, access_token="": {
             "iss": "https://sso.example.com/realms/company",
             "sub": "inactive-user-subject",
             "preferred_username": "accountant",
@@ -5368,12 +5427,13 @@ def test_sso_exchange_fails_for_inactive_bound_user(monkeypatch):
 
     try:
         with TestClient(app) as client:
-            with SessionLocal() as db:
-                state_ticket = auth_api.create_sso_state_ticket(db)
+            login_resp = client.get("/api/v1/auth/sso/login", follow_redirects=False)
+            assert login_resp.status_code == 302
+            state = parse_qs(urlparse(login_resp.headers["location"]).query)["state"][0]
 
             callback_resp = client.get(
                 "/api/v1/auth/sso/callback",
-                params={"state": state_ticket.ticket, "code": "demo-code"},
+                params={"state": state, "code": "demo-code"},
                 follow_redirects=False,
             )
             assert callback_resp.status_code == 302

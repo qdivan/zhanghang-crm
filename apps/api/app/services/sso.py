@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -19,6 +20,7 @@ from app.services.soft_delete import active_filter
 
 PROVIDER_KEYCLOAK = "keycloak"
 DEFAULT_SSO_ROLE = "ACCOUNTANT"
+logger = logging.getLogger(__name__)
 GROUP_ROLE_MAP = {
     "crm-owner": "OWNER",
     "crm-admin": "ADMIN",
@@ -257,7 +259,7 @@ def exchange_code_for_tokens(code: str) -> dict[str, Any]:
         return response.json()
 
 
-def verify_id_token(id_token: str, *, nonce: str) -> dict[str, Any]:
+def verify_id_token(id_token: str, *, nonce: str, access_token: str = "") -> dict[str, Any]:
     header = jwt.get_unverified_header(id_token)
     kid = _normalize_claim_text(header.get("kid"))
     alg = _normalize_claim_text(header.get("alg")) or "RS256"
@@ -272,8 +274,17 @@ def verify_id_token(id_token: str, *, nonce: str) -> dict[str, Any]:
             algorithms=[alg],
             audience=settings.oidc_client_id.strip(),
             issuer=settings.oidc_issuer.strip(),
+            access_token=access_token or None,
         )
     except JWTError as exc:
+        logger.warning(
+            "OIDC id_token verification failed: kid=%s alg=%s issuer=%s audience=%s error=%s",
+            kid,
+            alg,
+            settings.oidc_issuer.strip(),
+            settings.oidc_client_id.strip(),
+            str(exc),
+        )
         raise SsoError("企业单点登录令牌校验失败") from exc
     if _normalize_claim_text(claims.get("nonce")) != nonce:
         raise SsoError("企业单点登录状态校验失败，请重新登录")

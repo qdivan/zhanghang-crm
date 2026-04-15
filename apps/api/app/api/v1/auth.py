@@ -182,9 +182,10 @@ def sso_callback(
     try:
         token_payload = exchange_code_for_tokens(code)
         id_token = str(token_payload.get("id_token") or "").strip()
+        access_token = str(token_payload.get("access_token") or "").strip()
         if not id_token:
             raise SsoError("企业单点登录未返回身份令牌")
-        claims = verify_id_token(id_token, nonce=state_ticket.nonce)
+        claims = verify_id_token(id_token, nonce=state_ticket.nonce, access_token=access_token)
         user, outcome = resolve_or_create_local_user(db, claims)
         user.last_login_at = datetime.utcnow()
         write_operation_log(
