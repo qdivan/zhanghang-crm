@@ -4,7 +4,7 @@ import csv
 from dataclasses import dataclass
 from datetime import date, datetime
 from io import BytesIO, StringIO
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -150,7 +150,7 @@ def _parse_customer_csv_rows(content: bytes) -> list[tuple[int, dict[str, str]]]
     return _rows_from_values(rows)
 
 
-def _rows_from_values(rows: list[tuple[object, ...] | list[object]]) -> list[tuple[int, dict[str, str]]]:
+def _rows_from_values(rows: list[Sequence[object]]) -> list[tuple[int, dict[str, str]]]:
     headers = [_format_cell_value(item) for item in rows[0]]
     missing = [item.header for item in CUSTOMER_SHEET_COLUMNS if item.header not in headers]
     if missing:

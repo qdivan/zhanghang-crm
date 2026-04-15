@@ -114,3 +114,65 @@ class DataAccessGrantOut(BaseModel):
     granted_by_username: str
     created_at: datetime
     updated_at: datetime
+
+
+class SsoBindingOut(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    display_name: str
+    email: str
+    provider: str
+    issuer: str
+    subject: str
+    preferred_username: str
+    email_verified: bool
+    external_managed: bool
+    last_login_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+class SsoUnboundUserOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    email: str
+    auth_source: str
+    external_managed: bool
+    role: str
+    is_active: bool
+    created_at: datetime
+
+
+class SsoConflictOut(BaseModel):
+    id: int
+    provider: str
+    issuer: str
+    subject: str
+    preferred_username: str
+    email: str
+    display_name: str
+    reason: str
+    status: str
+    candidate_user_ids: list[int]
+    candidate_usernames: list[str]
+    first_seen_at: datetime
+    last_seen_at: datetime
+    resolved_user_id: Optional[int]
+    resolved_username: str = ""
+
+
+class SsoBindingManualCreate(BaseModel):
+    user_id: int = Field(gt=0)
+    issuer: str = Field(min_length=1, max_length=255)
+    subject: str = Field(min_length=1, max_length=255)
+    preferred_username: str = Field(default="", max_length=255)
+    email: str = Field(default="", max_length=255)
+    email_verified: bool = False
+    display_name: str = Field(default="", max_length=255)
+    raw_claims_json: str = Field(default="", max_length=20000)
+
+
+class SsoConflictResolve(BaseModel):
+    user_id: int = Field(gt=0)

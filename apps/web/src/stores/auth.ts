@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 
 import { apiClient } from "../api/client";
-import type { TokenResponse, UserInfo } from "../types";
+import type { AuthProviders, SsoExchangeResponse, TokenResponse, UserInfo } from "../types";
 
 const tokenKey = "daizhang_token";
 const userKey = "daizhang_user";
@@ -14,6 +14,7 @@ type State = {
   token: string;
   user: UserInfo | null;
   ready: boolean;
+  providers: AuthProviders | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,6 +62,7 @@ export const useAuthStore = defineStore("auth", {
     token: "",
     user: null,
     ready: false,
+    providers: null,
   }),
   getters: {
     isLoggedIn: (state) => Boolean(state.token && state.user),
@@ -167,6 +169,29 @@ export const useAuthStore = defineStore("auth", {
       this.user = loginUser;
       this.ready = true;
       persistSession(this.token, this.user);
+    },
+    async fetchProviders(force = false) {
+      if (this.providers && !force) return this.providers;
+      const resp = await apiClient.get<AuthProviders>("/auth/providers");
+      this.providers = resp.data;
+      return this.providers;
+    },
+    startSsoLogin() {
+      const loginUrl = apiClient.getUri({ url: "/auth/sso/login" });
+      window.location.href = loginUrl;
+    },
+    async exchangeSsoTicket(ticket: string) {
+      const resp = await apiClient.post<SsoExchangeResponse>("/auth/sso/exchange", {
+        ticket,
+      });
+      const data = resp.data;
+      if (data.status === "SUCCESS" && data.access_token && data.user && isUserInfo(data.user)) {
+        this.token = data.access_token;
+        this.user = data.user;
+        this.ready = true;
+        persistSession(this.token, this.user);
+      }
+      return data;
     },
     logout() {
       this.token = "";

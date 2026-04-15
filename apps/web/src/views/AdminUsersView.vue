@@ -21,6 +21,10 @@ import type {
   OperationLogItem,
   SecuritySettings,
   SecuritySettingsUpdatePayload,
+  SsoBindingItem,
+  SsoConflictItem,
+  SsoManualBindingPayload,
+  SsoUnboundUserItem,
   UserCreatePayload,
   UserRole,
   UserUpdatePayload,
@@ -28,10 +32,11 @@ import type {
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE";
 type GrantStatusFilter = "ALL" | "ACTIVE" | "INACTIVE" | "EFFECTIVE";
+type SsoConflictStatusFilter = "PENDING" | "RESOLVED" | "ALL";
 
 const auth = useAuthStore();
 const route = useRoute();
-const activeTab = ref<"users" | "grants" | "security" | "ldap" | "logs" | "recycle">("users");
+const activeTab = ref<"users" | "grants" | "sso" | "security" | "ldap" | "logs" | "recycle">("users");
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 
 const loading = ref(false);
@@ -40,6 +45,7 @@ const editLoading = ref(false);
 const deleteLoadingUserId = ref<number | null>(null);
 const deleteLoadingGrantId = ref<number | null>(null);
 const rows = ref<ManagedUser[]>([]);
+const allUserOptions = ref<ManagedUser[]>([]);
 const showCreateDialog = ref(false);
 const showEditDialog = ref(false);
 const editingOrigin = ref<ManagedUser | null>(null);
@@ -135,11 +141,55 @@ const grantForm = reactive({
   is_active: true,
 });
 
+const ssoBindingLoading = ref(false);
+const ssoConflictLoading = ref(false);
+const ssoUnboundLoading = ref(false);
+const ssoDeleteLoadingId = ref<number | null>(null);
+const ssoManualBindingLoading = ref(false);
+const ssoResolveLoadingId = ref<number | null>(null);
+const showSsoManualDialog = ref(false);
+const showSsoResolveDialog = ref(false);
+const ssoBindings = ref<SsoBindingItem[]>([]);
+const ssoConflicts = ref<SsoConflictItem[]>([]);
+const ssoUnboundUsers = ref<SsoUnboundUserItem[]>([]);
+const ssoConflictOrigin = ref<SsoConflictItem | null>(null);
+const ssoFilters = reactive({
+  bindingKeyword: "",
+  conflictKeyword: "",
+  conflictStatus: "PENDING" as SsoConflictStatusFilter,
+  includeInactiveUsers: false,
+});
+const ssoManualForm = reactive({
+  user_id: null as number | null,
+  issuer: "",
+  subject: "",
+  preferred_username: "",
+  email: "",
+  email_verified: false,
+  display_name: "",
+  raw_claims_json: "",
+});
+const ssoResolveForm = reactive({
+  conflict_id: null as number | null,
+  user_id: null as number | null,
+});
+
 const canManageAdminUsers = computed(() => auth.user?.role === "ADMIN");
 const editingSelf = computed(() => editForm.id === auth.user?.id);
 const managerOptions = computed(() =>
   rows.value.filter((item) => item.role === "MANAGER" && item.is_active),
 );
+const bindableUserOptions = computed(() => allUserOptions.value.filter((item) => item.is_active));
+const ssoPendingConflictCount = computed(() => ssoConflicts.value.filter((item) => item.status === "PENDING").length);
+const ssoResolvedConflictCount = computed(() => ssoConflicts.value.filter((item) => item.status === "RESOLVED").length);
+const ssoResolveCandidateOptions = computed(() => {
+  if (!ssoConflictOrigin.value?.candidate_user_ids.length) {
+    return bindableUserOptions.value;
+  }
+  const candidateSet = new Set(ssoConflictOrigin.value.candidate_user_ids);
+  const preferred = bindableUserOptions.value.filter((item) => candidateSet.has(item.id));
+  return preferred.length ? preferred : bindableUserOptions.value;
+});
 const createNeedsManager = computed(() => createForm.role === "ACCOUNTANT");
 const editNeedsManager = computed(() => editForm.role === "ACCOUNTANT");
 
@@ -184,6 +234,7 @@ const panelScopeText = computed(() =>
 const mobileTabItems = [
   { key: "users", label: "用户" },
   { key: "grants", label: "授权" },
+  { key: "sso", label: "SSO" },
   { key: "security", label: "安全" },
   { key: "ldap", label: "LDAP" },
   { key: "logs", label: "日志" },
@@ -238,8 +289,9 @@ const activeAdvancedLogFilterCount = computed(() => {
   return count;
 });
 
-function resolveTab(tab: unknown): "users" | "grants" | "security" | "ldap" | "logs" | "recycle" {
+function resolveTab(tab: unknown): "users" | "grants" | "sso" | "security" | "ldap" | "logs" | "recycle" {
   if (tab === "grants") return "grants";
+  if (tab === "sso") return "sso";
   if (tab === "security") return "security";
   if (tab === "ldap") return "ldap";
   if (tab === "logs") return "logs";
@@ -263,6 +315,7 @@ function roleTagType(role: UserRole): "danger" | "warning" | "primary" | "succes
 
 function authSourceLabel(source: string): string {
   if (source === "LDAP") return "LDAP";
+  if (source === "SSO") return "SSO";
   return "本地";
 }
 
@@ -315,6 +368,10 @@ function actionLabel(action: string): string {
     DATA_ACCESS_GRANT_REACTIVATED: "数据授权启用",
     DATA_ACCESS_GRANT_DELETED: "数据授权删除",
     DATA_ACCESS_GRANT_RESTORED: "数据授权恢复",
+    SSO_LOGIN: "SSO 登录",
+    SSO_BINDING_CREATED: "SSO 绑定创建",
+    SSO_BINDING_REMOVED: "SSO 绑定移除",
+    SSO_CONFLICT_RESOLVED: "SSO 冲突处理",
     TODO_CREATED: "待办创建",
     TODO_UPDATED: "待办更新",
     TODO_DELETED: "待办删除",
@@ -393,6 +450,19 @@ async function fetchUsers() {
   }
 }
 
+async function fetchAllUserOptions() {
+  try {
+    const resp = await apiClient.get<ManagedUser[]>("/users", {
+      params: {
+        include_inactive: true,
+      },
+    });
+    allUserOptions.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载账号选项失败");
+  }
+}
+
 function openCreateDialog() {
   resetCreateForm();
   showCreateDialog.value = true;
@@ -426,7 +496,7 @@ async function submitCreate() {
     await apiClient.post("/users", payload);
     ElMessage.success("用户已创建");
     showCreateDialog.value = false;
-    await Promise.all([fetchUsers(), fetchLogs()]);
+    await Promise.all([fetchUsers(), fetchAllUserOptions(), fetchLogs()]);
   } catch (error: any) {
     ElMessage.error(resolveErrorMessage(error, "创建失败"));
   } finally {
@@ -489,7 +559,7 @@ async function submitEdit() {
     await apiClient.patch(`/users/${editForm.id}`, payload);
     ElMessage.success("用户已更新");
     showEditDialog.value = false;
-    await Promise.all([fetchUsers(), fetchLogs()]);
+    await Promise.all([fetchUsers(), fetchAllUserOptions(), fetchLogs()]);
   } catch (error: any) {
     ElMessage.error(resolveErrorMessage(error, "更新失败"));
   } finally {
@@ -529,7 +599,7 @@ async function removeUser(row: ManagedUser) {
       params: { confirm_name: expectedName },
     });
     ElMessage.success("账号已移入回收站");
-    await Promise.all([fetchUsers(), fetchDeletedRecords(), fetchLogs()]);
+    await Promise.all([fetchUsers(), fetchAllUserOptions(), fetchDeletedRecords(), fetchLogs()]);
   } catch (error: any) {
     ElMessage.error(resolveErrorMessage(error, "删除失败"));
   } finally {
@@ -574,6 +644,167 @@ async function removeGrant(row: DataAccessGrantItem) {
     ElMessage.error(resolveErrorMessage(error, "删除授权失败"));
   } finally {
     deleteLoadingGrantId.value = null;
+  }
+}
+
+function resetSsoManualForm() {
+  ssoManualForm.user_id = null;
+  ssoManualForm.issuer = "";
+  ssoManualForm.subject = "";
+  ssoManualForm.preferred_username = "";
+  ssoManualForm.email = "";
+  ssoManualForm.email_verified = false;
+  ssoManualForm.display_name = "";
+  ssoManualForm.raw_claims_json = "";
+}
+
+async function fetchSsoBindings() {
+  ssoBindingLoading.value = true;
+  try {
+    const resp = await apiClient.get<SsoBindingItem[]>("/admin/sso/bindings", {
+      params: {
+        keyword: ssoFilters.bindingKeyword || undefined,
+      },
+    });
+    ssoBindings.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载身份绑定列表失败");
+  } finally {
+    ssoBindingLoading.value = false;
+  }
+}
+
+async function fetchSsoUnboundUsers() {
+  ssoUnboundLoading.value = true;
+  try {
+    const resp = await apiClient.get<SsoUnboundUserItem[]>("/admin/sso/unbound-users", {
+      params: {
+        keyword: ssoFilters.bindingKeyword || undefined,
+        include_inactive: ssoFilters.includeInactiveUsers,
+      },
+    });
+    ssoUnboundUsers.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载未绑定用户失败");
+  } finally {
+    ssoUnboundLoading.value = false;
+  }
+}
+
+async function fetchSsoConflicts() {
+  ssoConflictLoading.value = true;
+  try {
+    const resp = await apiClient.get<SsoConflictItem[]>("/admin/sso/conflicts", {
+      params: {
+        status_filter: ssoFilters.conflictStatus,
+        keyword: ssoFilters.conflictKeyword || undefined,
+      },
+    });
+    ssoConflicts.value = resp.data;
+  } catch (error) {
+    ElMessage.error("加载待处理冲突失败");
+  } finally {
+    ssoConflictLoading.value = false;
+  }
+}
+
+async function fetchSsoWorkspace() {
+  await Promise.all([fetchSsoBindings(), fetchSsoUnboundUsers(), fetchSsoConflicts()]);
+}
+
+function openSsoManualBindingDialog(row?: SsoUnboundUserItem) {
+  resetSsoManualForm();
+  if (row) {
+    ssoManualForm.user_id = row.id;
+    ssoManualForm.email = row.email || "";
+    ssoManualForm.display_name = row.display_name || row.username;
+    ssoManualForm.preferred_username = row.username;
+  }
+  showSsoManualDialog.value = true;
+}
+
+async function submitSsoManualBinding() {
+  if (!ssoManualForm.user_id) {
+    ElMessage.warning("请选择要绑定的本地用户");
+    return;
+  }
+  if (!ssoManualForm.issuer.trim() || !ssoManualForm.subject.trim()) {
+    ElMessage.warning("Issuer 和 Subject 都必须填写");
+    return;
+  }
+  const payload: SsoManualBindingPayload = {
+    user_id: ssoManualForm.user_id,
+    issuer: ssoManualForm.issuer.trim(),
+    subject: ssoManualForm.subject.trim(),
+    preferred_username: ssoManualForm.preferred_username.trim(),
+    email: ssoManualForm.email.trim(),
+    email_verified: ssoManualForm.email_verified,
+    display_name: ssoManualForm.display_name.trim(),
+    raw_claims_json: ssoManualForm.raw_claims_json.trim(),
+  };
+  ssoManualBindingLoading.value = true;
+  try {
+    await apiClient.post("/admin/sso/bindings/manual", payload);
+    ElMessage.success("SSO 绑定已创建");
+    showSsoManualDialog.value = false;
+    await Promise.all([fetchSsoWorkspace(), fetchUsers(), fetchAllUserOptions(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "创建 SSO 绑定失败");
+  } finally {
+    ssoManualBindingLoading.value = false;
+  }
+}
+
+function openResolveSsoConflictDialog(conflict: SsoConflictItem) {
+  ssoConflictOrigin.value = conflict;
+  ssoResolveForm.conflict_id = conflict.id;
+  ssoResolveForm.user_id = conflict.candidate_user_ids[0] ?? null;
+  showSsoResolveDialog.value = true;
+}
+
+async function submitResolveSsoConflict() {
+  if (!ssoResolveForm.conflict_id || !ssoResolveForm.user_id) {
+    ElMessage.warning("请先选择要绑定的本地用户");
+    return;
+  }
+  ssoResolveLoadingId.value = ssoResolveForm.conflict_id;
+  try {
+    await apiClient.post(`/admin/sso/conflicts/${ssoResolveForm.conflict_id}/resolve`, {
+      user_id: ssoResolveForm.user_id,
+    });
+    ElMessage.success("冲突已处理并完成绑定");
+    showSsoResolveDialog.value = false;
+    await Promise.all([fetchSsoWorkspace(), fetchUsers(), fetchAllUserOptions(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "处理绑定冲突失败");
+  } finally {
+    ssoResolveLoadingId.value = null;
+  }
+}
+
+async function removeSsoBinding(row: SsoBindingItem) {
+  try {
+    await ElMessageBox.confirm(
+      `确认解绑 ${row.username} 的企业单点登录吗？解绑后不会删除本地业务用户。`,
+      "解除 SSO 绑定",
+      {
+        type: "warning",
+        confirmButtonText: "确认解绑",
+        cancelButtonText: "取消",
+      },
+    );
+  } catch {
+    return;
+  }
+  ssoDeleteLoadingId.value = row.id;
+  try {
+    await apiClient.delete(`/admin/sso/bindings/${row.id}`);
+    ElMessage.success("SSO 绑定已解除");
+    await Promise.all([fetchSsoWorkspace(), fetchUsers(), fetchAllUserOptions(), fetchLogs()]);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "解除绑定失败");
+  } finally {
+    ssoDeleteLoadingId.value = null;
   }
 }
 
@@ -916,8 +1147,10 @@ async function toggleGrantActive(row: DataAccessGrantItem, isActive: boolean) {
 onMounted(async () => {
   await Promise.all([
     fetchUsers(),
+    fetchAllUserOptions(),
     fetchGrantUsers(),
     fetchDataAccessGrants(),
+    fetchSsoWorkspace(),
     fetchSecuritySettings(),
     fetchLdapSettings(),
     fetchLogs(),
@@ -1157,6 +1390,78 @@ watch(
                   @click="removeGrant(row)"
                 >
                   删除
+                </el-button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </template>
+
+      <template v-else-if="activeTab === 'sso'">
+        <section class="mobile-shell-panel">
+          <div class="mobile-toolbar">
+            <div class="mobile-toolbar-main">
+              <div class="admin-mobile-section-title">SSO / 身份绑定</div>
+              <div class="admin-mobile-section-copy">迁移期在这里看已绑定账号、待处理冲突和还没绑定的本地用户。</div>
+            </div>
+            <div class="mobile-toolbar-actions">
+              <el-tag class="mobile-count-tag" size="small" effect="plain">{{ ssoBindings.length }} 已绑定</el-tag>
+              <el-button class="mobile-row-primary-button" type="primary" @click="openSsoManualBindingDialog()">
+                手动绑定
+              </el-button>
+            </div>
+          </div>
+          <div class="mobile-chip-row admin-mobile-stat-row">
+            <span class="mobile-chip">待处理 {{ ssoPendingConflictCount }}</span>
+            <span class="mobile-chip">已解决 {{ ssoResolvedConflictCount }}</span>
+            <span class="mobile-chip">未绑定 {{ ssoUnboundUsers.length }}</span>
+          </div>
+          <div class="admin-mobile-filter-grid">
+            <el-input
+              v-model="ssoFilters.bindingKeyword"
+              placeholder="账号 / 邮箱 / subject"
+              clearable
+              @keyup.enter="fetchSsoWorkspace"
+            />
+            <el-select v-model="ssoFilters.conflictStatus" placeholder="冲突状态">
+              <el-option label="待处理" value="PENDING" />
+              <el-option label="已处理" value="RESOLVED" />
+              <el-option label="全部" value="ALL" />
+            </el-select>
+          </div>
+          <div class="admin-mobile-filter-actions">
+            <el-button class="mobile-row-secondary-button" plain @click="fetchSsoWorkspace">查询</el-button>
+          </div>
+        </section>
+
+        <section class="mobile-shell-panel">
+          <div class="admin-mobile-section-title">待处理冲突</div>
+          <div class="admin-mobile-section-copy">出现邮箱或用户名冲突时，需要管理员确认绑到哪一个本地业务账号。</div>
+          <div v-if="ssoConflictLoading && !ssoConflicts.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">SSO 冲突</div>
+            <div class="mobile-empty-title">正在加载待处理项</div>
+            <div class="mobile-empty-copy">冲突账号会在这里集中显示。</div>
+          </div>
+          <div v-else-if="!ssoConflicts.length" class="mobile-empty-block">
+            <div class="mobile-empty-kicker">SSO 冲突</div>
+            <div class="mobile-empty-title">当前没有需要人工处理的冲突</div>
+            <div class="mobile-empty-copy">后续有新的绑定冲突时会出现在这里。</div>
+          </div>
+          <div v-else class="mobile-record-list">
+            <article v-for="row in ssoConflicts" :key="row.id" class="mobile-record-card admin-mobile-card">
+              <div class="mobile-record-head">
+                <div class="mobile-record-main">
+                  <div class="mobile-record-title">{{ row.display_name || row.preferred_username || row.email || row.subject }}</div>
+                  <div class="mobile-record-subtitle">{{ row.reason }} · {{ row.status === "PENDING" ? "待处理" : "已处理" }}</div>
+                </div>
+                <el-tag class="mobile-status-tag" size="small" effect="plain" :type="row.status === 'PENDING' ? 'warning' : 'success'">
+                  {{ row.status === "PENDING" ? "待处理" : "已处理" }}
+                </el-tag>
+              </div>
+              <div class="mobile-record-note">候选账号：{{ row.candidate_usernames.join("、") || "暂无候选账号" }}</div>
+              <div class="mobile-action-main" v-if="row.status === 'PENDING'">
+                <el-button class="mobile-row-primary-button" size="small" type="primary" @click="openResolveSsoConflictDialog(row)">
+                  处理冲突
                 </el-button>
               </div>
             </article>
@@ -1599,6 +1904,235 @@ watch(
                       删除
                     </el-button>
                   </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </el-space>
+      </el-tab-pane>
+
+      <el-tab-pane label="SSO / 身份绑定" name="sso">
+      <el-space direction="vertical" fill :size="12">
+          <el-card shadow="never" class="admin-panel-card">
+            <div class="head head-rich">
+              <div>
+                <div class="section-title">企业单点登录绑定管理</div>
+                <div class="section-copy">这里不执行正式历史迁移，只负责确认系统已经具备绑定、冲突处理和新用户投影落地能力。</div>
+              </div>
+              <div class="head-actions">
+                <el-tag type="success" effect="plain">{{ ssoBindings.length }} 已绑定</el-tag>
+                <el-tag type="warning" effect="plain">{{ ssoPendingConflictCount }} 待处理</el-tag>
+                <el-button type="primary" @click="openSsoManualBindingDialog()">手动绑定</el-button>
+              </div>
+            </div>
+            <el-alert
+              title="迁移期建议先处理待绑定冲突，再补未绑定本地用户。若绑定错误，可先解绑，再重新绑定。"
+              type="info"
+              :closable="false"
+              class="admin-inline-note"
+            />
+            <el-form inline @submit.prevent="fetchSsoWorkspace" class="admin-filter-form">
+              <el-form-item label="账号检索">
+                <el-input
+                  v-model="ssoFilters.bindingKeyword"
+                  placeholder="账号 / 邮箱 / subject"
+                  clearable
+                  @keyup.enter="fetchSsoWorkspace"
+                />
+              </el-form-item>
+              <el-form-item label="冲突状态">
+                <el-select v-model="ssoFilters.conflictStatus" placeholder="待处理">
+                  <el-option label="待处理" value="PENDING" />
+                  <el-option label="已处理" value="RESOLVED" />
+                  <el-option label="全部" value="ALL" />
+                </el-select>
+              </el-form-item>
+              <el-form-item>
+                <el-checkbox v-model="ssoFilters.includeInactiveUsers">包含停用本地用户</el-checkbox>
+              </el-form-item>
+              <el-form-item>
+                <el-button @click="fetchSsoWorkspace">查询</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <el-row :gutter="12" class="sso-grid">
+            <el-col :xs="24" :xl="13">
+              <el-card shadow="never" class="admin-panel-card">
+                <template #header>
+                  <div class="head head-rich">
+                    <div>
+                      <div class="section-title">已绑定账号</div>
+                      <div class="section-copy">一旦绑定成功，后续主要依赖 issuer + subject 识别，不再长期依赖用户名。</div>
+                    </div>
+                    <div class="head-actions">
+                      <el-tag type="success" effect="plain">{{ ssoBindings.length }} 条</el-tag>
+                    </div>
+                  </div>
+                </template>
+                <el-table
+                  v-loading="ssoBindingLoading"
+                  :data="ssoBindings"
+                  stripe
+                  border
+                  size="small"
+                  class="admin-sso-table"
+                >
+                  <el-table-column prop="username" label="本地账号" min-width="150" />
+                  <el-table-column label="展示信息" min-width="220">
+                    <template #default="{ row }">
+                      <div class="sso-cell-stack">
+                        <div class="sso-cell-main">{{ row.display_name || row.preferred_username || row.username }}</div>
+                        <div class="sso-cell-meta">{{ row.email || "未同步邮箱" }}</div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="外部身份" min-width="260" show-overflow-tooltip>
+                    <template #default="{ row }">
+                      <div class="sso-cell-stack">
+                        <div class="sso-cell-main">{{ row.preferred_username || row.subject }}</div>
+                        <div class="sso-cell-meta">{{ row.subject }}</div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column
+                    label="最近登录"
+                    min-width="170"
+                    class-name="mobile-hide"
+                    label-class-name="mobile-hide"
+                  >
+                    <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.last_login_at) }}</template>
+                  </el-table-column>
+                  <el-table-column label="状态" width="120">
+                    <template #default="{ row }">
+                      <el-tag size="small" :type="row.external_managed ? 'success' : 'info'">
+                        {{ row.external_managed ? "外部托管" : "普通投影" }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="96" fixed="right">
+                    <template #default="{ row }">
+                      <el-button
+                        link
+                        type="danger"
+                        :loading="ssoDeleteLoadingId === row.id"
+                        @click="removeSsoBinding(row)"
+                      >
+                        解绑
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+            </el-col>
+
+            <el-col :xs="24" :xl="11">
+              <el-card shadow="never" class="admin-panel-card">
+                <template #header>
+                  <div class="head head-rich">
+                    <div>
+                      <div class="section-title">待处理冲突</div>
+                      <div class="section-copy">邮箱或用户名无法唯一命中时，会先落到这里，避免自动绑错本地业务账号。</div>
+                    </div>
+                    <div class="head-actions">
+                      <el-tag type="warning" effect="plain">{{ ssoPendingConflictCount }} 待处理</el-tag>
+                      <el-tag type="info" effect="plain">{{ ssoResolvedConflictCount }} 已处理</el-tag>
+                    </div>
+                  </div>
+                </template>
+                <el-table
+                  v-loading="ssoConflictLoading"
+                  :data="ssoConflicts"
+                  stripe
+                  border
+                  size="small"
+                  class="admin-sso-table"
+                >
+                  <el-table-column label="企业账号" min-width="180">
+                    <template #default="{ row }">
+                      <div class="sso-cell-stack">
+                        <div class="sso-cell-main">{{ row.display_name || row.preferred_username || row.email || row.subject }}</div>
+                        <div class="sso-cell-meta">{{ row.email || row.preferred_username || row.subject }}</div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="冲突原因" min-width="180" show-overflow-tooltip>
+                    <template #default="{ row }">
+                      <div class="sso-cell-stack">
+                        <div class="sso-cell-main">{{ row.reason }}</div>
+                        <div class="sso-cell-meta">候选：{{ row.candidate_usernames.join("、") || "暂无候选账号" }}</div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="状态" width="110">
+                    <template #default="{ row }">
+                      <el-tag size="small" :type="row.status === 'PENDING' ? 'warning' : 'success'">
+                        {{ row.status === "PENDING" ? "待处理" : "已处理" }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="110" fixed="right">
+                    <template #default="{ row }">
+                      <el-button
+                        v-if="row.status === 'PENDING'"
+                        link
+                        type="primary"
+                        :loading="ssoResolveLoadingId === row.id"
+                        @click="openResolveSsoConflictDialog(row)"
+                      >
+                        处理
+                      </el-button>
+                      <span v-else class="sso-resolved-text">已处理</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <el-card shadow="never" class="admin-panel-card">
+            <template #header>
+              <div class="head head-rich">
+                <div>
+                  <div class="section-title">未绑定本地用户</div>
+                  <div class="section-copy">这些账号已经在 CRM 里可用，但还没绑定到 Keycloak。历史迁移阶段可以按需手动补绑。</div>
+                </div>
+                <div class="head-actions">
+                  <el-tag type="info" effect="plain">{{ ssoUnboundUsers.length }} 条</el-tag>
+                </div>
+              </div>
+            </template>
+            <el-table
+              v-loading="ssoUnboundLoading"
+              :data="ssoUnboundUsers"
+              stripe
+              border
+              size="small"
+              class="admin-sso-table"
+            >
+              <el-table-column prop="username" label="本地账号" min-width="150" />
+              <el-table-column label="显示信息" min-width="220">
+                <template #default="{ row }">
+                  <div class="sso-cell-stack">
+                    <div class="sso-cell-main">{{ row.display_name || row.username }}</div>
+                    <div class="sso-cell-meta">{{ row.email || "未填写邮箱" }}</div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="来源 / 角色" width="160">
+                <template #default="{ row }">
+                  <div class="sso-cell-stack">
+                    <div class="sso-cell-main">{{ authSourceLabel(row.auth_source) }}</div>
+                    <div class="sso-cell-meta">{{ roleLabel(row.role) }}</div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" min-width="170" class-name="mobile-hide" label-class-name="mobile-hide">
+                <template #default="{ row }">{{ formatDateTimeInBrowserTimeZone(row.created_at) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="110" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" @click="openSsoManualBindingDialog(row)">手动绑定</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -2157,6 +2691,110 @@ watch(
       <el-button type="primary" :loading="grantCreateLoading" @click="submitGrantCreate">创建授权</el-button>
     </template>
   </el-dialog>
+
+  <el-dialog v-model="showSsoManualDialog" title="手动创建 SSO 绑定" width="620px">
+    <el-form label-position="top" class="admin-dialog-form">
+      <el-form-item label="本地业务用户">
+        <el-select v-model="ssoManualForm.user_id" filterable placeholder="请选择本地账号">
+          <el-option
+            v-for="item in bindableUserOptions"
+            :key="item.id"
+            :label="`${item.username}${item.display_name ? ` · ${item.display_name}` : ''}`"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="身份中心 Issuer">
+            <el-input v-model="ssoManualForm.issuer" placeholder="如 https://sso.example.com/realms/company" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="外部 Subject">
+            <el-input v-model="ssoManualForm.subject" placeholder="Keycloak 返回的 subject" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="外部用户名">
+            <el-input v-model="ssoManualForm.preferred_username" placeholder="如 crm-test" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="邮箱">
+            <el-input v-model="ssoManualForm.email" placeholder="如 crm-test@ivanshang.com" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="显示名">
+            <el-input v-model="ssoManualForm.display_name" placeholder="如 CRM 测试账号" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="邮箱已验证">
+            <el-switch v-model="ssoManualForm.email_verified" active-text="是" inactive-text="否" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item label="原始 claims（可留空）">
+        <el-input
+          v-model="ssoManualForm.raw_claims_json"
+          type="textarea"
+          :rows="4"
+          placeholder='如 {"groups":["crm-accountant"]}'
+        />
+      </el-form-item>
+      <el-alert
+        title="这一步只是在 CRM 里建立身份绑定，不执行正式历史迁移。"
+        type="info"
+        :closable="false"
+      />
+    </el-form>
+    <template #footer>
+      <el-button @click="showSsoManualDialog = false">取消</el-button>
+      <el-button type="primary" :loading="ssoManualBindingLoading" @click="submitSsoManualBinding">创建绑定</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="showSsoResolveDialog" title="处理 SSO 绑定冲突" width="560px">
+    <el-form label-position="top" class="admin-dialog-form">
+      <el-alert
+        v-if="ssoConflictOrigin"
+        :title="ssoConflictOrigin.reason"
+        type="warning"
+        :closable="false"
+      />
+      <el-form-item label="企业账号">
+        <el-input
+          :model-value="ssoConflictOrigin ? `${ssoConflictOrigin.display_name || ssoConflictOrigin.preferred_username || '-'} · ${ssoConflictOrigin.email || ssoConflictOrigin.subject}` : ''"
+          readonly
+        />
+      </el-form-item>
+      <el-form-item label="绑定到本地业务用户">
+        <el-select v-model="ssoResolveForm.user_id" filterable placeholder="请选择本地账号">
+          <el-option
+            v-for="item in ssoResolveCandidateOptions"
+            :key="item.id"
+            :label="`${item.username}${item.display_name ? ` · ${item.display_name}` : ''}`"
+            :value="item.id"
+          />
+        </el-select>
+      </el-form-item>
+      <div v-if="ssoConflictOrigin" class="sso-dialog-helper">
+        候选账号：{{ ssoConflictOrigin.candidate_usernames.join("、") || "暂无候选账号，允许手动指定" }}
+      </div>
+    </el-form>
+    <template #footer>
+      <el-button @click="showSsoResolveDialog = false">取消</el-button>
+      <el-button type="primary" :loading="ssoResolveLoadingId === ssoResolveForm.conflict_id" @click="submitResolveSsoConflict">
+        确认绑定
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -2201,7 +2839,7 @@ watch(
 
 .admin-mobile-tab-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 6px;
   margin-top: 14px;
 }
@@ -2278,6 +2916,10 @@ watch(
   border-color: var(--app-border-soft);
 }
 
+.admin-inline-note {
+  margin-bottom: 12px;
+}
+
 .grant-status-stack,
 .grant-period-cell,
 .grant-reason-cell {
@@ -2294,6 +2936,34 @@ watch(
   font-size: 12px;
   line-height: 1.45;
   color: var(--app-text-muted);
+}
+
+.sso-cell-stack,
+.sso-dialog-helper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sso-cell-main,
+.sso-resolved-text {
+  color: var(--app-text-primary);
+}
+
+.sso-cell-meta,
+.sso-dialog-helper {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--app-text-muted);
+}
+
+.sso-grid :deep(.el-card__body) {
+  min-width: 0;
+}
+
+.admin-sso-table :deep(.el-table__cell) {
+  padding-top: 9px;
+  padding-bottom: 9px;
 }
 
 .grant-reason-main {

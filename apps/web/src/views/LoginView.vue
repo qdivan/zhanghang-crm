@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowRight } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { reactive } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { getDefaultProtectedPath } from "../mobile/config";
@@ -19,9 +19,16 @@ const form = reactive({
 
 const state = reactive({
   loading: false,
+  ssoLoading: false,
+  providersLoading: false,
 });
+const showLocalLogin = ref(false);
 
 const scopeItems = ["客户开发", "客户列表", "收费明细", "到账核对"];
+const providers = computed(() => auth.providers);
+const ssoEnabled = computed(() => Boolean(providers.value?.sso.enabled));
+const ssoLabel = computed(() => providers.value?.sso.label || "企业单点登录");
+const localAdminOnly = computed(() => Boolean(providers.value?.local.admin_only));
 
 async function login() {
   if (!form.username || !form.password) {
@@ -45,6 +52,30 @@ async function login() {
 function openPublicLibrary() {
   router.push("/library/public");
 }
+
+async function startSso() {
+  state.ssoLoading = true;
+  try {
+    if (!auth.providers) {
+      await auth.fetchProviders();
+    }
+    auth.startSsoLogin();
+  } catch (error: any) {
+    state.ssoLoading = false;
+    ElMessage.error(error?.response?.data?.detail ?? "企业单点登录暂时不可用");
+  }
+}
+
+onMounted(async () => {
+  state.providersLoading = true;
+  try {
+    await auth.fetchProviders();
+  } catch {
+    ElMessage.warning("未能加载登录方式，先保留本地登录入口");
+  } finally {
+    state.providersLoading = false;
+  }
+});
 </script>
 
 <template>
@@ -66,10 +97,32 @@ function openPublicLibrary() {
       <section class="login-panel">
         <div class="login-panel-head">
           <div class="login-panel-title">登录</div>
-          <div class="login-panel-copy">本地账号可直接使用，LDAP 可后续接入。</div>
+          <div class="login-panel-copy">迁移期优先使用企业单点登录，本地账号仅保留给过渡期和应急管理员。</div>
         </div>
 
-        <el-form :model="form" label-position="top" class="login-form" @submit.prevent="login">
+        <div class="sso-entry-block">
+          <el-button
+            class="login-submit"
+            type="primary"
+            :loading="state.ssoLoading || state.providersLoading"
+            :disabled="!ssoEnabled && !state.providersLoading"
+            @click="startSso"
+          >
+            {{ ssoEnabled ? ssoLabel : "企业单点登录未启用" }}
+          </el-button>
+          <div class="login-foot-note">统一账号、密码、MFA 和停用状态都由身份中心维护。</div>
+        </div>
+
+        <div class="local-login-toggle">
+          <button class="login-secondary-link" type="button" @click="showLocalLogin = !showLocalLogin">
+            {{ showLocalLogin ? "收起本地登录" : "展开本地登录" }}
+          </button>
+          <span class="local-login-note">
+            {{ localAdminOnly ? "当前仅应急管理员支持本地登录" : "迁移期仍保留本地登录入口" }}
+          </span>
+        </div>
+
+        <el-form v-if="showLocalLogin" :model="form" label-position="top" class="login-form" @submit.prevent="login">
           <el-form-item label="账号">
             <el-input v-model="form.username" placeholder="请输入账号" size="large" />
           </el-form-item>
@@ -82,13 +135,13 @@ function openPublicLibrary() {
               size="large"
             />
           </el-form-item>
-          <el-button class="login-submit" type="primary" :loading="state.loading" @click="login">
-            进入系统
+          <el-button class="login-submit login-submit-local" type="default" :loading="state.loading" @click="login">
+            本地账号进入系统
           </el-button>
         </el-form>
 
         <div class="login-panel-foot">
-          <div class="login-foot-note">公开资料入口保留在系统外，登录后继续处理内部工作。</div>
+          <div class="login-foot-note">公开资料入口保留在系统外，企业单点登录完成后继续进入内部工作台。</div>
         </div>
       </section>
     </div>
@@ -203,6 +256,29 @@ function openPublicLibrary() {
   font-size: 13px;
 }
 
+.sso-entry-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.local-login-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--app-border-soft);
+}
+
+.local-login-note {
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
 .login-form :deep(.el-form-item) {
   margin-bottom: 16px;
 }
@@ -229,6 +305,12 @@ function openPublicLibrary() {
   border: none;
   border-radius: 0;
   background: var(--app-gradient);
+}
+
+.login-submit-local {
+  background: var(--app-surface-muted);
+  color: var(--app-text-primary);
+  border: 1px solid var(--app-border);
 }
 
 .login-panel-foot {
@@ -315,6 +397,15 @@ function openPublicLibrary() {
   .login-panel {
     justify-content: flex-start;
     padding: 18px;
+  }
+
+  .local-login-toggle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-login-note {
+    text-align: left;
   }
 }
 </style>

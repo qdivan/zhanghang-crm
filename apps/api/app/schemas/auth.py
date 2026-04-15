@@ -15,6 +15,31 @@ class TokenResponse(BaseModel):
     user: Optional["UserOut"] = None
 
 
+class AuthProviderEntry(BaseModel):
+    enabled: bool
+    label: str
+    admin_only: bool = False
+
+
+class AuthProvidersOut(BaseModel):
+    local: AuthProviderEntry
+    sso: AuthProviderEntry
+
+
+class SsoExchangeRequest(BaseModel):
+    ticket: str
+
+
+class SsoExchangeResponse(BaseModel):
+    status: str
+    message: str = ""
+    access_token: Optional[str] = None
+    token_type: str = "bearer"
+    user: Optional["UserOut"] = None
+    conflict_id: Optional[int] = None
+    provider_label: str = ""
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -22,6 +47,10 @@ class UserOut(BaseModel):
     username: str
     auth_source: str
     ldap_dn: str
+    email: str = ""
+    display_name: str = ""
+    external_managed: bool = False
+    sso_bound: bool = False
     role: str
     manager_user_id: Optional[int] = None
     manager_username: str = ""

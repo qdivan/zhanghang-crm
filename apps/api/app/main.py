@@ -205,6 +205,20 @@ def _ensure_schema_compatibility() -> None:
                     {"assignment_kind": expected_kind, "assignment_id": assignment_id},
                 )
 
+    def ensure_user_sso_columns() -> None:
+        if "users" not in table_names:
+            return
+        user_columns = {item["name"] for item in inspector.get_columns("users")}
+        with engine.begin() as conn:
+            if "email" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT ''"))
+            if "display_name" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255) DEFAULT ''"))
+            if "external_managed" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN external_managed BOOLEAN DEFAULT FALSE"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_external_managed ON users (external_managed)"))
+
     if "todo_items" in table_names:
         todo_columns = {item["name"] for item in inspector.get_columns("todo_items")}
         if "my_day_date" not in todo_columns:
@@ -423,6 +437,8 @@ def _ensure_schema_compatibility() -> None:
         "common_library_items",
     ]:
         ensure_soft_delete_columns(soft_delete_table)
+
+    ensure_user_sso_columns()
 
 
 @app.on_event("startup")

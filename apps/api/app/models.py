@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -53,6 +53,9 @@ class User(SoftDeleteMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     auth_source: Mapped[str] = mapped_column(String(20), default="LOCAL")
     ldap_dn: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="", index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    external_managed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     role: Mapped[str] = mapped_column(String(20), default="ACCOUNTANT")
     manager_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
@@ -72,6 +75,10 @@ class User(SoftDeleteMixin, Base):
     billing_activities: Mapped[list["BillingActivity"]] = relationship(back_populates="actor")
     billing_execution_logs: Mapped[list["BillingExecutionLog"]] = relationship(back_populates="actor")
     billing_payments: Mapped[list["BillingPayment"]] = relationship(back_populates="creator")
+    identities: Mapped[list["UserIdentity"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     manager: Mapped[Optional["User"]] = relationship(
         remote_side=lambda: [User.id],
         foreign_keys=[manager_user_id],
@@ -87,6 +94,81 @@ class User(SoftDeleteMixin, Base):
         if self.manager is None:
             return ""
         return self.manager.username
+
+    @property
+    def sso_bound(self) -> bool:
+        return len(self.identities) > 0
+
+
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "issuer", "subject", name="uq_user_identities_provider_subject"),
+        UniqueConstraint("user_id", "provider", name="uq_user_identities_user_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="keycloak", index=True)
+    issuer: Mapped[str] = mapped_column(String(255), default="", index=True)
+    subject: Mapped[str] = mapped_column(String(255), default="", index=True)
+    preferred_username: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    raw_claims_json: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="identities")
+
+
+class SsoBindingConflict(Base):
+    __tablename__ = "sso_binding_conflicts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="keycloak", index=True)
+    issuer: Mapped[str] = mapped_column(String(255), default="", index=True)
+    subject: Mapped[str] = mapped_column(String(255), default="", index=True)
+    preferred_username: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    raw_claims_json: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    candidate_user_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    resolved_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    resolved_user: Mapped[Optional["User"]] = relationship()
+
+
+class SsoLoginTicket(Base):
+    __tablename__ = "sso_login_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    ticket: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="keycloak", index=True)
+    purpose: Mapped[str] = mapped_column(String(32), default="STATE", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    nonce: Mapped[str] = mapped_column(String(255), default="")
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    conflict_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sso_binding_conflicts.id"), nullable=True, index=True)
+    error_code: Mapped[str] = mapped_column(String(64), default="")
+    error_message: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped[Optional["User"]] = relationship()
+    conflict: Mapped[Optional["SsoBindingConflict"]] = relationship()
 class Lead(SoftDeleteMixin, Base):
     __tablename__ = "leads"
 

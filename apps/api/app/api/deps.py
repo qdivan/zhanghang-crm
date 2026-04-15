@@ -26,11 +26,15 @@ def get_current_user(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效") from exc
 
-    username = payload.get("sub")
-    if not username:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效")
-
-    user = db.execute(select(User).where(User.username == username, active_filter(User))).scalar_one_or_none()
+    user = None
+    user_id = payload.get("uid")
+    if isinstance(user_id, int):
+        user = db.execute(select(User).where(User.id == user_id, active_filter(User))).scalar_one_or_none()
+    if user is None:
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效")
+        user = db.execute(select(User).where(User.username == username, active_filter(User))).scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号不存在或已停用")
     return user

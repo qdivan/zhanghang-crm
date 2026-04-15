@@ -8,6 +8,7 @@
    - `infra/docker-compose.yml`（db/api/web）
 3. 当前已支持：
    - 本地账号登录（JWT）
+   - Keycloak OIDC 企业单点登录（SSO）+ 本地业务用户投影
    - 线索列表查询（对齐两套 Excel 模板字段）
    - 新增线索（扩展字段：等级、地区/国家、传真、其他联系方式、服务信息、收费标准、备用字段）
    - 客户开发总览首页精简为核心字段，完整信息进入线索详情
@@ -30,6 +31,7 @@
    - 用户最近登录时间展示（管理员面板）
    - 操作日志（登录/用户管理/核心业务写操作）
    - LDAP 设置与账号同步（支持群晖 LDAP）
+   - SSO 身份绑定管理（已绑定 / 未绑定 / 待处理冲突、手动绑定、解绑、冲突确认）
 
 ## 常用命令（推荐）
 
@@ -123,6 +125,15 @@ npm run restore:prd -- --dump backups/prd/<timestamp>/postgres.dump --confirm da
 1. `backup:prd` 会输出数据库逻辑备份、配置归档和清单文件。
 2. `restore:prd` 是覆盖式恢复，恢复前默认会先做一次 `pre-restore` 备份。
 3. 完整策略、保留周期和恢复演练建议见 [docs/backup-architecture.md](/Users/shangyifan/Documents/New%20project/docs/backup-architecture.md)。
+
+## SSO（Keycloak）升级与绑定
+- 运维升级说明：[docs/sso-upgrade-guide.md](/Users/shangyifan/Documents/New%20project/docs/sso-upgrade-guide.md)
+- 管理员绑定操作说明：[docs/sso-binding-operations.md](/Users/shangyifan/Documents/New%20project/docs/sso-binding-operations.md)
+
+说明：
+1. 当前 CRM 已支持 Keycloak OIDC 单点登录，但仍保留本地 `users` 作为业务用户投影。
+2. 本地 `users.id` 继续作为客户、线索、收费、待办、授权等业务关系的锚点，不做高风险外键迁移。
+3. 正式历史迁移不在仓库内自动执行；推荐由管理员在后台 `SSO / 身份绑定` 页签完成绑定、解绑与冲突处理。
 
 ## 群晖 DS920+ 双环境部署（dev + prd）
 - 部署文档：`infra/DEPLOY_SYNOLOGY.md`

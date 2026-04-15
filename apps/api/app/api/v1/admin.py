@@ -1,8 +1,9 @@
+import json
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.api.deps import get_current_user, require_roles
@@ -17,6 +18,8 @@ from app.models import (
     LdapSetting,
     Lead,
     OperationLog,
+    SsoBindingConflict,
+    UserIdentity,
     SecuritySetting,
     TodoItem,
     User,
@@ -31,13 +34,19 @@ from app.schemas.admin import (
     LdapSettingsUpdate,
     LdapSyncResponse,
     OperationLogOut,
+    SsoBindingManualCreate,
+    SsoBindingOut,
+    SsoConflictOut,
+    SsoConflictResolve,
     SecuritySettingsOut,
     SecuritySettingsUpdate,
+    SsoUnboundUserOut,
 )
 from app.services.data_access import has_overlapping_active_grant
 from app.services.audit import write_operation_log
 from app.services.login_security import get_or_create_security_setting
 from app.services.ldap_sync import get_or_create_ldap_setting, sync_ldap_users
+from app.services.sso import PROVIDER_KEYCLOAK, SsoError, create_manual_binding
 from app.services.soft_delete import active_filter, deleted_filter, mark_deleted, restore_deleted
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles("OWNER", "ADMIN"))])
@@ -154,6 +163,83 @@ def _to_deleted_record_out(
         deleted_by_user_id=deleted_by_user_id,
         deleted_by_username=deleted_by_username or "-",
     )
+
+
+def _identity_to_out(identity: UserIdentity) -> SsoBindingOut:
+    user = identity.user
+    return SsoBindingOut(
+        id=identity.id,
+        user_id=identity.user_id,
+        username=user.username if user is not None else "-",
+        display_name=(user.display_name if user is not None else "") or identity.display_name or "",
+        email=(user.email if user is not None else "") or identity.email or "",
+        provider=identity.provider,
+        issuer=identity.issuer,
+        subject=identity.subject,
+        preferred_username=identity.preferred_username,
+        email_verified=identity.email_verified,
+        external_managed=bool(user.external_managed) if user is not None else False,
+        last_login_at=identity.last_login_at,
+        created_at=identity.created_at,
+        updated_at=identity.updated_at,
+    )
+
+
+def _conflict_to_out(db: Session, conflict: SsoBindingConflict) -> SsoConflictOut:
+    candidate_ids = []
+    try:
+        parsed = json.loads(conflict.candidate_user_ids_json or "[]")
+        if isinstance(parsed, list):
+            candidate_ids = [int(item) for item in parsed if str(item).isdigit()]
+    except Exception:
+        candidate_ids = []
+    candidate_names = []
+    if candidate_ids:
+        candidate_names = list(
+            db.execute(select(User.username).where(User.id.in_(candidate_ids), active_filter(User))).scalars().all()
+        )
+    return SsoConflictOut(
+        id=conflict.id,
+        provider=conflict.provider,
+        issuer=conflict.issuer,
+        subject=conflict.subject,
+        preferred_username=conflict.preferred_username,
+        email=conflict.email,
+        display_name=conflict.display_name,
+        reason=conflict.reason,
+        status=conflict.status,
+        candidate_user_ids=candidate_ids,
+        candidate_usernames=candidate_names,
+        first_seen_at=conflict.first_seen_at,
+        last_seen_at=conflict.last_seen_at,
+        resolved_user_id=conflict.resolved_user_id,
+        resolved_username=conflict.resolved_user.username if conflict.resolved_user is not None else "",
+    )
+
+
+def _resolve_matching_pending_sso_conflicts(
+    db: Session,
+    *,
+    issuer: str,
+    subject: str,
+    user_id: int,
+) -> list[SsoBindingConflict]:
+    rows = db.execute(
+        select(SsoBindingConflict).where(
+            SsoBindingConflict.provider == PROVIDER_KEYCLOAK,
+            SsoBindingConflict.issuer == issuer,
+            SsoBindingConflict.subject == subject,
+            SsoBindingConflict.status == "PENDING",
+        )
+    ).scalars().all()
+    if not rows:
+        return []
+    now = datetime.utcnow()
+    for row in rows:
+        row.status = "RESOLVED"
+        row.resolved_user_id = user_id
+        row.resolved_at = now
+    return rows
 
 
 @router.get("/ldap/settings", response_model=LdapSettingsOut)
@@ -838,5 +924,228 @@ def delete_data_access_grant(
         entity_type="DATA_ACCESS_GRANT",
         entity_id=grant_id,
         detail=expected_name,
+    )
+    db.commit()
+
+
+@router.get("/sso/bindings", response_model=list[SsoBindingOut])
+def list_sso_bindings(
+    keyword: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    stmt = (
+        select(UserIdentity)
+        .join(User, UserIdentity.user_id == User.id)
+        .where(UserIdentity.provider == PROVIDER_KEYCLOAK, active_filter(User))
+        .order_by(UserIdentity.updated_at.desc(), UserIdentity.id.desc())
+    )
+    if keyword:
+        key = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                User.username.ilike(key),
+                User.email.ilike(key),
+                User.display_name.ilike(key),
+                UserIdentity.email.ilike(key),
+                UserIdentity.preferred_username.ilike(key),
+                UserIdentity.subject.ilike(key),
+            )
+        )
+    rows = db.execute(stmt).scalars().all()
+    return [_identity_to_out(item) for item in rows]
+
+
+@router.get("/sso/unbound-users", response_model=list[SsoUnboundUserOut])
+def list_unbound_sso_users(
+    keyword: Optional[str] = Query(default=None),
+    include_inactive: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    binding_exists = (
+        select(UserIdentity.id)
+        .where(UserIdentity.user_id == User.id, UserIdentity.provider == PROVIDER_KEYCLOAK)
+        .exists()
+    )
+    stmt = (
+        select(User)
+        .where(active_filter(User))
+        .where(~binding_exists)
+        .order_by(User.created_at.desc(), User.id.desc())
+    )
+    if not include_inactive:
+        stmt = stmt.where(User.is_active.is_(True))
+    if keyword:
+        key = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                User.username.ilike(key),
+                User.email.ilike(key),
+                User.display_name.ilike(key),
+            )
+        )
+    rows = db.execute(stmt).scalars().all()
+    return [
+        SsoUnboundUserOut(
+            id=user.id,
+            username=user.username,
+            display_name=user.display_name or "",
+            email=user.email or "",
+            auth_source=user.auth_source,
+            external_managed=bool(user.external_managed),
+            role=user.role,
+            is_active=user.is_active,
+            created_at=user.created_at,
+        )
+        for user in rows
+    ]
+
+
+@router.get("/sso/conflicts", response_model=list[SsoConflictOut])
+def list_sso_conflicts(
+    status_filter: str = Query(default="PENDING"),
+    keyword: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    stmt = select(SsoBindingConflict).order_by(
+        SsoBindingConflict.status.asc(),
+        SsoBindingConflict.last_seen_at.desc(),
+        SsoBindingConflict.id.desc(),
+    )
+    if status_filter and status_filter != "ALL":
+        stmt = stmt.where(SsoBindingConflict.status == status_filter)
+    if keyword:
+        key = f"%{keyword.strip()}%"
+        stmt = stmt.where(
+            or_(
+                SsoBindingConflict.email.ilike(key),
+                SsoBindingConflict.display_name.ilike(key),
+                SsoBindingConflict.preferred_username.ilike(key),
+                SsoBindingConflict.subject.ilike(key),
+                SsoBindingConflict.reason.ilike(key),
+            )
+        )
+    rows = db.execute(stmt).scalars().all()
+    return [_conflict_to_out(db, row) for row in rows]
+
+
+@router.post("/sso/bindings/manual", response_model=SsoBindingOut, status_code=status.HTTP_201_CREATED)
+def create_sso_binding_manual(
+    payload: SsoBindingManualCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    user = db.execute(select(User).where(User.id == payload.user_id, active_filter(User))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="本地用户不存在")
+    try:
+        identity = create_manual_binding(
+            db,
+            user=user,
+            issuer=payload.issuer.strip(),
+            subject=payload.subject.strip(),
+            preferred_username=payload.preferred_username.strip(),
+            email=payload.email.strip(),
+            email_verified=payload.email_verified,
+            display_name=payload.display_name.strip(),
+            raw_claims_json=payload.raw_claims_json.strip(),
+        )
+    except SsoError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="SSO_BINDING_CREATED",
+        entity_type="USER_IDENTITY",
+        entity_id=identity.id,
+        detail=f"user={user.username},subject={identity.subject}",
+    )
+    resolved_conflicts = _resolve_matching_pending_sso_conflicts(
+        db,
+        issuer=identity.issuer,
+        subject=identity.subject,
+        user_id=user.id,
+    )
+    for conflict in resolved_conflicts:
+        write_operation_log(
+            db,
+            actor_id=current_user.id,
+            action="SSO_CONFLICT_RESOLVED",
+            entity_type="SSO_CONFLICT",
+            entity_id=conflict.id,
+            detail=f"user={user.username},subject={identity.subject},method=manual-binding",
+        )
+    db.commit()
+    db.refresh(identity)
+    return _identity_to_out(identity)
+
+
+@router.post("/sso/conflicts/{conflict_id}/resolve", response_model=SsoBindingOut)
+def resolve_sso_conflict(
+    conflict_id: int,
+    payload: SsoConflictResolve,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conflict = db.execute(select(SsoBindingConflict).where(SsoBindingConflict.id == conflict_id)).scalar_one_or_none()
+    if conflict is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SSO 绑定冲突不存在")
+    user = db.execute(select(User).where(User.id == payload.user_id, active_filter(User))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="本地用户不存在")
+    try:
+        identity = create_manual_binding(
+            db,
+            user=user,
+            issuer=conflict.issuer,
+            subject=conflict.subject,
+            preferred_username=conflict.preferred_username,
+            email=conflict.email,
+            display_name=conflict.display_name,
+            raw_claims_json=conflict.raw_claims_json,
+        )
+    except SsoError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    conflict.status = "RESOLVED"
+    conflict.resolved_user_id = user.id
+    conflict.resolved_at = datetime.utcnow()
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="SSO_CONFLICT_RESOLVED",
+        entity_type="SSO_CONFLICT",
+        entity_id=conflict.id,
+        detail=f"user={user.username},subject={conflict.subject}",
+    )
+    db.commit()
+    db.refresh(identity)
+    return _identity_to_out(identity)
+
+
+@router.delete("/sso/bindings/{binding_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sso_binding(
+    binding_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    identity = db.execute(select(UserIdentity).where(UserIdentity.id == binding_id)).scalar_one_or_none()
+    if identity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SSO 绑定不存在")
+    user = identity.user
+    subject = identity.subject
+    db.delete(identity)
+    db.flush()
+    if user is not None:
+        remaining = db.execute(
+            select(func.count(UserIdentity.id)).where(UserIdentity.user_id == user.id)
+        ).scalar_one()
+        if int(remaining or 0) == 0:
+            user.external_managed = False
+    write_operation_log(
+        db,
+        actor_id=current_user.id,
+        action="SSO_BINDING_REMOVED",
+        entity_type="USER_IDENTITY",
+        entity_id=binding_id,
+        detail=f"user={(user.username if user is not None else '-')},subject={subject}",
     )
     db.commit()

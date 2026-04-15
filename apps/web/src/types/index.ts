@@ -5,6 +5,10 @@ export interface UserInfo {
   username: string;
   auth_source: "LOCAL" | "LDAP" | string;
   ldap_dn: string;
+  email: string;
+  display_name: string;
+  external_managed: boolean;
+  sso_bound: boolean;
   role: UserRole;
   granted_read_modules: DataAccessModule[];
   manager_user_id: number | null;
@@ -30,6 +34,27 @@ export interface UserUpdatePayload {
   role?: UserRole;
   manager_user_id?: number | null;
   is_active?: boolean;
+}
+
+export interface AuthProviderEntry {
+  enabled: boolean;
+  label: string;
+  admin_only: boolean;
+}
+
+export interface AuthProviders {
+  local: AuthProviderEntry;
+  sso: AuthProviderEntry;
+}
+
+export interface SsoExchangeResponse {
+  status: "SUCCESS" | "PENDING_BINDING" | "ERROR";
+  message: string;
+  access_token: string | null;
+  token_type: "bearer";
+  user: UserInfo | null;
+  conflict_id: number | null;
+  provider_label: string;
 }
 
 export interface LdapSettings {
@@ -144,6 +169,64 @@ export interface DataAccessGrantUpdatePayload {
   ends_at?: string;
   reason?: string;
   is_active?: boolean;
+}
+
+export interface SsoBindingItem {
+  id: number;
+  user_id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  provider: string;
+  issuer: string;
+  subject: string;
+  preferred_username: string;
+  email_verified: boolean;
+  external_managed: boolean;
+  last_login_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SsoUnboundUserItem {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  auth_source: string;
+  external_managed: boolean;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SsoConflictItem {
+  id: number;
+  provider: string;
+  issuer: string;
+  subject: string;
+  preferred_username: string;
+  email: string;
+  display_name: string;
+  reason: string;
+  status: string;
+  candidate_user_ids: number[];
+  candidate_usernames: string[];
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_user_id: number | null;
+  resolved_username: string;
+}
+
+export interface SsoManualBindingPayload {
+  user_id: number;
+  issuer: string;
+  subject: string;
+  preferred_username?: string;
+  email?: string;
+  email_verified?: boolean;
+  display_name?: string;
+  raw_claims_json?: string;
 }
 
 export type LeadStatus = "NEW" | "FOLLOWING" | "CONVERTED" | "LOST";

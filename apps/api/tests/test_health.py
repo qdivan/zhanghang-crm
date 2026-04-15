@@ -1,14 +1,20 @@
 import os
+from datetime import datetime
 from datetime import date, timedelta
 from io import BytesIO
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import select
 
+from app.api.v1 import auth as auth_api
+from app.core.config import settings
+from app.core.security import create_access_token
 from app.main import app
 from app.db.session import SessionLocal
-from app.models import BillingRecord
+from app.models import BillingRecord, SsoBindingConflict, User
+from app.services import sso as sso_service
 from app.services.customer_spreadsheet import CUSTOMER_SHEET_COLUMNS
 
 DEMO_PASSWORD = os.environ.get("BOOTSTRAP_DEMO_PASSWORD", "Daizhang#2026!")
@@ -4936,3 +4942,449 @@ def test_billing_record_list_supports_sorting():
         )
         assert due_sorted_resp.status_code == 200
         assert [item["due_month"] for item in due_sorted_resp.json()] == ["2026-10-31", "2026-11-30", "2026-12-31"]
+
+
+def test_auth_providers_and_local_login_transition_rules(monkeypatch):
+    original = {
+        "sso_enabled": settings.sso_enabled,
+        "oidc_issuer": settings.oidc_issuer,
+        "oidc_client_id": settings.oidc_client_id,
+        "oidc_client_secret": settings.oidc_client_secret,
+        "local_login_enabled": settings.local_login_enabled,
+    }
+    monkeypatch.setattr(settings, "sso_enabled", True)
+    monkeypatch.setattr(settings, "oidc_issuer", "https://sso.example.com/realms/company")
+    monkeypatch.setattr(settings, "oidc_client_id", "zhanghang-crm")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret-value")
+    monkeypatch.setattr(settings, "local_login_enabled", False)
+
+    try:
+        with TestClient(app) as client:
+            providers_resp = client.get("/api/v1/auth/providers")
+            assert providers_resp.status_code == 200
+            providers = providers_resp.json()
+            assert providers["sso"]["enabled"] is True
+            assert providers["local"]["enabled"] is True
+            assert providers["local"]["admin_only"] is True
+
+            restricted_login = client.post(
+                "/api/v1/auth/login",
+                json={"username": "accountant", "password": DEMO_PASSWORD},
+            )
+            assert restricted_login.status_code == 403
+            assert "企业单点登录" in restricted_login.json()["detail"]
+
+            owner_login = client.post(
+                "/api/v1/auth/login",
+                json={"username": "boss", "password": DEMO_PASSWORD},
+            )
+            assert owner_login.status_code == 200
+    finally:
+        for key, value in original.items():
+            setattr(settings, key, value)
+
+
+def test_auth_me_supports_uid_claim_for_transition_tokens():
+    with SessionLocal() as db:
+        boss = db.execute(select(User).where(User.username == "boss")).scalar_one()
+        token = create_access_token(subject="legacy-mismatch", role=boss.role, user_id=boss.id)
+
+    with TestClient(app) as client:
+        me_resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me_resp.status_code == 200
+        assert me_resp.json()["username"] == "boss"
+
+
+def test_sso_callback_exchange_can_issue_crm_token(monkeypatch):
+    original = {
+        "sso_enabled": settings.sso_enabled,
+        "oidc_issuer": settings.oidc_issuer,
+        "oidc_client_id": settings.oidc_client_id,
+        "oidc_client_secret": settings.oidc_client_secret,
+        "app_public_base_url": settings.app_public_base_url,
+    }
+    monkeypatch.setattr(settings, "sso_enabled", True)
+    monkeypatch.setattr(settings, "oidc_issuer", "https://sso.example.com/realms/company")
+    monkeypatch.setattr(settings, "oidc_client_id", "zhanghang-crm")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret-value")
+    monkeypatch.setattr(settings, "app_public_base_url", "https://ivanshang.com:26888")
+
+    monkeypatch.setattr(auth_api, "sso_is_enabled", lambda: True)
+    monkeypatch.setattr(auth_api, "exchange_code_for_tokens", lambda code: {"id_token": "fake-id-token"})
+    monkeypatch.setattr(
+        auth_api,
+        "verify_id_token",
+        lambda token, nonce: {
+            "iss": "https://sso.example.com/realms/company",
+            "sub": "keycloak-user-1",
+            "preferred_username": "boss",
+            "email": "boss@example.com",
+        },
+    )
+
+    def fake_resolve_or_create_local_user(db, claims):
+        user = db.execute(select(User).where(User.username == "boss")).scalar_one()
+        return user, "BOUND"
+
+    monkeypatch.setattr(auth_api, "resolve_or_create_local_user", fake_resolve_or_create_local_user)
+
+    try:
+        with TestClient(app) as client:
+            with SessionLocal() as db:
+                state_ticket = auth_api.create_sso_state_ticket(db)
+
+            callback_resp = client.get(
+                "/api/v1/auth/sso/callback",
+                params={"state": state_ticket.ticket, "code": "demo-code"},
+                follow_redirects=False,
+            )
+            assert callback_resp.status_code == 302
+            location = callback_resp.headers["location"]
+            assert "/login/sso?ticket=" in location
+            exchange_ticket = location.split("ticket=", 1)[1]
+
+            exchange_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": exchange_ticket})
+            assert exchange_resp.status_code == 200
+            payload = exchange_resp.json()
+            assert payload["status"] == "SUCCESS"
+            assert payload["access_token"]
+            assert payload["user"]["username"] == "boss"
+    finally:
+        for key, value in original.items():
+            setattr(settings, key, value)
+
+
+def test_admin_can_manage_sso_bindings_and_conflicts():
+    manual_subject = f"manual-binding-{uuid4()}"
+    conflict_subject = f"conflict-binding-{uuid4()}"
+    with TestClient(app) as client:
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": DEMO_PASSWORD},
+        )
+        assert admin_login.status_code == 200
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        with SessionLocal() as db:
+            boss = db.execute(select(User).where(User.username == "boss")).scalar_one()
+            manager = db.execute(select(User).where(User.username == "manager")).scalar_one()
+            existing_conflict = db.execute(
+                select(SsoBindingConflict).where(
+                    SsoBindingConflict.provider == "keycloak",
+                    SsoBindingConflict.subject == conflict_subject,
+                )
+            ).scalar_one_or_none()
+            if existing_conflict is None:
+                existing_conflict = SsoBindingConflict(
+                    provider="keycloak",
+                    issuer="https://sso.example.com/realms/company",
+                    subject=conflict_subject,
+                    preferred_username="crm-test-conflict",
+                    email="crm-test-conflict@example.com",
+                    display_name="CRM 测试冲突",
+                    raw_claims_json="{}",
+                    reason="邮箱匹配到多个本地账号",
+                    status="PENDING",
+                    candidate_user_ids_json=f"[{manager.id}]",
+                    first_seen_at=datetime.utcnow(),
+                    last_seen_at=datetime.utcnow(),
+                )
+                db.add(existing_conflict)
+                db.commit()
+                db.refresh(existing_conflict)
+            conflict_id = existing_conflict.id
+            boss_id = boss.id
+            manager_id = manager.id
+
+        unbound_resp = client.get("/api/v1/admin/sso/unbound-users", headers=headers)
+        assert unbound_resp.status_code == 200
+        assert any(item["username"] == "boss" for item in unbound_resp.json())
+
+        manual_bind_resp = client.post(
+            "/api/v1/admin/sso/bindings/manual",
+            headers=headers,
+            json={
+                "user_id": boss_id,
+                "issuer": "https://sso.example.com/realms/company",
+                "subject": manual_subject,
+                "preferred_username": "crm-test",
+                "email": f"crm-test-{uuid4()}@ivanshang.com",
+                "display_name": "CRM 测试账号",
+            },
+        )
+        assert manual_bind_resp.status_code == 201
+        binding_id = manual_bind_resp.json()["id"]
+
+        bindings_resp = client.get("/api/v1/admin/sso/bindings", headers=headers)
+        assert bindings_resp.status_code == 200
+        assert any(item["id"] == binding_id for item in bindings_resp.json())
+
+        resolve_resp = client.post(
+            f"/api/v1/admin/sso/conflicts/{conflict_id}/resolve",
+            headers=headers,
+            json={"user_id": manager_id},
+        )
+        assert resolve_resp.status_code == 200
+        assert resolve_resp.json()["user_id"] == manager_id
+
+        delete_resp = client.delete(f"/api/v1/admin/sso/bindings/{binding_id}", headers=headers)
+        assert delete_resp.status_code == 204
+
+
+def test_sso_exchange_ticket_is_one_time_use():
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            ticket = auth_api.create_exchange_ticket(
+                db,
+                status="ERROR",
+                error_code="DEMO",
+                error_message="测试票据",
+            )
+
+        first_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": ticket.ticket})
+        assert first_resp.status_code == 200
+        assert first_resp.json()["status"] == "ERROR"
+
+        second_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": ticket.ticket})
+        assert second_resp.status_code == 400
+        assert "票据已失效" in second_resp.json()["detail"]
+
+
+def test_manual_sso_binding_resolves_matching_pending_conflict():
+    subject = f"manual-resolve-{uuid4()}"
+    with TestClient(app) as client:
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": DEMO_PASSWORD},
+        )
+        assert admin_login.status_code == 200
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        with SessionLocal() as db:
+            manager = db.execute(select(User).where(User.username == "manager")).scalar_one()
+            conflict = SsoBindingConflict(
+                provider="keycloak",
+                issuer="https://sso.example.com/realms/company",
+                subject=subject,
+                preferred_username="resolve-by-manual",
+                email="resolve-by-manual@example.com",
+                display_name="手动绑定自动消冲突",
+                raw_claims_json="{}",
+                reason="邮箱匹配到多个本地账号",
+                status="PENDING",
+                candidate_user_ids_json=f"[{manager.id}]",
+                first_seen_at=datetime.utcnow(),
+                last_seen_at=datetime.utcnow(),
+            )
+            db.add(conflict)
+            db.commit()
+            db.refresh(conflict)
+            conflict_id = conflict.id
+            manager_id = manager.id
+
+        manual_bind_resp = client.post(
+            "/api/v1/admin/sso/bindings/manual",
+            headers=headers,
+            json={
+                "user_id": manager_id,
+                "issuer": "https://sso.example.com/realms/company",
+                "subject": subject,
+                "preferred_username": "resolve-by-manual",
+                "email": "resolve-by-manual@example.com",
+                "display_name": "手动绑定自动消冲突",
+            },
+        )
+        assert manual_bind_resp.status_code == 201
+
+        conflicts_resp = client.get("/api/v1/admin/sso/conflicts", headers=headers, params={"status_filter": "ALL"})
+        assert conflicts_resp.status_code == 200
+        matched = next(item for item in conflicts_resp.json() if item["id"] == conflict_id)
+        assert matched["status"] == "RESOLVED"
+        assert matched["resolved_user_id"] == manager_id
+
+
+def test_sso_auto_bind_by_email_and_auto_create_projection():
+    with TestClient(app):
+        with SessionLocal() as db:
+            accountant = db.execute(select(User).where(User.username == "accountant")).scalar_one()
+            accountant.email = "accountant-sso@example.com"
+            db.commit()
+
+            claims_existing = {
+                "iss": "https://sso.example.com/realms/company",
+                "sub": f"auto-bind-email-{uuid4()}",
+                "preferred_username": "some-other-login",
+                "email": "accountant-sso@example.com",
+                "email_verified": True,
+                "name": "会计自动绑定",
+            }
+            user_existing, outcome_existing = sso_service.resolve_or_create_local_user(db, claims_existing)
+            assert outcome_existing == "AUTO_BOUND_EMAIL"
+            assert user_existing.id == accountant.id
+            assert user_existing.external_managed is True
+            assert any(identity.subject == claims_existing["sub"] for identity in user_existing.identities)
+
+            claims_new = {
+                "iss": "https://sso.example.com/realms/company",
+                "sub": f"auto-create-{uuid4()}",
+                "preferred_username": f"sso-new-{uuid4().hex[:8]}",
+                "email": f"sso-new-{uuid4().hex[:8]}@example.com",
+                "email_verified": True,
+                "name": "SSO 新用户",
+                "groups": ["crm-manager"],
+            }
+            user_new, outcome_new = sso_service.resolve_or_create_local_user(db, claims_new)
+            assert outcome_new == "AUTO_CREATED"
+            assert user_new.auth_source == "SSO"
+            assert user_new.external_managed is True
+            assert user_new.role == "MANAGER"
+            assert user_new.email == claims_new["email"]
+
+
+def test_sso_auto_bind_by_username_and_conflict_goes_pending():
+    with TestClient(app):
+        with SessionLocal() as db:
+            claims_username = {
+                "iss": "https://sso.example.com/realms/company",
+                "sub": f"auto-bind-username-{uuid4()}",
+                "preferred_username": "manager",
+                "email": "",
+                "name": "经理自动绑定",
+            }
+            user, outcome = sso_service.resolve_or_create_local_user(db, claims_username)
+            assert outcome == "AUTO_BOUND_USERNAME"
+            assert user.username == "manager"
+
+            conflict_email = f"shared-{uuid4().hex[:8]}@example.com"
+            boss = db.execute(select(User).where(User.username == "boss")).scalar_one()
+            manager = db.execute(select(User).where(User.username == "manager")).scalar_one()
+            boss.email = conflict_email
+            manager.email = conflict_email
+            db.commit()
+
+            claims_conflict = {
+                "iss": "https://sso.example.com/realms/company",
+                "sub": f"conflict-{uuid4()}",
+                "preferred_username": "conflict-user",
+                "email": conflict_email,
+                "name": "冲突用户",
+            }
+            try:
+                sso_service.resolve_or_create_local_user(db, claims_conflict)
+                assert False, "expected SsoConflictError"
+            except sso_service.SsoConflictError as exc:
+                conflict = exc.conflict
+                assert conflict.status == "PENDING"
+                assert conflict.reason == "邮箱匹配到多个本地账号"
+
+
+def test_sso_binding_can_unbind_and_rebind_to_another_local_user():
+    with TestClient(app) as client:
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": DEMO_PASSWORD},
+        )
+        assert admin_login.status_code == 200
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        subject = f"rebind-{uuid4()}"
+        issuer = "https://sso.example.com/realms/company"
+
+        with SessionLocal() as db:
+            boss = db.execute(select(User).where(User.username == "boss")).scalar_one()
+            manager = db.execute(select(User).where(User.username == "manager")).scalar_one()
+            boss_id = boss.id
+            manager_id = manager.id
+
+        bind_first = client.post(
+            "/api/v1/admin/sso/bindings/manual",
+            headers=headers,
+            json={
+                "user_id": boss_id,
+                "issuer": issuer,
+                "subject": subject,
+                "preferred_username": "rebind-user",
+                "email": f"rebind-{uuid4().hex[:8]}@example.com",
+                "display_name": "换绑测试用户",
+            },
+        )
+        assert bind_first.status_code == 201
+        binding_id = bind_first.json()["id"]
+        assert bind_first.json()["user_id"] == boss_id
+
+        unbind_resp = client.delete(f"/api/v1/admin/sso/bindings/{binding_id}", headers=headers)
+        assert unbind_resp.status_code == 204
+
+        bind_second = client.post(
+            "/api/v1/admin/sso/bindings/manual",
+            headers=headers,
+            json={
+                "user_id": manager_id,
+                "issuer": issuer,
+                "subject": subject,
+                "preferred_username": "rebind-user",
+                "email": f"rebind-second-{uuid4().hex[:8]}@example.com",
+                "display_name": "换绑测试用户-新",
+            },
+        )
+        assert bind_second.status_code == 201
+        assert bind_second.json()["user_id"] == manager_id
+
+
+def test_sso_exchange_fails_for_inactive_bound_user(monkeypatch):
+    original = {
+        "sso_enabled": settings.sso_enabled,
+        "oidc_issuer": settings.oidc_issuer,
+        "oidc_client_id": settings.oidc_client_id,
+        "oidc_client_secret": settings.oidc_client_secret,
+        "app_public_base_url": settings.app_public_base_url,
+    }
+    monkeypatch.setattr(settings, "sso_enabled", True)
+    monkeypatch.setattr(settings, "oidc_issuer", "https://sso.example.com/realms/company")
+    monkeypatch.setattr(settings, "oidc_client_id", "zhanghang-crm")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret-value")
+    monkeypatch.setattr(settings, "app_public_base_url", "https://ivanshang.com:26888")
+
+    monkeypatch.setattr(auth_api, "sso_is_enabled", lambda: True)
+    monkeypatch.setattr(auth_api, "exchange_code_for_tokens", lambda code: {"id_token": "fake-id-token"})
+    monkeypatch.setattr(
+        auth_api,
+        "verify_id_token",
+        lambda token, nonce: {
+            "iss": "https://sso.example.com/realms/company",
+            "sub": "inactive-user-subject",
+            "preferred_username": "accountant",
+            "email": "inactive-bound@example.com",
+        },
+    )
+
+    def fake_resolve_inactive(db, claims):
+        user = db.execute(select(User).where(User.username == "accountant")).scalar_one()
+        user.is_active = False
+        db.commit()
+        return user, "BOUND"
+
+    monkeypatch.setattr(auth_api, "resolve_or_create_local_user", fake_resolve_inactive)
+
+    try:
+        with TestClient(app) as client:
+            with SessionLocal() as db:
+                state_ticket = auth_api.create_sso_state_ticket(db)
+
+            callback_resp = client.get(
+                "/api/v1/auth/sso/callback",
+                params={"state": state_ticket.ticket, "code": "demo-code"},
+                follow_redirects=False,
+            )
+            assert callback_resp.status_code == 302
+            exchange_ticket = callback_resp.headers["location"].split("ticket=", 1)[1]
+
+            exchange_resp = client.post("/api/v1/auth/sso/exchange", json={"ticket": exchange_ticket})
+            assert exchange_resp.status_code == 401
+    finally:
+        with SessionLocal() as db:
+            accountant = db.execute(select(User).where(User.username == "accountant")).scalar_one()
+            accountant.is_active = True
+            db.commit()
+        for key, value in original.items():
+            setattr(settings, key, value)

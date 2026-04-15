@@ -9,6 +9,7 @@ import type { UserRole } from "../types";
 const AppLayout = () => import("../layouts/AppLayout.vue");
 const MobileLayout = () => import("../layouts/MobileLayout.vue");
 const LoginView = () => import("../views/LoginView.vue");
+const LoginSsoCallbackView = () => import("../views/LoginSsoCallbackView.vue");
 const PublicLibraryView = () => import("../views/PublicLibraryView.vue");
 const DashboardView = () => import("../views/DashboardView.vue");
 const LeadView = () => import("../views/LeadView.vue");
@@ -42,6 +43,14 @@ const router = createRouter({
       path: "/login",
       name: "login",
       component: LoginView,
+    },
+    {
+      path: "/login/sso",
+      name: "login-sso",
+      component: LoginSsoCallbackView,
+      meta: {
+        public: true,
+      },
     },
     {
       path: "/library/public",
