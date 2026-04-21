@@ -4986,6 +4986,43 @@ def test_auth_providers_and_local_login_transition_rules(monkeypatch):
             setattr(settings, key, value)
 
 
+def test_sso_logout_returns_end_session_endpoint_with_post_logout_redirect(monkeypatch):
+    original = {
+        "sso_enabled": settings.sso_enabled,
+        "oidc_issuer": settings.oidc_issuer,
+        "oidc_client_id": settings.oidc_client_id,
+        "oidc_client_secret": settings.oidc_client_secret,
+        "app_public_base_url": settings.app_public_base_url,
+        "oidc_post_logout_redirect_url": settings.oidc_post_logout_redirect_url,
+    }
+    monkeypatch.setattr(settings, "sso_enabled", True)
+    monkeypatch.setattr(settings, "oidc_issuer", "https://sso.example.com/realms/company")
+    monkeypatch.setattr(settings, "oidc_client_id", "zhanghang-crm")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret-value")
+    monkeypatch.setattr(settings, "app_public_base_url", "https://ivanshang.com:26888")
+    monkeypatch.setattr(settings, "oidc_post_logout_redirect_url", "")
+    monkeypatch.setattr(
+        sso_service,
+        "get_oidc_discovery",
+        lambda: {"end_session_endpoint": "https://sso.example.com/realms/company/protocol/openid-connect/logout"},
+    )
+
+    try:
+        with TestClient(app) as client:
+            resp = client.post("/api/v1/auth/sso/logout")
+            assert resp.status_code == 200
+            logout_url = resp.json()["logout_url"]
+            parsed = urlparse(logout_url)
+            assert (
+                f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                == "https://sso.example.com/realms/company/protocol/openid-connect/logout"
+            )
+            assert parse_qs(parsed.query)["post_logout_redirect_uri"] == ["https://ivanshang.com:26888/login"]
+    finally:
+        for key, value in original.items():
+            setattr(settings, key, value)
+
+
 def test_auth_me_supports_uid_claim_for_transition_tokens():
     with SessionLocal() as db:
         boss = db.execute(select(User).where(User.username == "boss")).scalar_one()

@@ -1,0 +1,5 @@
+crm_username,display_name,email,keycloak_username,target_group,send_email,force_reset_password,note
+boss,张三,zhangsan@example.com,zhangsan,crm-owner,yes,yes,老板
+admin,李四,lisi@example.com,,crm-admin,yes,yes,系统管理员
+manager1,王五,wangwu@example.com,,crm-manager,yes,yes,销售经理
+accountant1,赵六,zhaoliu@example.com,,crm-accountant,yes,yes,会计

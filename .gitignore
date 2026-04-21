@@ -33,6 +33,7 @@ output/ui-audit/
 output/run-sso-staging-audit.mjs
 output/zhanghang-sso-staging-*.md
 output/zhanghang-sso-staging-*.json
+output/zhanghang-crm-prd-sso-cutover-*.md
 old_example_table/
 backups/
 
@@ -50,3 +51,7 @@ apps/api/.dockerignore 2
 apps/api/Dockerfile 2.prod
 apps/api/tests/conftest 2.py
 apps/web/nginx/default 2.conf
+
+# Local SSO migration artifacts with environment-specific account data
+docs/sso-user-binding-template-prefilled-from-prd.csv
+docs/sso-user-binding-template-prefilled-from-prd.md

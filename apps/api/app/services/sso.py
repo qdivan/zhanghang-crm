@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from jose import JWTError, jwt
@@ -182,6 +182,34 @@ def build_sso_login_url(ticket: SsoLoginTicket) -> str:
         }
     )
     return f"{authorization_endpoint}?{query}"
+
+
+def build_sso_logout_url() -> str:
+    redirect_url = settings.oidc_logout_redirect_url
+    if not sso_is_enabled():
+        return redirect_url
+
+    discovery = get_oidc_discovery()
+    end_session_endpoint = _normalize_claim_text(discovery.get("end_session_endpoint"))
+    if not end_session_endpoint:
+        raise SsoConfigError("OIDC Discovery 未返回 end_session_endpoint")
+
+    endpoint_parts = urlsplit(end_session_endpoint)
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(endpoint_parts.query, keep_blank_values=True)
+        if key != "post_logout_redirect_uri"
+    ]
+    query_items.append(("post_logout_redirect_uri", redirect_url))
+    return urlunsplit(
+        (
+            endpoint_parts.scheme,
+            endpoint_parts.netloc,
+            endpoint_parts.path,
+            urlencode(query_items),
+            endpoint_parts.fragment,
+        )
+    )
 
 
 def get_valid_state_ticket(db: Session, state: str) -> SsoLoginTicket:

@@ -31,6 +31,7 @@ from app.services.sso import (
     SsoConflictError,
     SsoError,
     build_auth_provider_payload,
+    build_sso_logout_url,
     build_sso_login_url,
     consume_exchange_ticket,
     create_exchange_ticket,
@@ -256,7 +257,10 @@ def exchange_sso_ticket(payload: SsoExchangeRequest, db: Session = Depends(get_d
 
 @router.post("/sso/logout")
 def sso_logout():
-    logout_url = settings.oidc_logout_redirect_url
+    try:
+        logout_url = build_sso_logout_url()
+    except SsoError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return {"logout_url": logout_url}
 
 
