@@ -20,6 +20,8 @@ import {
 const props = defineProps<{
   visible: boolean;
   form: LeadCreateForm;
+  mode?: "create" | "edit";
+  externalMode?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +34,8 @@ const dialogVisible = computed({
   set: (value: boolean) => emit("update:visible", value),
 });
 
+const isEditing = computed(() => props.mode === "edit");
+const isExternalMode = computed(() => Boolean(props.externalMode));
 const isConversionLikeTemplate = computed(() => props.form.template_type !== "FOLLOWUP");
 const leadDialogSheetHint = computed(() => buildLeadDialogSheetHint(props.form.template_type));
 
@@ -160,10 +164,21 @@ watch(
 </script>
 
 <template>
-  <el-dialog v-model="dialogVisible" title="新增线索（按 Excel 原型录入）" width="860px">
+  <el-dialog
+    v-model="dialogVisible"
+    :title="isEditing ? '编辑线索' : isExternalMode ? '新增线索' : '新增线索（按 Excel 原型录入）'"
+    width="860px"
+  >
     <el-form label-position="top">
+      <el-alert
+        v-if="isExternalMode"
+        title="你只能查看和维护自己录入的线索；公司名保存时会自动加上你的项目前缀。"
+        type="info"
+        :closable="false"
+        class="lead-dialog-alert"
+      />
       <el-row :gutter="12">
-        <el-col :span="6">
+        <el-col v-if="!isExternalMode" :span="6">
           <el-form-item label="来源模板">
             <el-select v-model="props.form.template_type">
               <el-option
@@ -175,9 +190,10 @@ watch(
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="isExternalMode ? 12 : 8">
           <el-form-item label="公司名">
             <el-autocomplete
+              v-if="!isExternalMode"
               v-model="props.form.name"
               :fetch-suggestions="fetchCompanySuggestions"
               :trigger-on-focus="false"
@@ -195,15 +211,21 @@ watch(
                 </div>
               </template>
             </el-autocomplete>
+            <el-input
+              v-else
+              v-model="props.form.name"
+              clearable
+              placeholder="如 青岛示例有限公司"
+            />
             <el-text v-if="!props.form.name?.trim()" size="small" type="info">
               留空时会默认使用联系人姓名作为公司名。
             </el-text>
-            <el-text v-if="props.form.related_customer_id" size="small" type="primary">
+            <el-text v-if="!isExternalMode && props.form.related_customer_id" size="small" type="primary">
               已关联现有客户，后续转化时可选择复用原客户或新建客户主体。
             </el-text>
           </el-form-item>
         </el-col>
-        <el-col :span="5">
+        <el-col :span="isExternalMode ? 6 : 5">
           <el-form-item label="等级">
             <el-select v-model="props.form.grade">
               <el-option
@@ -215,7 +237,7 @@ watch(
             </el-select>
           </el-form-item>
         </el-col>
-        <el-col :span="5">
+        <el-col :span="isExternalMode ? 6 : 5">
           <el-form-item label="提醒值">
             <el-select v-model="props.form.reminder_value">
               <el-option
@@ -229,7 +251,7 @@ watch(
         </el-col>
       </el-row>
 
-      <el-alert type="info" :closable="false" :title="leadDialogSheetHint" class="lead-dialog-alert" />
+      <el-alert v-if="!isExternalMode" type="info" :closable="false" :title="leadDialogSheetHint" class="lead-dialog-alert" />
 
       <el-row :gutter="12">
         <el-col :span="8">
@@ -302,7 +324,7 @@ watch(
           />
         </el-form-item>
 
-        <el-row :gutter="12">
+        <el-row v-if="!isExternalMode" :gutter="12">
           <el-col :span="8">
             <el-form-item label="备用2">
               <el-input v-model="props.form.reserve_2" />

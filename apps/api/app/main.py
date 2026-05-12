@@ -246,9 +246,14 @@ def _ensure_schema_compatibility() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT ''"))
             if "display_name" not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(255) DEFAULT ''"))
+            if "phone" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT ''"))
+            if "lead_name_prefix" not in user_columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN lead_name_prefix VARCHAR(64) DEFAULT ''"))
             if "external_managed" not in user_columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN external_managed BOOLEAN DEFAULT FALSE"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_phone ON users (phone)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_external_managed ON users (external_managed)"))
 
     if "todo_items" in table_names:

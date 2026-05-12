@@ -36,6 +36,10 @@ function canAccessReceiptReconciliation(user: { role: UserRole; granted_read_mod
   );
 }
 
+function isExternalLeadAllowedPath(path: string): boolean {
+  return /^\/leads(\/\d+)?$/.test(path) || /^\/m\/leads(\/\d+)?$/.test(path);
+}
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -300,17 +304,20 @@ router.beforeEach(async (to) => {
     return "/login";
   }
   if (to.path === "/login" && auth.isLoggedIn) {
-    return getDefaultProtectedPath();
+    return getDefaultProtectedPath(auth.user);
+  }
+  if (auth.user?.role === "EXTERNAL_LEAD" && !isExternalLeadAllowedPath(to.path)) {
+    return getDefaultProtectedPath(auth.user);
   }
   if (
     (to.path.startsWith("/receipt-reconciliation") || to.path.startsWith("/m/receipt-reconciliation")) &&
     !canAccessReceiptReconciliation(auth.user)
   ) {
-    return getDefaultProtectedPath();
+    return getDefaultProtectedPath(auth.user);
   }
   const roleLimit = to.meta.roles as UserRole[] | undefined;
   if (roleLimit && (!auth.user || !roleLimit.includes(auth.user.role))) {
-    return getDefaultProtectedPath();
+    return getDefaultProtectedPath(auth.user);
   }
   if (auth.isLoggedIn) {
     scheduleMobileWorkspacePrefetch();

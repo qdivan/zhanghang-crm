@@ -55,6 +55,8 @@ class User(SoftDeleteMixin, Base):
     ldap_dn: Mapped[str] = mapped_column(String(255), default="")
     email: Mapped[str] = mapped_column(String(255), default="", index=True)
     display_name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(32), default="", index=True)
+    lead_name_prefix: Mapped[str] = mapped_column(String(64), default="")
     external_managed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     role: Mapped[str] = mapped_column(String(20), default="ACCOUNTANT")
     manager_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)

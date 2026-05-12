@@ -7,6 +7,7 @@ import { statusOptions, templateOptions } from "../../views/lead/viewMeta";
 
 const props = defineProps<{
   filters: LeadFilters;
+  externalMode?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -45,7 +46,7 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
               />
             </el-select>
           </el-form-item>
-          <el-form-item v-show="!isMobile || showAdvancedFilters" label="模板">
+          <el-form-item v-if="!props.externalMode" v-show="!isMobile || showAdvancedFilters" label="模板">
             <el-select v-model="props.filters.template_type" placeholder="全部" clearable>
               <el-option
                 v-for="item in templateOptions"
@@ -65,12 +66,18 @@ const hasAdvancedValue = computed(() => Boolean(props.filters.status || props.fi
       <div class="workspace-inline-toolbar-actions action-group">
         <el-button size="small" @click="emit('query')">查询</el-button>
         <el-button size="small" type="primary" @click="emit('create')">新增线索</el-button>
-        <el-button size="small" type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
+        <el-button v-if="!props.externalMode" size="small" type="primary" plain @click="emit('redevelop')">老客二次开发</el-button>
         <el-button size="small" @click="emit('guide')">流程说明</el-button>
-        <el-button size="small" @click="emit('importExcel')">导入 Excel</el-button>
+        <el-button v-if="!props.externalMode" size="small" @click="emit('importExcel')">导入 Excel</el-button>
       </div>
     </div>
-    <div class="lead-toolbar-copy">这里只显示未成单线索。默认按最新录入在前，可点表头按序号、名称或联络开始排序。</div>
+    <div class="lead-toolbar-copy">
+      {{
+        props.externalMode
+          ? "你只能查看和维护自己录入的线索。公司名保存时会自动加上你的项目前缀。"
+          : "这里只显示未成单线索。默认按最新录入在前，可点表头按序号、名称或联络开始排序。"
+      }}
+    </div>
   </el-card>
 </template>
 

@@ -18,6 +18,8 @@ const props = defineProps<{
   rows: LeadItem[];
   canConvert: boolean;
   canDelete: boolean;
+  canEdit: boolean;
+  externalMode?: boolean;
   sortProp: string;
   sortOrder: "ascending" | "descending" | null;
 }>();
@@ -27,6 +29,7 @@ const emit = defineEmits<{
   detail: [row: LeadItem];
   customer: [row: LeadItem];
   followup: [row: LeadItem];
+  edit: [row: LeadItem];
   history: [row: LeadItem];
   convert: [row: LeadItem];
   revoke: [row: LeadItem];
@@ -76,6 +79,7 @@ function mobileMetrics(row: LeadItem) {
 
 function handleMobileCommand(command: string, row: LeadItem) {
   if (command === "detail") emit("detail", row);
+  if (command === "edit") emit("edit", row);
   if (command === "followup") emit("followup", row);
   if (command === "history") emit("history", row);
   if (command === "customer") emit("customer", row);
@@ -144,9 +148,24 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
 
         <div class="mobile-actions">
           <el-button size="small" @click="emit('detail', row)">详情</el-button>
-          <el-button size="small" type="primary" @click="emit('followup', row)">跟进</el-button>
           <el-button
-            v-if="row.customer_id"
+            v-if="!props.externalMode"
+            size="small"
+            type="primary"
+            @click="emit('followup', row)"
+          >
+            跟进
+          </el-button>
+          <el-button
+            v-if="props.canEdit && row.status !== 'CONVERTED'"
+            size="small"
+            type="primary"
+            @click="emit('edit', row)"
+          >
+            编辑
+          </el-button>
+          <el-button
+            v-if="row.customer_id && !props.externalMode"
             size="small"
             type="success"
             plain
@@ -155,7 +174,7 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
             客户档案
           </el-button>
           <el-button
-            v-else
+            v-else-if="!props.externalMode"
             size="small"
             type="success"
             :disabled="!props.canConvert || row.status === 'CONVERTED'"
@@ -181,17 +200,23 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item :command="{ action: 'history', row }">跟进历史</el-dropdown-item>
-                <el-dropdown-item v-if="row.customer_id" :command="{ action: 'customer', row }">客户档案</el-dropdown-item>
+                <el-dropdown-item v-if="!props.externalMode" :command="{ action: 'history', row }">跟进历史</el-dropdown-item>
+                <el-dropdown-item v-if="row.customer_id && !props.externalMode" :command="{ action: 'customer', row }">客户档案</el-dropdown-item>
                 <el-dropdown-item
-                  v-else
+                  v-if="props.canEdit && row.status !== 'CONVERTED'"
+                  :command="{ action: 'edit', row }"
+                >
+                  编辑线索
+                </el-dropdown-item>
+                <el-dropdown-item
+                  v-else-if="!props.externalMode"
                   :command="{ action: 'convert', row }"
                   :disabled="!props.canConvert || row.status === 'CONVERTED'"
                 >
                   转化成交
                 </el-dropdown-item>
                 <el-dropdown-item
-                  v-if="row.status === 'CONVERTED'"
+                  v-if="!props.externalMode && row.status === 'CONVERTED'"
                   :command="{ action: 'revoke', row }"
                   :disabled="!props.canConvert"
                 >
@@ -325,12 +350,14 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
         <template #default="{ row }">
           <el-space class="table-action-wrap">
             <el-button link @click="emit('detail', row)">详情</el-button>
-            <el-button v-if="row.customer_id" link type="primary" @click="emit('customer', row)">
+            <el-button v-if="row.customer_id && !props.externalMode" link type="primary" @click="emit('customer', row)">
               客户档案
             </el-button>
-            <el-button link type="primary" @click="emit('followup', row)">跟进</el-button>
-            <el-button link @click="emit('history', row)">历史</el-button>
+            <el-button v-if="!props.externalMode" link type="primary" @click="emit('followup', row)">跟进</el-button>
+            <el-button v-if="props.canEdit && row.status !== 'CONVERTED'" link type="primary" @click="emit('edit', row)">编辑</el-button>
+            <el-button v-if="!props.externalMode" link @click="emit('history', row)">历史</el-button>
             <el-button
+              v-if="!props.externalMode"
               link
               type="success"
               :disabled="!props.canConvert || row.status === 'CONVERTED'"
@@ -339,7 +366,7 @@ function onMobileMenuCommand(command: { action: string; row: LeadItem }) {
               转化
             </el-button>
             <el-button
-              v-if="row.status === 'CONVERTED'"
+              v-if="!props.externalMode && row.status === 'CONVERTED'"
               link
               type="danger"
               :disabled="!props.canConvert"

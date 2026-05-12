@@ -41,7 +41,7 @@ async function login() {
     startMobileLoginToTodoMeasurement();
     scheduleMobileWorkspacePrefetch();
     ElMessage.success("登录成功");
-    router.push(getDefaultProtectedPath());
+    router.push(getDefaultProtectedPath(auth.user));
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail ?? "账号或密码错误");
   } finally {

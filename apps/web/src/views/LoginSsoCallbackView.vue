@@ -29,7 +29,7 @@ async function finishSso() {
     const result = await auth.exchangeSsoTicket(ticket.value);
     if (result.status === "SUCCESS") {
       ElMessage.success(result.message || "企业单点登录成功");
-      await router.replace(getDefaultProtectedPath());
+      await router.replace(getDefaultProtectedPath(auth.user));
       return;
     }
     if (result.status === "PENDING_BINDING") {

@@ -49,6 +49,8 @@ class UserOut(BaseModel):
     ldap_dn: str
     email: str = ""
     display_name: str = ""
+    phone: str = ""
+    lead_name_prefix: str = ""
     external_managed: bool = False
     sso_bound: bool = False
     role: str

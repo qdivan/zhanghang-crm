@@ -27,6 +27,7 @@ const mobileMenuVisible = ref(false);
 
 const canOpenAdminPanel = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
 const canOpenCostView = computed(() => auth.user?.role === "OWNER");
+const isExternalLeadUser = computed(() => auth.user?.role === "EXTERNAL_LEAD");
 const canOpenReceiptReconciliation = computed(
   () =>
     auth.user?.role === "OWNER" ||
@@ -36,6 +37,9 @@ const canOpenReceiptReconciliation = computed(
 );
 
 const menuItems = computed(() => {
+  if (auth.user?.role === "EXTERNAL_LEAD") {
+    return [{ path: "/leads", label: "客户开发", icon: Management }];
+  }
   const items = [
     { path: "/dashboard", label: "工作台", icon: House },
     { path: "/leads", label: "客户开发", icon: Management },
@@ -81,6 +85,7 @@ const roleLabel = computed(() => {
   if (auth.user.role === "OWNER") return "老板";
   if (auth.user.role === "ADMIN") return "管理员";
   if (auth.user.role === "MANAGER") return "部门经理";
+  if (auth.user.role === "EXTERNAL_LEAD") return "外部线索人员";
   return "会计";
 });
 
@@ -175,7 +180,7 @@ const userTagText = computed(() => {
         <div class="content-main">
           <router-view />
         </div>
-        <TodoDock />
+        <TodoDock v-if="!isExternalLeadUser" />
       </el-main>
     </el-container>
   </el-container>

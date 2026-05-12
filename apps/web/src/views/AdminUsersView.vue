@@ -62,6 +62,9 @@ const createForm = reactive({
   confirm_password: "",
   role: "ACCOUNTANT" as UserRole,
   manager_user_id: null as number | null,
+  display_name: "",
+  phone: "",
+  lead_name_prefix: "",
   is_active: true,
 });
 
@@ -70,6 +73,9 @@ const editForm = reactive({
   username: "",
   role: "ACCOUNTANT" as UserRole,
   manager_user_id: null as number | null,
+  display_name: "",
+  phone: "",
+  lead_name_prefix: "",
   is_active: true,
   password: "",
 });
@@ -192,6 +198,8 @@ const ssoResolveCandidateOptions = computed(() => {
 });
 const createNeedsManager = computed(() => createForm.role === "ACCOUNTANT");
 const editNeedsManager = computed(() => editForm.role === "ACCOUNTANT");
+const createIsExternalLead = computed(() => createForm.role === "EXTERNAL_LEAD");
+const editIsExternalLead = computed(() => editForm.role === "EXTERNAL_LEAD");
 
 const roleOptions = computed(() =>
   canManageAdminUsers.value
@@ -200,13 +208,17 @@ const roleOptions = computed(() =>
         { label: "管理员", value: "ADMIN" as UserRole },
         { label: "部门经理", value: "MANAGER" as UserRole },
         { label: "会计", value: "ACCOUNTANT" as UserRole },
+        { label: "外部线索人员", value: "EXTERNAL_LEAD" as UserRole },
       ]
     : [
         { label: "老板", value: "OWNER" as UserRole },
         { label: "部门经理", value: "MANAGER" as UserRole },
         { label: "会计", value: "ACCOUNTANT" as UserRole },
+        { label: "外部线索人员", value: "EXTERNAL_LEAD" as UserRole },
       ],
 );
+
+const ldapRoleOptions = computed(() => roleOptions.value.filter((item) => item.value !== "EXTERNAL_LEAD"));
 
 const visibleRows = computed(() => {
   if (filters.status === "ALL") return rows.value;
@@ -303,13 +315,15 @@ function roleLabel(role: UserRole): string {
   if (role === "OWNER") return "老板";
   if (role === "ADMIN") return "管理员";
   if (role === "MANAGER") return "部门经理";
+  if (role === "EXTERNAL_LEAD") return "外部线索人员";
   return "会计";
 }
 
-function roleTagType(role: UserRole): "danger" | "warning" | "primary" | "success" {
+function roleTagType(role: UserRole): "danger" | "warning" | "primary" | "success" | "info" {
   if (role === "OWNER") return "danger";
   if (role === "ADMIN") return "warning";
   if (role === "MANAGER") return "primary";
+  if (role === "EXTERNAL_LEAD") return "info";
   return "success";
 }
 
@@ -419,6 +433,9 @@ function resolveErrorMessage(error: any, fallback: string): string {
     "该用户名已在回收站，可先恢复": "该用户名已在回收站，可先恢复",
     "请先恢复被授权账号": "请先恢复被授权账号",
     "LDAP账号请在LDAP中停用或删除": "LDAP账号请在LDAP中停用或删除",
+    "外部线索人员姓名不能为空": "外部线索人员姓名不能为空",
+    "外部线索人员电话不能为空": "外部线索人员电话不能为空",
+    "外部线索人员线索前缀不能为空": "外部线索人员线索前缀不能为空",
   };
   return map[detail] ?? detail;
 }
@@ -429,6 +446,9 @@ function resetCreateForm() {
   createForm.confirm_password = "";
   createForm.role = "ACCOUNTANT";
   createForm.manager_user_id = null;
+  createForm.display_name = "";
+  createForm.phone = "";
+  createForm.lead_name_prefix = "";
   createForm.is_active = true;
 }
 
@@ -482,12 +502,29 @@ async function submitCreate() {
     ElMessage.warning("两次输入的密码不一致");
     return;
   }
+  if (createIsExternalLead.value) {
+    if (!createForm.display_name.trim()) {
+      ElMessage.warning("请填写外部人员姓名");
+      return;
+    }
+    if (!createForm.phone.trim()) {
+      ElMessage.warning("请填写外部人员电话");
+      return;
+    }
+    if (!createForm.lead_name_prefix.trim()) {
+      ElMessage.warning("请填写线索名称前缀");
+      return;
+    }
+  }
 
   const payload: UserCreatePayload = {
     username,
     password: createForm.password,
     role: createForm.role,
     manager_user_id: createNeedsManager.value ? createForm.manager_user_id : null,
+    display_name: createForm.display_name.trim(),
+    phone: createForm.phone.trim(),
+    lead_name_prefix: createForm.lead_name_prefix.trim(),
     is_active: createForm.is_active,
   };
 
@@ -510,6 +547,9 @@ function openEditDialog(row: ManagedUser) {
   editForm.username = row.username;
   editForm.role = row.role;
   editForm.manager_user_id = row.manager_user_id;
+  editForm.display_name = row.display_name || "";
+  editForm.phone = row.phone || "";
+  editForm.lead_name_prefix = row.lead_name_prefix || "";
   editForm.is_active = row.is_active;
   editForm.password = "";
   showEditDialog.value = true;
@@ -525,6 +565,20 @@ async function submitEdit() {
   if (editForm.password && editForm.password.length < 6) {
     ElMessage.warning("新密码至少 6 位");
     return;
+  }
+  if (editIsExternalLead.value) {
+    if (!editForm.display_name.trim()) {
+      ElMessage.warning("请填写外部人员姓名");
+      return;
+    }
+    if (!editForm.phone.trim()) {
+      ElMessage.warning("请填写外部人员电话");
+      return;
+    }
+    if (!editForm.lead_name_prefix.trim()) {
+      ElMessage.warning("请填写线索名称前缀");
+      return;
+    }
   }
 
   const payload: UserUpdatePayload = {};
@@ -547,6 +601,15 @@ async function submitEdit() {
   }
   if (editForm.password.trim()) {
     payload.password = editForm.password.trim();
+  }
+  if (editForm.display_name.trim() !== (editingOrigin.value.display_name || "")) {
+    payload.display_name = editForm.display_name.trim();
+  }
+  if (editForm.phone.trim() !== (editingOrigin.value.phone || "")) {
+    payload.phone = editForm.phone.trim();
+  }
+  if (editForm.lead_name_prefix.trim() !== (editingOrigin.value.lead_name_prefix || "")) {
+    payload.lead_name_prefix = editForm.lead_name_prefix.trim();
   }
 
   if (Object.keys(payload).length === 0) {
@@ -1165,6 +1228,24 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => createForm.phone,
+  (value) => {
+    if (createForm.role === "EXTERNAL_LEAD" && !createForm.username.trim()) {
+      createForm.username = value.trim();
+    }
+  },
+);
+
+watch(
+  () => createForm.role,
+  (value) => {
+    if (value === "EXTERNAL_LEAD" && !createForm.username.trim() && createForm.phone.trim()) {
+      createForm.username = createForm.phone.trim();
+    }
+  },
+);
 </script>
 
 <template>
@@ -1520,7 +1601,7 @@ watch(
             </el-form-item>
             <el-form-item label="默认角色">
               <el-select v-model="ldapForm.default_role">
-                <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
+                <el-option v-for="item in ldapRoleOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
             <el-form-item label="服务器地址">
@@ -1726,6 +1807,14 @@ watch(
             <el-table v-loading="loading" :data="visibleRows" stripe border>
               <el-table-column prop="id" label="ID" width="80" />
               <el-table-column prop="username" label="账号" min-width="160" />
+              <el-table-column label="姓名 / 电话" min-width="170">
+                <template #default="{ row }">
+                  <div class="sso-cell-stack">
+                    <div class="sso-cell-main">{{ row.display_name || "-" }}</div>
+                    <div class="sso-cell-meta">{{ row.phone || "-" }}</div>
+                  </div>
+                </template>
+              </el-table-column>
               <el-table-column
                 label="账号来源"
                 width="100"
@@ -1751,6 +1840,14 @@ watch(
                 label-class-name="mobile-hide"
               >
                 <template #default="{ row }">{{ row.manager_username || "-" }}</template>
+              </el-table-column>
+              <el-table-column
+                label="线索前缀"
+                min-width="120"
+                class-name="mobile-hide"
+                label-class-name="mobile-hide"
+              >
+                <template #default="{ row }">{{ row.lead_name_prefix || "-" }}</template>
               </el-table-column>
               <el-table-column
                 label="状态"
@@ -2208,7 +2305,7 @@ watch(
                 <el-col :xs="24" :md="8">
                   <el-form-item label="默认角色">
                     <el-select v-model="ldapForm.default_role">
-                      <el-option v-for="item in roleOptions" :key="item.value" :label="item.label" :value="item.value" />
+                      <el-option v-for="item in ldapRoleOptions" :key="item.value" :label="item.label" :value="item.value" />
                     </el-select>
                   </el-form-item>
                 </el-col>
@@ -2525,21 +2622,6 @@ watch(
 
   <el-dialog v-model="showCreateDialog" title="新增本地用户" width="520px">
     <el-form label-position="top" class="admin-dialog-form">
-      <el-form-item label="用户名">
-        <el-input v-model="createForm.username" placeholder="如 accountant5" />
-      </el-form-item>
-      <el-row :gutter="12">
-        <el-col :span="12">
-          <el-form-item label="密码">
-            <el-input v-model="createForm.password" type="password" show-password />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="确认密码">
-            <el-input v-model="createForm.confirm_password" type="password" show-password />
-          </el-form-item>
-        </el-col>
-      </el-row>
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="角色">
@@ -2551,6 +2633,43 @@ watch(
         <el-col :span="12">
           <el-form-item label="状态">
             <el-switch v-model="createForm.is_active" active-text="启用" inactive-text="停用" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-alert
+        v-if="createIsExternalLead"
+        title="外部线索人员只能新增、查看和修改自己录入的线索；公司名保存时会自动加上线索前缀。"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
+      <el-row v-if="createIsExternalLead" :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="姓名">
+            <el-input v-model="createForm.display_name" placeholder="如 张三" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="电话">
+            <el-input v-model="createForm.phone" placeholder="手机号或常用联系电话" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item v-if="createIsExternalLead" label="线索名称前缀">
+        <el-input v-model="createForm.lead_name_prefix" placeholder="如 渠道A；保存线索时生成 渠道A-青岛示例有限公司" />
+      </el-form-item>
+      <el-form-item label="用户名">
+        <el-input v-model="createForm.username" :placeholder="createIsExternalLead ? '默认使用电话，也可手动修改' : '如 accountant5'" />
+      </el-form-item>
+      <el-row :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="密码">
+            <el-input v-model="createForm.password" type="password" show-password />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="确认密码">
+            <el-input v-model="createForm.confirm_password" type="password" show-password />
           </el-form-item>
         </el-col>
       </el-row>
@@ -2573,9 +2692,6 @@ watch(
 
   <el-dialog v-model="showEditDialog" title="编辑用户" width="520px">
     <el-form label-position="top" class="admin-dialog-form">
-      <el-form-item label="用户名">
-        <el-input v-model="editForm.username" />
-      </el-form-item>
       <el-row :gutter="12">
         <el-col :span="12">
           <el-form-item label="角色">
@@ -2595,6 +2711,31 @@ watch(
           </el-form-item>
         </el-col>
       </el-row>
+      <el-alert
+        v-if="editIsExternalLead"
+        title="外部线索人员只允许访问自己录入的线索，线索名称前缀只影响之后新增或编辑的线索。"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+      />
+      <el-row v-if="editIsExternalLead" :gutter="12">
+        <el-col :span="12">
+          <el-form-item label="姓名">
+            <el-input v-model="editForm.display_name" />
+          </el-form-item>
+        </el-col>
+        <el-col :span="12">
+          <el-form-item label="电话">
+            <el-input v-model="editForm.phone" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+      <el-form-item v-if="editIsExternalLead" label="线索名称前缀">
+        <el-input v-model="editForm.lead_name_prefix" />
+      </el-form-item>
+      <el-form-item label="用户名">
+        <el-input v-model="editForm.username" />
+      </el-form-item>
       <el-form-item v-if="editNeedsManager" label="直属经理">
         <el-select v-model="editForm.manager_user_id" clearable placeholder="可选，选择部门经理" :disabled="editingSelf">
           <el-option

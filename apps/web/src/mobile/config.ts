@@ -35,6 +35,10 @@ const primaryNavItems: MobileNavItem[] = [
   { key: "more", label: "更多", path: "/m/more" },
 ];
 
+const externalLeadPrimaryNavItems: MobileNavItem[] = [
+  { key: "leads", label: "开发", path: "/m/leads" },
+];
+
 const moreEntries: MobileMoreEntry[] = [
   {
     key: "receipt-reconciliation",
@@ -114,15 +118,22 @@ export function isMobileAppPath(path: string): boolean {
   return path === "/m" || path.startsWith("/m/");
 }
 
-export function getDefaultProtectedPath(): string {
+export function getDefaultProtectedPath(user?: UserInfo | null): string {
+  if (user?.role === "EXTERNAL_LEAD") {
+    return isHandsetViewport() ? "/m/leads" : "/leads";
+  }
   return isHandsetViewport() ? "/m/todo" : "/dashboard";
 }
 
-export function getMobilePrimaryNavItems(): MobileNavItem[] {
+export function getMobilePrimaryNavItems(user?: UserInfo | null): MobileNavItem[] {
+  if (user?.role === "EXTERNAL_LEAD") {
+    return externalLeadPrimaryNavItems;
+  }
   return primaryNavItems;
 }
 
 export function getMobileMoreEntries(user: UserInfo | null): MobileMoreEntry[] {
+  if (user?.role === "EXTERNAL_LEAD") return [];
   return moreEntries.filter((item) => (item.visible ? item.visible(user) : true));
 }
 
@@ -141,6 +152,7 @@ export function getRoleLabel(user: UserInfo | null): string {
   if (user.role === "OWNER") return "老板";
   if (user.role === "ADMIN") return "管理员";
   if (user.role === "MANAGER") return "部门经理";
+  if (user.role === "EXTERNAL_LEAD") return "外部线索人员";
   return "会计";
 }
 

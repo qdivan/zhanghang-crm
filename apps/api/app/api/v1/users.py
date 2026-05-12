@@ -35,6 +35,19 @@ def _normalize_username(username: str) -> str:
     return normalized
 
 
+def _normalize_optional_text(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
+def _validate_external_lead_profile(*, display_name: str, phone: str, lead_name_prefix: str) -> None:
+    if not display_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="外部线索人员姓名不能为空")
+    if not phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="外部线索人员电话不能为空")
+    if not lead_name_prefix:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="外部线索人员线索前缀不能为空")
+
+
 def _ensure_owner_scope(current_user: User, target_user_role: str) -> None:
     if current_user.role == "OWNER" and target_user_role == "ADMIN":
         raise HTTPException(
@@ -147,7 +160,15 @@ def list_users(
         stmt = stmt.where(User.role == role)
     if keyword:
         key = f"%{keyword.strip()}%"
-        stmt = stmt.where(or_(User.username.ilike(key), User.role.ilike(key)))
+        stmt = stmt.where(
+            or_(
+                User.username.ilike(key),
+                User.display_name.ilike(key),
+                User.phone.ilike(key),
+                User.lead_name_prefix.ilike(key),
+                User.role.ilike(key),
+            )
+        )
     if current_user.role == "MANAGER" and scope != "all_active":
         stmt = stmt.where(User.id.in_(get_manager_subordinate_ids(db, current_user.id)))
     elif current_user.role == "OWNER" and scope != "all_active":
@@ -175,6 +196,16 @@ def create_user(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该用户名已在回收站，可先恢复")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已存在")
 
+    display_name = _normalize_optional_text(payload.display_name)
+    phone = _normalize_optional_text(payload.phone)
+    lead_name_prefix = _normalize_optional_text(payload.lead_name_prefix).rstrip("-－—_ ")
+    if payload.role == "EXTERNAL_LEAD":
+        _validate_external_lead_profile(
+            display_name=display_name,
+            phone=phone,
+            lead_name_prefix=lead_name_prefix,
+        )
+
     user = User(
         username=username,
         password_hash=hash_password(payload.password),
@@ -185,6 +216,9 @@ def create_user(
             payload.manager_user_id,
             target_role=payload.role,
         ),
+        display_name=display_name,
+        phone=phone,
+        lead_name_prefix=lead_name_prefix,
         is_active=payload.is_active,
     )
     write_operation_log(
@@ -249,6 +283,16 @@ def update_user(
         target_user.password_hash = hash_password(payload.password)
         password_changed = True
 
+    old_display_name = target_user.display_name
+    old_phone = target_user.phone
+    old_lead_name_prefix = target_user.lead_name_prefix
+    if payload.display_name is not None:
+        target_user.display_name = _normalize_optional_text(payload.display_name)
+    if payload.phone is not None:
+        target_user.phone = _normalize_optional_text(payload.phone)
+    if payload.lead_name_prefix is not None:
+        target_user.lead_name_prefix = _normalize_optional_text(payload.lead_name_prefix).rstrip("-－—_ ")
+
     if payload.is_active is not None:
         if current_user.id == target_user.id and payload.is_active is False:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="不能停用当前登录账号")
@@ -273,6 +317,13 @@ def update_user(
     if target_user.id == target_user.manager_user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="直属经理不能设置为自己")
 
+    if target_user.role == "EXTERNAL_LEAD":
+        _validate_external_lead_profile(
+            display_name=target_user.display_name,
+            phone=target_user.phone,
+            lead_name_prefix=target_user.lead_name_prefix,
+        )
+
     change_items: list[str] = []
     if old_username != target_user.username:
         change_items.append(f"username:{old_username}->{target_user.username}")
@@ -285,6 +336,14 @@ def update_user(
     if old_manager_user_id != target_user.manager_user_id:
         change_items.append(
             f"manager_user_id:{old_manager_user_id or '-'}->{target_user.manager_user_id or '-'}"
+        )
+    if old_display_name != target_user.display_name:
+        change_items.append(f"display_name:{old_display_name or '-'}->{target_user.display_name or '-'}")
+    if old_phone != target_user.phone:
+        change_items.append(f"phone:{old_phone or '-'}->{target_user.phone or '-'}")
+    if old_lead_name_prefix != target_user.lead_name_prefix:
+        change_items.append(
+            f"lead_name_prefix:{old_lead_name_prefix or '-'}->{target_user.lead_name_prefix or '-'}"
         )
     if password_changed:
         change_items.append("password:已修改")

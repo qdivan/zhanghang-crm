@@ -55,6 +55,29 @@ LEAD_SORT_FIELDS = {
     "status": func.lower(Lead.status),
 }
 
+EXTERNAL_LEAD_ROLE = "EXTERNAL_LEAD"
+EXTERNAL_LEAD_FORBIDDEN_UPDATE_FIELDS = {"status", "template_type", "related_customer_id"}
+
+
+def _is_external_lead_user(user: User) -> bool:
+    return user.role == EXTERNAL_LEAD_ROLE
+
+
+def _apply_external_lead_prefix(user: User, name: str) -> str:
+    normalized_name = (name or "").strip()
+    prefix = (user.lead_name_prefix or "").strip().rstrip("-－—_ ")
+    if not prefix or not normalized_name:
+        return normalized_name
+    separators = ("-", "－", "—", "_")
+    if normalized_name == prefix or any(normalized_name.startswith(f"{prefix}{separator}") for separator in separators):
+        return normalized_name
+    return f"{prefix}-{normalized_name}"
+
+
+def _ensure_external_lead_payload_allowed(payload: LeadCreate) -> None:
+    if payload.template_type == "REDEVELOP" or payload.related_customer_id is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员不能创建老客二开或关联内部客户")
+
 
 def _get_lead_or_404(db: Session, lead_id: int) -> Lead:
     lead = db.execute(select(Lead).where(Lead.id == lead_id, active_filter(Lead))).scalar_one_or_none()
@@ -134,6 +157,12 @@ def _apply_lead_sort(stmt, sort_by: Optional[str], sort_order: Optional[str]):
 
 
 def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_write: bool = False) -> None:
+    if _is_external_lead_user(current_user):
+        if lead.owner_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能访问自己录入的线索")
+        if for_write and lead.status == "CONVERTED":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="已转化线索不能由外部线索人员修改")
+        return
     if current_user.role not in {"ACCOUNTANT", "MANAGER"}:
         return
     if current_user.role == "MANAGER":
@@ -192,6 +221,8 @@ def _ensure_lead_access(lead: Lead, current_user: User, db: Session, *, for_writ
 
 def _apply_lead_scope(stmt, current_user: User, db: Session):
     stmt = stmt.where(active_filter(Lead))
+    if _is_external_lead_user(current_user):
+        return stmt.where(Lead.owner_id == current_user.id)
     if current_user.role == "MANAGER":
         managed_ids = [current_user.id, *get_manager_subordinate_ids(db, current_user.id)]
         return stmt.where(
@@ -307,7 +338,10 @@ def create_lead(
     current_user: User = Depends(get_current_user),
 ):
     related_customer = None
-    if current_user.role == "ACCOUNTANT":
+    if _is_external_lead_user(current_user):
+        _ensure_external_lead_payload_allowed(payload)
+        target_owner_id = current_user.id
+    elif current_user.role == "ACCOUNTANT":
         target_owner_id = current_user.id
     elif current_user.role == "MANAGER":
         target_owner_id = payload.owner_id or current_user.id
@@ -322,7 +356,7 @@ def create_lead(
         if target_owner_id != current_user.id and target_owner_id not in managed_ids:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能把线索分配给自己或直属下属")
 
-    related_customer_id = payload.related_customer_id
+    related_customer_id = None if _is_external_lead_user(current_user) else payload.related_customer_id
     if related_customer_id is not None:
         related_customer = db.execute(
             select(Customer)
@@ -352,6 +386,8 @@ def create_lead(
     normalized_name = (payload.name or "").strip() or (payload.contact_name or "").strip()
     if not normalized_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="联系人不能为空")
+    if _is_external_lead_user(current_user):
+        normalized_name = _apply_external_lead_prefix(current_user, normalized_name)
     normalized_phone = (payload.phone or "").strip()
     normalized_source = (payload.source or "").strip()
     if not normalized_source:
@@ -428,9 +464,13 @@ def update_lead(
 ):
     lead = _get_lead_or_404(db, lead_id)
     _ensure_lead_access(lead, current_user, db, for_write=True)
+    if _is_external_lead_user(current_user):
+        forbidden_fields = EXTERNAL_LEAD_FORBIDDEN_UPDATE_FIELDS.intersection(payload.model_fields_set)
+        if forbidden_fields:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员不能修改线索状态、模板或关联客户")
 
     if payload.name is not None:
-        lead.name = payload.name
+        lead.name = _apply_external_lead_prefix(current_user, payload.name) if _is_external_lead_user(current_user) else payload.name
     if payload.contact_name is not None:
         lead.contact_name = payload.contact_name
     if payload.phone is not None:
@@ -532,6 +572,8 @@ def create_followup(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if _is_external_lead_user(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员不能新增开发跟进")
     lead = _get_lead_or_404(db, lead_id)
     _ensure_lead_access(lead, current_user, db, for_write=True)
 
@@ -583,6 +625,8 @@ def list_followups(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if _is_external_lead_user(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员不能查看内部跟进记录")
     lead = _get_lead_or_404(db, lead_id)
     _ensure_lead_access(lead, current_user, db)
 
@@ -646,6 +690,8 @@ def convert_lead(
     ).scalar_one_or_none()
     if responsible_user is None or not responsible_user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Responsible user not found or inactive")
+    if responsible_user.role == EXTERNAL_LEAD_ROLE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="外部线索人员不能作为客户负责人员")
 
     accountant: Optional[User] = None
     if assigned_accountant_id is None and responsible_user.role == "ACCOUNTANT":

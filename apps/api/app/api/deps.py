@@ -47,3 +47,9 @@ def require_roles(*roles: str) -> Callable[[User], User]:
         return current_user
 
     return role_checker
+
+
+def forbid_external_lead_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role == "EXTERNAL_LEAD":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员只能访问客户开发线索")
+    return current_user

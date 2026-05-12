@@ -1,4 +1,4 @@
-export type UserRole = "OWNER" | "ADMIN" | "MANAGER" | "ACCOUNTANT";
+export type UserRole = "OWNER" | "ADMIN" | "MANAGER" | "ACCOUNTANT" | "EXTERNAL_LEAD";
 
 export interface UserInfo {
   id: number;
@@ -7,6 +7,8 @@ export interface UserInfo {
   ldap_dn: string;
   email: string;
   display_name: string;
+  phone: string;
+  lead_name_prefix: string;
   external_managed: boolean;
   sso_bound: boolean;
   role: UserRole;
@@ -25,6 +27,9 @@ export interface UserCreatePayload {
   password: string;
   role: UserRole;
   manager_user_id?: number | null;
+  display_name?: string;
+  phone?: string;
+  lead_name_prefix?: string;
   is_active: boolean;
 }
 
@@ -33,6 +38,9 @@ export interface UserUpdatePayload {
   password?: string;
   role?: UserRole;
   manager_user_id?: number | null;
+  display_name?: string;
+  phone?: string;
+  lead_name_prefix?: string;
   is_active?: boolean;
 }
 

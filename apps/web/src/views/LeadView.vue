@@ -77,6 +77,7 @@ const loading = ref(false);
 const leadsHydrated = ref(false);
 const rows = ref<LeadItem[]>([]);
 const showLeadDialog = ref(false);
+const showLeadEditDialog = ref(false);
 const showRedevelopDialog = ref(false);
 const showFollowupDialog = ref(false);
 const showHistoryDrawer = ref(false);
@@ -108,12 +109,16 @@ const leadRouteQueueHandling = ref(false);
 const filters = reactive(createLeadFilters());
 const leadMobileFilterMemory = useMobileFilterMemory("crm.mobile_filters.leads", createLeadFilters());
 const leadForm = reactive<LeadCreateForm>(createLeadForm());
+const editLeadForm = reactive<LeadCreateForm>(createLeadForm());
+const editingLeadId = ref<number | null>(null);
 const followupForm = reactive<LeadFollowupForm>(createLeadFollowupForm(todayInBrowserTimeZone()));
 
+const isExternalLeadUser = computed(() => auth.user?.role === "EXTERNAL_LEAD");
 const canConvert = computed(
   () => auth.user?.role === "OWNER" || auth.user?.role === "MANAGER",
 );
 const canDeleteLead = computed(() => auth.user?.role === "OWNER" || auth.user?.role === "ADMIN");
+const canEditLead = computed(() => isExternalLeadUser.value);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
 const leadFilterChips = computed(() =>
   [
@@ -138,13 +143,19 @@ const leadQuickFilters = computed(() => [
   { key: "all" as const, label: "全部", active: !filters.status && !filters.template_type },
   { key: "following" as const, label: "跟进中", active: filters.status === "FOLLOWING" && !filters.template_type },
   { key: "new" as const, label: "新线索", active: filters.status === "NEW" && !filters.template_type },
-  { key: "redevelop" as const, label: "老客二开", active: !filters.status && filters.template_type === "REDEVELOP" },
-]);
+  isExternalLeadUser.value
+    ? null
+    : { key: "redevelop" as const, label: "老客二开", active: !filters.status && filters.template_type === "REDEVELOP" },
+].filter(Boolean) as Array<{ key: "all" | "following" | "new" | "redevelop"; label: string; active: boolean }>);
 const leadPageActionItems = computed(() => [
-  { key: "redevelop", label: "老客二次开发", description: "快速基于老客户补一条二开线索。" },
+  isExternalLeadUser.value
+    ? null
+    : { key: "redevelop", label: "老客二次开发", description: "快速基于老客户补一条二开线索。" },
   { key: "guide", label: "流程说明", description: "查看开发流程和字段使用说明。" },
-  { key: "import", label: "导入 Excel", description: "保留导入入口，后续继续接入。", disabled: true },
-]);
+  isExternalLeadUser.value
+    ? null
+    : { key: "import", label: "导入 Excel", description: "保留导入入口，后续继续接入。", disabled: true },
+].filter(Boolean) as Array<{ key: string; label: string; description: string; disabled?: boolean }>);
 const showLeadInitialSkeleton = computed(() => !leadsHydrated.value);
 const leadSortBy = ref(String(route.query.sort_by || "id"));
 const leadSortOrder = ref<"asc" | "desc">(route.query.sort_order === "asc" ? "asc" : "desc");
@@ -153,16 +164,27 @@ const leadRowActionItems = computed(() => {
   if (!row) return [];
   return [
     { key: "detail", label: "查看详情", description: "进入完整线索详情页。" },
-    { key: "history", label: "跟进历史", description: "查看这条线索的全部跟进记录。" },
+    isExternalLeadUser.value
+      ? null
+      : { key: "history", label: "跟进历史", description: "查看这条线索的全部跟进记录。" },
     row.customer_id
-      ? { key: "customer", label: "客户档案", description: "跳转到已转化的客户档案。" }
-      : {
-          key: "convert",
-          label: "转化成交",
-          description: canConvert.value ? "将这条线索转为客户并分配负责人员。" : "当前账号没有转化权限。",
-          disabled: !canConvert.value || row.status === "CONVERTED",
-        },
-    row.status === "CONVERTED"
+      ? isExternalLeadUser.value
+        ? null
+        : { key: "customer", label: "客户档案", description: "跳转到已转化的客户档案。" }
+      : isExternalLeadUser.value
+        ? {
+            key: "edit",
+            label: "编辑线索",
+            description: "修改自己录入的未转化线索。",
+            disabled: row.status === "CONVERTED",
+          }
+        : {
+            key: "convert",
+            label: "转化成交",
+            description: canConvert.value ? "将这条线索转为客户并分配负责人员。" : "当前账号没有转化权限。",
+            disabled: !canConvert.value || row.status === "CONVERTED",
+          },
+    !isExternalLeadUser.value && row.status === "CONVERTED"
       ? {
           key: "revoke",
           label: "撤销转化",
@@ -226,10 +248,12 @@ async function fetchLeads() {
         sort_order: leadSortOrder.value || "desc",
       },
     });
-    const activeLeadRows = resp.data.filter((item) => item.status !== "CONVERTED");
+    const visibleLeadRows = isExternalLeadUser.value
+      ? resp.data
+      : resp.data.filter((item) => item.status !== "CONVERTED");
     const filtered = filters.template_type
-      ? activeLeadRows.filter((item) => item.template_type === filters.template_type)
-      : activeLeadRows;
+      ? visibleLeadRows.filter((item) => item.template_type === filters.template_type)
+      : visibleLeadRows;
     rows.value = filtered;
   } catch (error) {
     ElMessage.error("获取线索失败");
@@ -271,7 +295,7 @@ async function createLead() {
     };
 
     let autoLinkedCustomerName = "";
-    if (!leadForm.related_customer_id && rawCompanyName) {
+    if (!isExternalLeadUser.value && !leadForm.related_customer_id && rawCompanyName) {
       const exactCustomer = await findExactLeadCustomer(rawCompanyName);
       if (exactCustomer) {
         payload.related_customer_id = exactCustomer.id;
@@ -293,6 +317,95 @@ async function createLead() {
   }
 }
 
+function fillLeadFormFromRow(target: LeadCreateForm, row: LeadItem) {
+  Object.assign(target, createLeadForm(), {
+    template_type: row.template_type,
+    name: row.name,
+    related_customer_id: row.related_customer_id,
+    grade: row.grade,
+    contact_name: row.contact_name,
+    phone: row.phone,
+    region: row.region,
+    country: row.country,
+    source: row.source,
+    contact_wechat: row.contact_wechat,
+    fax: row.fax,
+    other_contact: row.other_contact,
+    contact_start_date: row.contact_start_date,
+    service_start_text: row.service_start_text,
+    company_nature: row.company_nature,
+    service_mode: row.service_mode,
+    main_business: row.main_business,
+    intro: row.intro,
+    fee_standard: row.fee_standard,
+    first_billing_period: row.first_billing_period,
+    reserve_2: row.reserve_2,
+    reserve_3: row.reserve_3,
+    reserve_4: row.reserve_4,
+    reminder_value: row.reminder_value,
+    next_reminder_at: row.next_reminder_at,
+    notes: row.notes,
+  });
+}
+
+function openEditLeadDialog(row: LeadItem) {
+  if (!canEditLead.value) {
+    ElMessage.warning("当前角色不能编辑线索");
+    return;
+  }
+  if (row.status === "CONVERTED") {
+    ElMessage.warning("已转化线索不能修改");
+    return;
+  }
+  editingLeadId.value = row.id;
+  fillLeadFormFromRow(editLeadForm, row);
+  showLeadEditDialog.value = true;
+}
+
+async function submitEditLead() {
+  if (!editingLeadId.value) return;
+  if (!editLeadForm.contact_name.trim()) {
+    ElMessage.warning("请填写联系人");
+    return;
+  }
+  if (!editLeadForm.contact_start_date) {
+    ElMessage.warning("请填写联络开始时间");
+    return;
+  }
+  if (!editLeadForm.main_business.trim()) {
+    ElMessage.warning("请填写主营/需要");
+    return;
+  }
+  if (!editLeadForm.source.trim()) {
+    ElMessage.warning("请填写来源");
+    return;
+  }
+  try {
+    await apiClient.patch(`/leads/${editingLeadId.value}`, {
+      name: (editLeadForm.name.trim() || editLeadForm.contact_name.trim()),
+      contact_name: editLeadForm.contact_name.trim(),
+      phone: editLeadForm.phone.trim(),
+      grade: editLeadForm.grade,
+      region: editLeadForm.region,
+      source: editLeadForm.source.trim(),
+      contact_wechat: editLeadForm.contact_wechat,
+      other_contact: editLeadForm.other_contact,
+      contact_start_date: editLeadForm.contact_start_date,
+      main_business: editLeadForm.main_business.trim(),
+      intro: editLeadForm.intro.trim(),
+      next_reminder_at: editLeadForm.next_reminder_at,
+      reminder_value: editLeadForm.reminder_value,
+      notes: editLeadForm.notes,
+    });
+    ElMessage.success("线索已更新");
+    showLeadEditDialog.value = false;
+    editingLeadId.value = null;
+    await fetchLeads();
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail ?? "更新线索失败");
+  }
+}
+
 async function fetchUserOptions() {
   if (!canConvert.value) {
     userOptions.value = [];
@@ -308,7 +421,7 @@ async function fetchUserOptions() {
         params: { role: "ACCOUNTANT", scope: "all_active" },
       }),
     ]);
-    userOptions.value = usersResp.data;
+    userOptions.value = usersResp.data.filter((item) => item.role !== "EXTERNAL_LEAD");
     accountantOptions.value = accountantsResp.data;
   } catch (error) {
     ElMessage.error("获取负责人员列表失败");
@@ -326,6 +439,10 @@ function resetRedevelopForm() {
 }
 
 function openRedevelopDialog() {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能创建老客二开");
+    return;
+  }
   resetRedevelopForm();
   showRedevelopDialog.value = true;
 }
@@ -381,6 +498,10 @@ async function createRedevelopLead() {
 }
 
 function openFollowupDialog(lead: LeadItem) {
+  if (isExternalLeadUser.value) {
+    openEditLeadDialog(lead);
+    return;
+  }
   const grade = lead.grade || "意向中";
   Object.assign(followupForm, createLeadFollowupForm(todayInBrowserTimeZone()), {
     lead_id: lead.id,
@@ -398,6 +519,10 @@ function getNextFollowupLeadId(currentLeadId: number) {
 }
 
 function startLeadFollowupQueue() {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能新增开发跟进");
+    return;
+  }
   const firstLead = rows.value[0];
   if (!firstLead) {
     ElMessage.warning("当前没有可连续跟进的线索");
@@ -639,6 +764,10 @@ function openLeadDetail(lead: LeadItem) {
 }
 
 function openCompanyPage(lead: LeadItem) {
+  if (isExternalLeadUser.value) {
+    router.push(`${isMobileWorkflow.value ? "/m/leads" : "/leads"}/${lead.id}`);
+    return;
+  }
   if (lead.status === "CONVERTED" && lead.customer_id) {
     router.push(`${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${lead.customer_id}?from=leads`);
     return;
@@ -647,6 +776,10 @@ function openCompanyPage(lead: LeadItem) {
 }
 
 function openCustomerArchive(lead: LeadItem) {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能查看客户档案");
+    return;
+  }
   if (!lead.customer_id) {
     ElMessage.warning("该线索尚未转化");
     return;
@@ -762,20 +895,30 @@ function handleMobileMenuCommand(command: string, row: LeadItem) {
   if (command === "detail") openLeadDetail(row);
   if (command === "history") void openHistoryDrawer(row);
   if (command === "customer") openCustomerArchive(row);
+  if (command === "edit") openEditLeadDialog(row);
   if (command === "convert") void openConvertDialog(row);
   if (command === "revoke") void revokeConvert(row);
   if (command === "delete") void removeLead(row);
 }
 
 function canQuickConvertLead(row: LeadItem) {
-  return canConvert.value && row.status !== "CONVERTED";
+  return !isExternalLeadUser.value && canConvert.value && row.status !== "CONVERTED";
 }
 
 function leadQuickActionLabel(row: LeadItem) {
+  if (isExternalLeadUser.value) return row.status === "CONVERTED" ? "详情" : "编辑";
   return canQuickConvertLead(row) ? "转化" : "历史";
 }
 
 function handleLeadQuickAction(row: LeadItem) {
+  if (isExternalLeadUser.value) {
+    if (row.status === "CONVERTED") {
+      openLeadDetail(row);
+      return;
+    }
+    openEditLeadDialog(row);
+    return;
+  }
   if (canQuickConvertLead(row)) {
     void openConvertDialog(row);
     return;
@@ -794,10 +937,18 @@ function handleLeadRowActionSelect(action: string) {
     void confirmRemoveLead(selectedLeadActionRow.value);
     return;
   }
+  if (action === "edit") {
+    openEditLeadDialog(selectedLeadActionRow.value);
+    return;
+  }
   handleMobileMenuCommand(action, selectedLeadActionRow.value);
 }
 
 async function openHistoryDrawer(lead: LeadItem) {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能查看内部跟进记录");
+    return;
+  }
   historyLeadName.value = lead.name;
   historyLoading.value = true;
   showHistoryDrawer.value = true;
@@ -882,7 +1033,7 @@ watch(
       </section>
 
       <section class="mobile-shell-panel lead-mobile-list-panel">
-        <div v-if="rows.length" class="mobile-queue-strip">
+        <div v-if="rows.length && !isExternalLeadUser" class="mobile-queue-strip">
           <div class="mobile-queue-main">
             <div class="mobile-queue-kicker">连续跟进</div>
             <div class="mobile-queue-copy">按当前筛选顺序处理 {{ rows.length }} 条线索。</div>
@@ -894,7 +1045,9 @@ watch(
         <div class="lead-mobile-head">
           <div>
             <div class="lead-mobile-title">客户开发</div>
-            <div class="lead-mobile-copy">先看状态和提醒，再直接跟进或转化。</div>
+            <div class="lead-mobile-copy">
+              {{ isExternalLeadUser ? "只显示你录入的线索，可新增或编辑未转化线索。" : "先看状态和提醒，再直接跟进或转化。" }}
+            </div>
           </div>
           <div v-if="showLeadInitialSkeleton" class="mobile-skeleton-chip lead-mobile-count-skeleton"></div>
           <el-tag v-else class="mobile-count-tag" effect="plain">{{ rows.length }} 条</el-tag>
@@ -966,8 +1119,23 @@ watch(
 
             <div class="mobile-action-stack lead-mobile-actions">
               <div class="mobile-action-main">
-                <el-button class="mobile-row-primary-button" size="small" type="primary" @click="openFollowupDialog(row)">
+                <el-button
+                  v-if="!isExternalLeadUser"
+                  class="mobile-row-primary-button"
+                  size="small"
+                  type="primary"
+                  @click="openFollowupDialog(row)"
+                >
                   跟进
+                </el-button>
+                <el-button
+                  v-if="isExternalLeadUser && row.status !== 'CONVERTED'"
+                  class="mobile-row-primary-button"
+                  size="small"
+                  type="primary"
+                  @click="openEditLeadDialog(row)"
+                >
+                  编辑
                 </el-button>
                 <el-button class="mobile-row-secondary-button" size="small" plain @click="handleLeadQuickAction(row)">
                   {{ leadQuickActionLabel(row) }}
@@ -1014,7 +1182,7 @@ watch(
           </el-select>
         </el-form-item>
         <el-form-item label="模板">
-          <el-select v-model="filters.template_type" placeholder="全部" clearable>
+          <el-select v-model="filters.template_type" placeholder="全部" clearable :disabled="isExternalLeadUser">
             <el-option label="客户跟进模板" value="FOLLOWUP" />
             <el-option label="客户转化模板" value="CONVERSION" />
             <el-option label="老客二开模板" value="REDEVELOP" />
@@ -1053,6 +1221,7 @@ watch(
     </section>
     <LeadFilterCard
       :filters="filters"
+      :external-mode="isExternalLeadUser"
       @query="fetchLeads"
       @create="openCreateLeadDialog"
       @redevelop="openRedevelopDialog"
@@ -1064,12 +1233,15 @@ watch(
       :rows="rows"
       :can-convert="canConvert"
       :can-delete="canDeleteLead"
+      :can-edit="canEditLead"
+      :external-mode="isExternalLeadUser"
       :sort-prop="leadSortBy"
       :sort-order="leadSortOrderForTable()"
       @company="openCompanyPage"
       @detail="openLeadDetail"
       @customer="openCustomerArchive"
       @followup="openFollowupDialog"
+      @edit="openEditLeadDialog"
       @history="openHistoryDrawer"
       @convert="openConvertDialog"
       @revoke="revokeConvert"
@@ -1078,7 +1250,20 @@ watch(
     />
   </el-space>
 
-  <LeadCreateDialog v-model:visible="showLeadDialog" :form="leadForm" @submit="createLead" />
+  <LeadCreateDialog
+    v-model:visible="showLeadDialog"
+    :form="leadForm"
+    :external-mode="isExternalLeadUser"
+    @submit="createLead"
+  />
+
+  <LeadCreateDialog
+    v-model:visible="showLeadEditDialog"
+    :form="editLeadForm"
+    mode="edit"
+    :external-mode="isExternalLeadUser"
+    @submit="submitEditLead"
+  />
 
   <LeadRedevelopDialog
     v-model:visible="showRedevelopDialog"

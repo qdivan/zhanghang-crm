@@ -9,6 +9,7 @@ import MobileActionSheet from "../components/mobile/MobileActionSheet.vue";
 import FlexibleDateInput from "../components/shared/FlexibleDateInput.vue";
 import { useResponsive } from "../composables/useResponsive";
 import { isMobileAppPath } from "../mobile/config";
+import { useAuthStore } from "../stores/auth";
 import type { LeadItem } from "../types";
 import { todayInBrowserTimeZone } from "../utils/time";
 import { buildNextReminderDate, getDefaultReminderValueForGrade, leadGradeOptions, leadReminderOptions } from "./lead/viewMeta";
@@ -27,6 +28,7 @@ type FollowupItem = {
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 const { isMobile } = useResponsive();
 const loading = ref(false);
 const followupLoading = ref(false);
@@ -35,6 +37,7 @@ const followups = ref<FollowupItem[]>([]);
 const showFollowupDialog = ref(false);
 const showMobileSecondaryActionSheet = ref(false);
 const isMobileWorkflow = computed(() => isMobileAppPath(route.path));
+const isExternalLeadUser = computed(() => auth.user?.role === "EXTERNAL_LEAD");
 const backTarget = computed(() => {
   const from = String(route.query.from || "");
   if (from === "customers") {
@@ -117,7 +120,7 @@ const leadSummaryNotes = computed(() => {
 });
 const mobileSecondaryActionItems = computed(() =>
   [
-    lead.value?.customer_id
+    lead.value?.customer_id && !isExternalLeadUser.value
       ? {
           key: "customer",
           label: "客户档案",
@@ -171,12 +174,14 @@ async function fetchLeadDetail() {
 
   loading.value = true;
   try {
-    const [leadResp, followupResp] = await Promise.all([
-      apiClient.get<LeadItem>(`/leads/${leadId}`),
-      apiClient.get<FollowupItem[]>(`/leads/${leadId}/followups`),
-    ]);
+    const leadResp = await apiClient.get<LeadItem>(`/leads/${leadId}`);
     lead.value = leadResp.data;
-    followups.value = followupResp.data;
+    if (isExternalLeadUser.value) {
+      followups.value = [];
+    } else {
+      const followupResp = await apiClient.get<FollowupItem[]>(`/leads/${leadId}/followups`);
+      followups.value = followupResp.data;
+    }
   } catch (error) {
     ElMessage.error("加载线索详情失败");
   } finally {
@@ -185,6 +190,10 @@ async function fetchLeadDetail() {
 }
 
 function openFollowupDialog() {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能新增开发跟进");
+    return;
+  }
   const grade = lead.value?.grade || "意向中";
   followupForm.followup_at = todayInBrowserTimeZone();
   followupForm.grade = grade;
@@ -221,6 +230,10 @@ function backToLeads() {
 }
 
 function openCustomerArchive() {
+  if (isExternalLeadUser.value) {
+    ElMessage.warning("外部线索人员不能查看客户档案");
+    return;
+  }
   if (!lead.value?.customer_id) return;
   router.push({
     path: `${isMobileWorkflow.value ? "/m/customers" : "/customers"}/${lead.value.customer_id}`,
@@ -316,7 +329,13 @@ onMounted(fetchLeadDetail);
             <div class="lead-detail-mobile-copy">{{ leadHeroCopy }}</div>
           </div>
           <div class="lead-detail-mobile-hero-actions">
-            <el-button class="mobile-row-primary-button" type="primary" :disabled="!lead" @click="openFollowupDialog">
+            <el-button
+              v-if="!isExternalLeadUser"
+              class="mobile-row-primary-button"
+              type="primary"
+              :disabled="!lead"
+              @click="openFollowupDialog"
+            >
               新增开发跟进
             </el-button>
             <el-button
@@ -394,7 +413,7 @@ onMounted(fetchLeadDetail);
         </template>
       </section>
 
-      <section class="mobile-shell-panel">
+      <section v-if="!isExternalLeadUser" class="mobile-shell-panel">
         <div class="lead-detail-mobile-section-head">
           <div class="lead-detail-mobile-section-title">开发跟进记录</div>
           <el-tag class="mobile-count-tag" size="small" effect="plain">{{ followups.length }} 条</el-tag>
@@ -435,7 +454,7 @@ onMounted(fetchLeadDetail);
     <el-card shadow="never">
       <el-space class="action-bar" wrap>
         <el-button :icon="ArrowLeft" @click="backToLeads">{{ backTarget.label }}</el-button>
-        <el-button type="primary" :disabled="!lead" @click="openFollowupDialog">新增开发跟进</el-button>
+        <el-button v-if="!isExternalLeadUser" type="primary" :disabled="!lead" @click="openFollowupDialog">新增开发跟进</el-button>
       </el-space>
     </el-card>
 
@@ -556,7 +575,7 @@ onMounted(fetchLeadDetail);
       </template>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card v-if="!isExternalLeadUser" shadow="never">
       <template #header>
         <div class="head">
           <span>开发跟进记录</span>
@@ -595,7 +614,7 @@ onMounted(fetchLeadDetail);
     </el-card>
   </el-space>
 
-  <el-dialog v-model="showFollowupDialog" title="新增开发跟进" width="720px">
+  <el-dialog v-if="!isExternalLeadUser" v-model="showFollowupDialog" title="新增开发跟进" width="720px">
     <el-form label-position="top">
       <el-row :gutter="12">
         <el-col :span="6">

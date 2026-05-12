@@ -19,6 +19,11 @@ from app.services.soft_delete import active_filter, mark_deleted
 router = APIRouter(prefix="/common-library-items", tags=["common-library-items"])
 
 
+def _forbid_external_lead_user(current_user: User) -> None:
+    if current_user.role == "EXTERNAL_LEAD":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="外部线索人员不能访问常用资料")
+
+
 @router.get("", response_model=list[CommonLibraryItemOut])
 def list_common_library_items(
     module_type: Optional[str] = Query(default=None),
@@ -27,7 +32,7 @@ def list_common_library_items(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    del current_user
+    _forbid_external_lead_user(current_user)
     stmt = (
         select(CommonLibraryItem)
         .where(active_filter(CommonLibraryItem))
@@ -86,6 +91,7 @@ def create_common_library_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _forbid_external_lead_user(current_user)
     data = payload.model_dump()
     for key, value in data.items():
         if isinstance(value, str):
@@ -115,6 +121,7 @@ def update_common_library_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _forbid_external_lead_user(current_user)
     item = db.execute(
         select(CommonLibraryItem).where(CommonLibraryItem.id == item_id, active_filter(CommonLibraryItem))
     ).scalar_one_or_none()

@@ -38,7 +38,7 @@ const sectionIcons = {
   costs: CollectionTag,
 } as const;
 
-const primaryNav = computed(() => getMobilePrimaryNavItems());
+const primaryNav = computed(() => getMobilePrimaryNavItems(auth.user));
 
 const currentTitle = computed(() => String(route.meta.mobileTitle || "账航·一帆财税"));
 const currentSubtitle = computed(() => String(route.meta.mobileSubtitle || ""));
